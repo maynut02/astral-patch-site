@@ -2,7 +2,7 @@ import { sendRedirect } from 'h3'
 
 export default defineOAuthGoogleEventHandler({
   config: {
-    scope: ['openid', 'email', 'profile']
+    scope: ['openid', 'email']
   },
 
   async onSuccess(event, { user }) {
@@ -14,13 +14,14 @@ export default defineOAuthGoogleEventHandler({
           id: appUser.googleSub,
           email: appUser.email,
           name: appUser.name,
-          avatarUrl: appUser.avatarUrl,
+          handle: appUser.handle,
+          nickname: appUser.nickname,
           role: appUser.role
         },
         loggedInAt: Date.now()
       })
 
-      return sendRedirect(event, '/')
+      return sendRedirect(event, appUser.handle && appUser.nickname ? '/' : '/profile/setup')
     } catch (error) {
       console.error('[auth/google] failed to create session', error)
       return sendRedirect(event, '/?authError=google')
