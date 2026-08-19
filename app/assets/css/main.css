@@ -1,0 +1,88 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@theme {
+  --font-sans: 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans TC', 'Noto Sans KR', 'Noto Sans', sans-serif;
+  --spacing-main: var(--w-main);
+
+  --ui-color-neutral-50: oklch(0.99 0.00 0);
+  --ui-color-neutral-100: oklch(0.97 0.00 0);
+  --ui-color-neutral-200: oklch(0.92 0.00 0);
+  --ui-color-neutral-300: oklch(0.87 0.00 0);
+  --ui-color-neutral-400: oklch(0.72 0.00 0);
+  --ui-color-neutral-500: oklch(0.56 0.00 0);
+  --ui-color-neutral-600: oklch(0.44 0.00 0);
+  --ui-color-neutral-700: oklch(0.37 0.00 0);
+  --ui-color-neutral-800: oklch(0.27 0.00 0);
+  --ui-color-neutral-900: oklch(0.20 0.00 0);
+  --ui-color-neutral-950: oklch(0.14 0.00 0);
+}
+
+:root {
+  --ui-radius: 0.5rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+.dark {
+  --ui-primary: var(--ui-color-primary-400);
+  --ui-secondary: var(--ui-color-secondary-400);
+  --ui-success: var(--ui-color-success-400);
+  --ui-info: var(--ui-color-info-400);
+  --ui-warning: var(--ui-color-warning-400);
+  --ui-error: var(--ui-color-error-400);
+
+  --ui-text-dimmed: var(--ui-color-neutral-500);
+  --ui-text-muted: var(--ui-color-neutral-400);
+  --ui-text-toned: var(--ui-color-neutral-300);
+  --ui-text: var(--ui-color-neutral-200);
+  --ui-text-highlighted: white;
+  --ui-text-inverted: var(--ui-color-neutral-900);
+
+  --ui-bg: var(--ui-color-neutral-950);
+  --ui-bg-muted: var(--ui-color-neutral-900);
+  --ui-bg-elevated: var(--ui-color-neutral-800);
+  --ui-bg-accented: var(--ui-color-neutral-700);
+  --ui-bg-inverted: white;
+
+  --ui-border: var(--ui-color-neutral-800);
+  --ui-border-muted: var(--ui-color-neutral-700);
+  --ui-border-accented: var(--ui-color-neutral-600);
+  --ui-border-inverted: white;
+}
+
+/* 언어별 줄바꿈 설정 */
+:lang(ko) {
+  word-break: keep-all;
+}
+
+:lang(en) {
+  word-break: normal;
+}
+
+:lang(zh) {
+  word-break: normal;
+}
+
+:lang(ja) {
+  word-break: break-all;
+  line-break: strict;
+}
+
+/* 스크롤바 디자인 */
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-color-neutral-700) transparent;
+  overflow-wrap: anywhere;
+}
