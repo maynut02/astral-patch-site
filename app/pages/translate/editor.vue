@@ -55,6 +55,31 @@ function getQueryBoolean(value: unknown): boolean {
   return ['true', '1', 'on'].includes(getQueryString(value).toLowerCase())
 }
 
+function normalizeVersion(value: string): string {
+  return value.trim().replace(/^v/i, '')
+}
+
+function normalizeRevision(value: string): string {
+  return value.trim().replace(/^r/i, '')
+}
+
+function getRevisionLabel(version: string, revision: string): string {
+  return `v${normalizeVersion(version)}_r${normalizeRevision(revision)}`
+}
+
+function getRevisionParts(label: string): { version: string, revision: string } | null {
+  const match = /^v(.+)_r(.+)$/.exec(label)
+
+  if (!match) {
+    return null
+  }
+
+  return {
+    version: normalizeVersion(match[1] ?? ''),
+    revision: normalizeRevision(match[2] ?? '')
+  }
+}
+
 function getAllLanguages(): EditorLanguage[] {
   return languageItems.map(language => language.key)
 }
@@ -63,9 +88,17 @@ function isEditorLanguage(value: unknown): value is EditorLanguage {
   return value === 'cnS' || value === 'en' || value === 'jp' || value === 'cnT'
 }
 
+const initialVersion = normalizeVersion(getQueryString(route.query.version))
+const initialRevision = normalizeRevision(getQueryString(route.query.revision))
+const hasInitialVersion = Boolean(initialVersion && initialRevision)
+
 const search = ref(getQueryString(route.query.search))
-const category = ref(getQueryString(route.query.category) || EDITOR_ALL_CATEGORY_VALUE)
-const revisionId = ref(getQueryString(route.query.revisionId) || EDITOR_ALL_REVISION_VALUE)
+const category = ref(hasInitialVersion ? EDITOR_ALL_CATEGORY_VALUE : getQueryString(route.query.file) || EDITOR_ALL_CATEGORY_VALUE)
+const version = ref(initialVersion)
+const revision = ref(initialRevision)
+const revisionId = ref(EDITOR_ALL_REVISION_VALUE)
+const itemId = ref(getQueryString(route.query.itemId))
+const editRequested = ref(getQueryBoolean(route.query.edit))
 const selectedLanguages = ref<EditorLanguage[]>(getAllLanguages())
 const untranslatedOnly = ref(getQueryBoolean(route.query.untranslated))
 const page = ref(getQueryPage(route.query.page))
@@ -89,7 +122,12 @@ const requestQuery = computed(() => ({
   page: page.value,
   search: search.value || undefined,
   category: category.value && category.value !== EDITOR_ALL_CATEGORY_VALUE ? category.value : undefined,
-  revisionId: revisionId.value && revisionId.value !== EDITOR_ALL_REVISION_VALUE ? revisionId.value : undefined,
+  version: version.value || undefined,
+  revision: revision.value || undefined,
+  revisionId: !version.value && !revision.value && revisionId.value && revisionId.value !== EDITOR_ALL_REVISION_VALUE
+    ? revisionId.value
+    : undefined,
+  itemId: itemId.value || undefined,
   untranslated: untranslatedOnly.value ? 'true' : undefined
 }))
 
@@ -112,6 +150,48 @@ const displayedPage = computed(() => editorData.value?.page ?? page.value)
 const isLoading = computed(() => filterStatus.value === 'pending' || editorStatus.value === 'pending')
 const hasError = computed(() => Boolean(filterError.value || editorError.value))
 const visibleLanguageItems = computed(() => languageItems.filter(language => selectedLanguages.value.includes(language.key)))
+
+function resolveRevisionId() {
+  if (!version.value || !revision.value) {
+    if (revisionId.value !== EDITOR_ALL_REVISION_VALUE) {
+      revisionId.value = EDITOR_ALL_REVISION_VALUE
+    }
+    return
+  }
+
+  const revisionOption = revisionItems.value.find(option => option.label === getRevisionLabel(version.value, revision.value))
+  const nextRevisionId = revisionOption?.value ?? EDITOR_ALL_REVISION_VALUE
+
+  if (revisionId.value !== nextRevisionId) {
+    revisionId.value = nextRevisionId
+  }
+}
+
+watch([revisionItems, version, revision], resolveRevisionId, { immediate: true })
+
+watch(category, (value) => {
+  if (applyingRouteQuery || value === EDITOR_ALL_CATEGORY_VALUE) {
+    return
+  }
+
+  version.value = ''
+  revision.value = ''
+  revisionId.value = EDITOR_ALL_REVISION_VALUE
+})
+
+watch(revisionId, (value) => {
+  if (applyingRouteQuery || value === EDITOR_ALL_REVISION_VALUE) {
+    return
+  }
+
+  const revisionOption = revisionItems.value.find(option => option.value === value)
+  const parts = revisionOption ? getRevisionParts(revisionOption.label) : null
+
+  if (parts) {
+    version.value = parts.version
+    revision.value = parts.revision
+  }
+})
 
 onMounted(() => {
   try {
@@ -149,7 +229,7 @@ watch(selectedLanguages, (value) => {
   }
 }, { deep: true })
 
-watch([search, category, revisionId, untranslatedOnly], () => {
+watch([search, category, revisionId, version, revision, untranslatedOnly], () => {
   if (!applyingRouteQuery && page.value !== 1) {
     page.value = 1
   }
@@ -162,12 +242,19 @@ function getEditorRouteQuery(): Record<string, string> {
     query.search = search.value
   }
 
-  if (category.value && category.value !== EDITOR_ALL_CATEGORY_VALUE) {
-    query.category = category.value
+  if (itemId.value) {
+    query.itemId = itemId.value
   }
 
-  if (revisionId.value && revisionId.value !== EDITOR_ALL_REVISION_VALUE) {
-    query.revisionId = revisionId.value
+  if (editRequested.value) {
+    query.edit = 'true'
+  }
+
+  if (version.value && revision.value) {
+    query.version = normalizeVersion(version.value)
+    query.revision = normalizeRevision(revision.value)
+  } else if (category.value && category.value !== EDITOR_ALL_CATEGORY_VALUE) {
+    query.file = category.value
   }
 
   if (untranslatedOnly.value) {
@@ -189,16 +276,22 @@ function syncEditorRouteQuery() {
   const nextQuery = getEditorRouteQuery()
   const currentQuery = {
     search: getQueryString(route.query.search),
-    category: getQueryString(route.query.category),
-    revisionId: getQueryString(route.query.revisionId),
+    itemId: getQueryString(route.query.itemId),
+    edit: getQueryString(route.query.edit),
+    file: getQueryString(route.query.file),
+    version: getQueryString(route.query.version),
+    revision: getQueryString(route.query.revision),
     untranslated: getQueryString(route.query.untranslated),
     page: getQueryString(route.query.page)
   }
 
   if (
     currentQuery.search === (nextQuery.search || '')
-    && currentQuery.category === (nextQuery.category || '')
-    && currentQuery.revisionId === (nextQuery.revisionId || '')
+    && currentQuery.itemId === (nextQuery.itemId || '')
+    && currentQuery.edit === (nextQuery.edit || '')
+    && currentQuery.file === (nextQuery.file || '')
+    && currentQuery.version === (nextQuery.version || '')
+    && currentQuery.revision === (nextQuery.revision || '')
     && currentQuery.untranslated === (nextQuery.untranslated || '')
     && currentQuery.page === (nextQuery.page || '')
   ) {
@@ -208,7 +301,7 @@ function syncEditorRouteQuery() {
   void router.push({ query: nextQuery })
 }
 
-watch([category, revisionId, untranslatedOnly, page], syncEditorRouteQuery)
+watch([category, revisionId, version, revision, untranslatedOnly, page], syncEditorRouteQuery)
 
 watch(search, () => {
   if (applyingRouteQuery) {
@@ -226,7 +319,7 @@ watch(search, () => {
 })
 
 watch(
-  () => [route.query.search, route.query.category, route.query.revisionId, route.query.untranslated, route.query.page],
+  () => [route.query.search, route.query.itemId, route.query.edit, route.query.file, route.query.version, route.query.revision, route.query.untranslated, route.query.page],
   () => {
     if (searchQueryTimer) {
       clearTimeout(searchQueryTimer)
@@ -235,8 +328,14 @@ watch(
 
     applyingRouteQuery = true
     search.value = getQueryString(route.query.search)
-    category.value = getQueryString(route.query.category) || EDITOR_ALL_CATEGORY_VALUE
-    revisionId.value = getQueryString(route.query.revisionId) || EDITOR_ALL_REVISION_VALUE
+    itemId.value = getQueryString(route.query.itemId)
+    editRequested.value = getQueryBoolean(route.query.edit)
+    version.value = normalizeVersion(getQueryString(route.query.version))
+    revision.value = normalizeRevision(getQueryString(route.query.revision))
+    category.value = version.value && revision.value
+      ? EDITOR_ALL_CATEGORY_VALUE
+      : getQueryString(route.query.file) || EDITOR_ALL_CATEGORY_VALUE
+    revisionId.value = EDITOR_ALL_REVISION_VALUE
     untranslatedOnly.value = getQueryBoolean(route.query.untranslated)
     page.value = getQueryPage(route.query.page)
 
@@ -258,9 +357,19 @@ watch(totalPages, (value) => {
   }
 })
 
+watch(isLoading, (loading, wasLoading) => {
+  if (wasLoading && !loading && import.meta.client) {
+    nextTick(() => {
+      window.scrollTo({ top: 0, behavior: 'auto' })
+    })
+  }
+})
+
 function resetFilters() {
   search.value = ''
   category.value = EDITOR_ALL_CATEGORY_VALUE
+  version.value = ''
+  revision.value = ''
   revisionId.value = EDITOR_ALL_REVISION_VALUE
   selectedLanguages.value = getAllLanguages()
   untranslatedOnly.value = false
@@ -281,6 +390,42 @@ function startEdit(item: EditorItem) {
   draftKo.value = item.ko
   editError.value = ''
 }
+
+let focusedItemId: string | null = null
+
+function focusRequestedItem() {
+  const requestedItemId = itemId.value
+
+  if (!requestedItemId || editorStatus.value !== 'success') {
+    return
+  }
+
+  const item = items.value.find(value => value.id === requestedItemId)
+
+  if (!item) {
+    return
+  }
+
+  if (focusedItemId !== requestedItemId) {
+    focusedItemId = requestedItemId
+    nextTick(() => {
+      if (!import.meta.client) {
+        return
+      }
+
+      document.getElementById(`editor-item-${requestedItemId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      })
+    })
+  }
+
+  if (editRequested.value && canEdit.value && editingItemId.value !== requestedItemId) {
+    startEdit(item)
+  }
+}
+
+watch([items, editorStatus, canEdit, itemId, editRequested], focusRequestedItem)
 
 function cancelEdit() {
   editingItemId.value = null
@@ -391,7 +536,8 @@ watch(canEdit, (value) => {
           <span class="px-4 py-2 bg-muted rounded-xl">{{ displayedPage }} / {{ totalPages }} 페이지</span>
         </div>
 
-        <div v-for="item in items" :key="item.id" class="flex flex-col bg-muted rounded-xl px-2">
+        <div v-for="item in items" :id="`editor-item-${item.id}`" :key="item.id"
+          class="flex flex-col bg-muted rounded-xl px-2">
           <div class="flex items-center gap-4 p-4">
             <span class="text-base font-semibold">{{ item.category }}</span>
             <span class="text-sm font-medium text-muted">{{ item.unitKey }}</span>
@@ -455,12 +601,8 @@ watch(canEdit, (value) => {
       </template>
     </USlideover>
 
-    <div
-      v-if="isLoading"
-      class="fixed inset-0 z-[100] flex items-center justify-center bg-default/30 backdrop-blur-sm"
-      role="status"
-      aria-live="polite"
-      aria-label="데이터를 불러오는 중">
+    <div v-if="isLoading" class="fixed size-100 z-100 flex items-center justify-center bg-default/30 backdrop-blur-sm"
+      role="status" aria-live="polite" aria-label="데이터를 불러오는 중">
       <UIcon name="i-tabler-loader-2" class="size-10 animate-spin text-default" />
       <span class="sr-only">데이터를 불러오는 중입니다.</span>
     </div>

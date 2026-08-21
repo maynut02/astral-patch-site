@@ -65,3 +65,70 @@ export interface EditorItemsResponse {
   pageSize: number
   totalPages: number
 }
+
+export interface EditorTranslationLogEntry {
+  id: string
+  unitId: string
+  kind: 'lang' | 'str'
+  category: string
+  unitKey: string
+  nickname: string
+  previousText: string | null
+  proposedText: string
+  status: EditorChangeStatus
+  createdAt: string
+  reviewedAt: string | null
+}
+
+export interface EditorTranslationLogResponse {
+  entries: EditorTranslationLogEntry[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+export interface EditorSourceRevision {
+  id: string
+  gameVersion: string
+  revision: string
+  detectedAt: string
+  processedAt: string | null
+  totalChanges: number
+  addedCount: number
+  modifiedCount: number
+  removedCount: number
+}
+
+export interface EditorSourceRevisionsResponse {
+  revisions: EditorSourceRevision[]
+}
+
+export type EditorSourceChangeType = 'added' | 'modified' | 'removed'
+
+export interface EditorSourceChangeEntry {
+  id: string
+  revisionId: string
+  unitId: string
+  kind: 'lang' | 'str'
+  category: string
+  unitKey: string
+  changeType: EditorSourceChangeType
+  beforeCnS: string | null
+  beforeEn: string | null
+  beforeJp: string | null
+  beforeCnT: string | null
+  afterCnS: string | null
+  afterEn: string | null
+  afterJp: string | null
+  afterCnT: string | null
+  createdAt: string
+}
+
+export interface EditorSourceChangesResponse {
+  entries: EditorSourceChangeEntry[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}

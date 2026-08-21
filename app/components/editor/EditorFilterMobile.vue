@@ -49,7 +49,7 @@ function resetFilters() {
 
   <UDrawer v-model:open="filterOpen">
     <template #body>
-      <div class="overflow-y-auto p-2">
+      <div class="overflow-y-auto p-1">
         <EditorFilterDesktop :search="props.search" :category="props.category" :category-items="props.categoryItems"
           :revision-id="props.revisionId" :revision-items="props.revisionItems"
           :selected-languages="props.selectedLanguages" :untranslated-only="props.untranslatedOnly" :page="props.page"

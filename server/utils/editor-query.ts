@@ -17,6 +17,9 @@ export interface EditorQueryFilters {
   search: string
   category: string
   revisionId: string
+  version: string
+  revision: string
+  itemId: string
   untranslatedOnly: boolean
 }
 
@@ -64,16 +67,46 @@ function parseRevisionId(value: unknown): string {
   return revisionId
 }
 
+function parseVersion(value: unknown): string {
+  return getFirstQueryValue(value).trim().replace(/^v/i, '')
+}
+
+function parseRevision(value: unknown): string {
+  return getFirstQueryValue(value).trim().replace(/^r/i, '')
+}
+
+function parseItemId(value: unknown): string {
+  const itemId = getFirstQueryValue(value)
+
+  if (itemId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(itemId)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid item id'
+    })
+  }
+
+  return itemId
+}
+
 export function parseEditorQuery(query: Record<string, unknown>): EditorQueryFilters {
   const search = getFirstQueryValue(query.search).trim()
   const category = parseCategory(query.category)
   const revisionId = parseRevisionId(query.revisionId)
+  const version = parseVersion(query.version)
+  const revision = parseRevision(query.revision)
   const untranslated = getFirstQueryValue(query.untranslated).toLowerCase()
 
-  if (search.length > 200 || category.length > 200) {
+  if (search.length > 200 || category.length > 200 || version.length > 100 || revision.length > 100) {
     throw createError({
       statusCode: 400,
       statusMessage: 'Filter value is too long'
+    })
+  }
+
+  if (Boolean(version) !== Boolean(revision)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Version and revision must be provided together'
     })
   }
 
@@ -82,6 +115,9 @@ export function parseEditorQuery(query: Record<string, unknown>): EditorQueryFil
     search,
     category,
     revisionId,
+    version,
+    revision,
+    itemId: parseItemId(query.itemId),
     untranslatedOnly: untranslated === 'true' || untranslated === '1' || untranslated === 'on'
   }
 }
@@ -90,8 +126,11 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
   const hasSearch = Boolean(filters.search)
   const hasCategory = Boolean(filters.category)
   const hasRevision = Boolean(filters.revisionId)
+  const hasVersion = Boolean(filters.version && filters.revision)
+  const hasItem = Boolean(filters.itemId)
   const searchPattern = `%${filters.search}%`
   const revisionId = filters.revisionId || null
+  const itemId = filters.itemId || null
 
   return sql`
     (
@@ -121,8 +160,24 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
         FROM source_changes sc
         WHERE sc.unit_id = wb.unit_id
           AND sc.revision_id = ${revisionId}
+        AND sc.change_type IN ('added', 'modified')
+      )
+    )
+    AND (
+      NOT ${hasVersion}
+      OR EXISTS (
+        SELECT 1
+        FROM source_changes sc
+        JOIN source_revision_change_summary src ON src.revision_id = sc.revision_id
+        WHERE sc.unit_id = wb.unit_id
+          AND src.game_version = ${filters.version || null}
+          AND src.revision = ${filters.revision || null}
           AND sc.change_type IN ('added', 'modified')
       )
+    )
+    AND (
+      NOT ${hasItem}
+      OR wb.unit_id = ${itemId}
     )
     AND (
       NOT ${filters.untranslatedOnly}
