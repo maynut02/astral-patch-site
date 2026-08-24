@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
+import { ensureBotWorkMigration } from './auth-user'
 import { getDatabase } from './database'
 import type { EditorReviewAction, EditorReviewResponse } from '../../shared/types/editor'
 
@@ -43,6 +44,7 @@ export async function reviewEditorChange(
 ): Promise<EditorReviewResponse> {
   const action = parseReviewAction(input.action)
   const database = getDatabase()
+  await ensureBotWorkMigration(database)
 
   return database.begin(async (transaction) => {
     const [change] = await transaction<PendingEditorChange[]>`

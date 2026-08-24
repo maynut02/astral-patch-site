@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EditorItem, EditorItemsResponse, EditorLanguage } from '#shared/types/editor'
+import type { EditorDiffMode, EditorItem, EditorItemsResponse, EditorLanguage } from '#shared/types/editor'
 import {
   EDITOR_PROGRESS_STATUSES,
   type EditorOverviewResponse,
@@ -81,10 +81,10 @@ const defaultOverview: EditorOverviewResponse = {
 }
 
 const sourceLanguageItems: { key: EditorLanguage, label: string }[] = [
-  { key: 'cnS', label: 'zh' },
-  { key: 'en', label: 'en' },
-  { key: 'jp', label: 'ja' },
-  { key: 'cnT', label: 'tw' }
+  { key: 'cnS', label: '중국어 간체' },
+  { key: 'en', label: '영어' },
+  { key: 'jp', label: '일본어' },
+  { key: 'cnT', label: '중국어 번체' }
 ]
 
 const displayLanguageOptions: { key: EditorLanguage, label: string }[] = [
@@ -97,9 +97,20 @@ const displayLanguageOptions: { key: EditorLanguage, label: string }[] = [
 const displayLanguages = ref<EditorLanguage[]>(displayLanguageOptions.map(language => language.key))
 const languageStorageKey = 'astral-editor-languages'
 const languagePreferencesReady = ref(false)
+const diffModeOptions: { key: EditorDiffMode, label: string, description: string }[] = [
+  { key: 'unified', label: '통합 비교', description: '변경 전·후를 한 줄에서 비교' },
+  { key: 'split', label: '분할 비교', description: '변경 전·후를 각각 표시' }
+]
+const diffMode = ref<EditorDiffMode>('unified')
+const diffModeStorageKey = 'astral-editor-diff-mode'
+const diffModePreferencesReady = ref(false)
 
 function isEditorLanguage(value: unknown): value is EditorLanguage {
   return value === 'cnS' || value === 'en' || value === 'jp' || value === 'cnT'
+}
+
+function isEditorDiffMode(value: unknown): value is EditorDiffMode {
+  return value === 'unified' || value === 'split'
 }
 
 const visibleSourceLanguageItems = computed(() => sourceLanguageItems.filter(language =>
@@ -108,7 +119,6 @@ const visibleSourceLanguageItems = computed(() => sourceLanguageItems.filter(lan
 
 const sidebarMenuItems: SidebarMenuItem[] = [
   { key: 'list', label: '목록', icon: 'i-tabler-list-search' },
-  { key: 'changes', label: '변경된 항목', icon: 'i-tabler-switch-2' },
   { key: 'history', label: '변경 기록', icon: 'i-tabler-history-toggle' },
   { key: 'comments', label: '코멘트', icon: 'i-tabler-message' },
   { key: 'dictionary', label: '사전', icon: 'i-tabler-book' },
@@ -119,22 +129,26 @@ const activeSidebarMenuItem = computed<SidebarMenuItem>(() =>
   sidebarMenuItems.find(item => item.key === activeSidebarMenu.value) ?? sidebarMenuItems[0]!
 )
 
-const itemStatusMeta: Record<EditorItemStatus, { label: string, color: string }> = {
+const itemStatusMeta: Record<EditorItemStatus, { label: string, color: string, textColor: string }> = {
   success: {
     label: '번역 완료',
-    color: 'bg-[#5eba6e]'
+    color: 'bg-[#81C995]',
+    textColor: 'text-[#81C995]'
   },
   info: {
     label: '승인 대기',
-    color: 'bg-[#578fff]'
+    color: 'bg-[#8AB4F8]',
+    textColor: 'text-[#8AB4F8]'
   },
   warning: {
     label: '확인 필요',
-    color: 'bg-[#baba5e]'
+    color: 'bg-[#FDD663]',
+    textColor: 'text-[#FDD663]'
   },
   untranslated: {
     label: '미번역',
-    color: 'bg-[#c0595a]'
+    color: 'bg-[#F28B82]',
+    textColor: 'text-[#F28B82]'
   }
 }
 
@@ -148,6 +162,7 @@ function getQueryString(value: unknown): string {
 
 onMounted(() => {
   const storedLanguages = window.localStorage.getItem(languageStorageKey)
+  const storedDiffMode = window.localStorage.getItem(diffModeStorageKey)
 
   if (storedLanguages) {
     try {
@@ -161,7 +176,12 @@ onMounted(() => {
     }
   }
 
+  if (storedDiffMode && isEditorDiffMode(storedDiffMode)) {
+    diffMode.value = storedDiffMode
+  }
+
   languagePreferencesReady.value = true
+  diffModePreferencesReady.value = true
 })
 
 watch(displayLanguages, (languages) => {
@@ -171,6 +191,14 @@ watch(displayLanguages, (languages) => {
 
   window.localStorage.setItem(languageStorageKey, JSON.stringify(languages))
 }, { deep: true })
+
+watch(diffMode, (mode) => {
+  if (!diffModePreferencesReady.value || !import.meta.client) {
+    return
+  }
+
+  window.localStorage.setItem(diffModeStorageKey, mode)
+})
 
 const initialSearch = getQueryString(route.query.search).trim()
 searchInput.value = initialSearch
@@ -275,6 +303,10 @@ const {
 })
 
 const items = computed(() => itemsData.value?.items ?? [])
+const selectedItemKey = computed(() => {
+  const item = items.value.find(item => item.id === selectedItemId.value)
+  return item ? `${item.category}_${item.unitKey}` : ''
+})
 const total = computed(() => itemsData.value?.total ?? 0)
 const totalPages = computed(() => Math.max(1, itemsData.value?.totalPages ?? 1))
 const isLoading = computed(() => itemsStatus.value === 'idle' || itemsStatus.value === 'pending')
@@ -282,6 +314,13 @@ const overview = computed(() => overviewData.value ?? defaultOverview)
 const isSidebarListLoading = computed(() => overviewStatus.value === 'idle' || overviewStatus.value === 'pending')
 const sidebarListHasError = computed(() => Boolean(overviewError.value))
 const persistedItemStates = ref<Record<string, PersistedItemState>>({})
+const selectedItemStatus = computed(() => {
+  const item = items.value.find(item => item.id === selectedItemId.value)
+  return item ? getItemStatus(item) : null
+})
+const selectedItemStatusMeta = computed(() => selectedItemStatus.value
+  ? itemStatusMeta[selectedItemStatus.value]
+  : null)
 
 const sidebarCategoryRows = computed<SidebarListRow[]>(() => {
   const query = sidebarListSearch.value.trim().toLowerCase()
@@ -657,7 +696,12 @@ watch(items, (nextItems) => {
             </UInput>
             <div class="my-1 border-x border-default mx-1" />
             <UTooltip text="필터" :delay-duration="0">
-              <UButton icon="i-tabler-filter" color="neutral" variant="ghost" size="lg" />
+              <UButton icon="i-tabler-filter" color="neutral" variant="ghost" size="lg"
+                class="text-dimmed hover:text-default" />
+            </UTooltip>
+            <UTooltip text="변경된 항목" :delay-duration="0">
+              <UButton icon="i-tabler-switch-2" color="neutral" variant="ghost" size="lg"
+                class="text-dimmed hover:text-default" />
             </UTooltip>
           </div>
 
@@ -737,7 +781,7 @@ watch(items, (nextItems) => {
                 <div class="flex min-w-0 flex-1 shrink-0">
                   <!-- 번역 내용 -->
                   <UTextarea v-model="item.ko" color="neutral" variant="none" autoresize placeholder="미번역"
-                    :ui="{ base: 'py-2.5 px- h-full' }" class="w-full min-w-0" @focus="selectItem(item)" />
+                    :ui="{ base: 'p-2.5 pl-5  h-full' }" class="w-full min-w-0" @focus="selectItem(item)" />
 
                   <!-- 변경 상태 -->
                   <div class="flex shrink-0 p-2 pl-0 text-info">
@@ -790,12 +834,13 @@ watch(items, (nextItems) => {
       </main>
 
       <!-- 사이드바 -->
-      <aside class="flex shrink-0 overflow-hidden bg-muted transition-[width] duration-300 ease-in-out"
+      <aside class="relative shrink-0 overflow-hidden bg-muted transition-[width] duration-300 ease-in-out"
         :style="{ width: isSidebarOpen ? 'max(25%, 28rem)' : '4rem' }">
         <!-- 사이드바 내용 -->
-        <section class="flex min-w-0 flex-1 flex-col border-r border-default transition-opacity" :class="isSidebarOpen
-          ? 'opacity-100 duration-500 ease-out'
-          : 'pointer-events-none opacity-0 duration-150 ease-in'">
+        <section class="absolute inset-y-0 left-0 flex shrink-0 flex-col border-r border-default transition-opacity"
+          :style="{ width: 'calc(max(25vw, 28rem) - 4rem)' }" :class="isSidebarOpen
+            ? 'opacity-100 duration-500 ease-out'
+            : 'pointer-events-none opacity-0 duration-150 ease-in'">
           <!-- 사이드바 헤더 -->
           <div class="flex items-center gap-2 px-4 pt-4 text-sm font-medium text-muted">
             <UIcon :name="activeSidebarMenuItem.icon" class="size-4" />
@@ -838,7 +883,7 @@ watch(items, (nextItems) => {
                   title="전체 번역">
                   <UIcon name="i-tabler-language" class="size-4 shrink-0" />
                   <span class="min-w-0 flex-1 truncate">전체 번역</span>
-                  <span class="shrink-0 font-mono text-xs text-[#5eba6e]">
+                  <span class="shrink-0 font-mono text-xs text-[#81C995]">
                     {{ formatPercent(overview.overall.success, overview.overall.total) }}
                   </span>
                 </NuxtLink>
@@ -855,7 +900,7 @@ watch(items, (nextItems) => {
                   <UIcon :name="row.mode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
                     class="size-4 shrink-0" />
                   <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
-                  <span class="shrink-0 font-mono text-xs text-[#5eba6e]">
+                  <span class="shrink-0 font-mono text-xs text-[#81C995]">
                     {{ formatPercent(row.counts.success, row.total) }}
                   </span>
                 </NuxtLink>
@@ -864,7 +909,9 @@ watch(items, (nextItems) => {
           </template>
 
           <template v-else-if="activeSidebarMenu === 'history'">
-            <EditorChangeHistory :item-id="selectedItemId" :reload-key="historyReloadKey"
+            <EditorChangeHistory :item-id="selectedItemId" :item-key="selectedItemKey" :reload-key="historyReloadKey"
+              :item-status-label="selectedItemStatusMeta?.label ?? ''"
+              :item-status-color="selectedItemStatusMeta?.textColor ?? 'text-muted'" :diff-mode="diffMode"
               @changed="handleHistoryChanged" />
           </template>
 
@@ -887,6 +934,26 @@ watch(items, (nextItems) => {
                   </button>
                 </div>
               </div>
+
+              <div class="flex flex-col gap-2 border-t border-default pt-4">
+                <p class="text-xs font-medium text-muted">
+                  변경 기록 표시 방식
+                </p>
+
+                <div class="flex flex-col text-sm">
+                  <button v-for="mode in diffModeOptions" :key="mode.key" type="button"
+                    class="flex items-start gap-2 rounded-xl py-1 pl-1 text-left transition-colors hover:bg-muted"
+                    :class="diffMode === mode.key ? 'text-default' : 'text-dimmed hover:text-toned'"
+                    :aria-pressed="diffMode === mode.key" @click="diffMode = mode.key">
+                    <UIcon v-if="diffMode === mode.key" name="i-tabler-check" class="mt-0.5 size-4 shrink-0" />
+                    <span v-else class="mt-0.5 size-4 shrink-0" />
+                    <span class="min-w-0">
+                      <span class="block">{{ mode.label }}</span>
+                      <span class="mt-0.5 block text-xs text-dimmed">{{ mode.description }}</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
             </div>
           </template>
 
@@ -896,7 +963,7 @@ watch(items, (nextItems) => {
         </section>
 
         <!-- 사이드바 네비게이션 -->
-        <nav class="flex w-16 shrink-0 flex-col gap-2 p-3 bg-muted z-20">
+        <nav class="absolute inset-y-0 right-0 z-20 flex w-16 shrink-0 flex-col gap-2 bg-muted p-3">
           <div class="flex flex-1 flex-col gap-2">
             <UTooltip v-for="menu in sidebarMenuItems" :key="menu.key" :text="menu.label" :delay-duration="0"
               :content="{ side: 'left' }">

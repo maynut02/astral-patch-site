@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
-import { ensureUsersTable } from './auth-user'
+import { BOT_GOOGLE_SUB, BOT_NICKNAME, ensureBotWorkMigration } from './auth-user'
 import { getDatabase } from './database'
 import type { EditorChangeStatus, EditorHistoryResponse, EditorSaveResponse } from '../../shared/types/editor'
 
@@ -71,6 +71,7 @@ export async function saveEditorTranslation(
   const proposedText = parseTranslationText(input.text)
   const expectedText = parseExpectedText(input.expectedText)
   const database = getDatabase()
+  await ensureBotWorkMigration(database)
 
   const result = await database.begin(async (transaction) => {
     const [current] = await transaction<CurrentEditorTranslation[]>`
@@ -186,21 +187,74 @@ export async function saveEditorTranslation(
 
 export async function getEditorHistory(unitId: string): Promise<EditorHistoryResponse> {
   const database = getDatabase()
-  await ensureUsersTable(database)
+  await ensureBotWorkMigration(database)
 
   const entries = await database<EditorHistoryResponse['entries']>`
-    SELECT
-      tc.id,
-      COALESCE(NULLIF(BTRIM(au.nickname), ''), '알 수 없는 사용자') AS nickname,
-      tc.previous_text AS "previousText",
-      tc.proposed_text AS "proposedText",
-      tc.status,
-      tc.created_at AS "createdAt"
-    FROM translation_changes tc
-    LEFT JOIN app_users au ON au.google_sub = tc.created_by
-    WHERE tc.unit_id = ${unitId}
-      AND tc.locale = 'ko'
-    ORDER BY tc.created_at DESC, tc.id DESC
+    SELECT *
+    FROM (
+      SELECT
+        concat('source:', sc.revision_id::text, ':', sc.unit_id::text) AS id,
+        'source_changed'::text AS action,
+        'automation'::text AS "actorType",
+        COALESCE(NULLIF(BTRIM(bot.nickname), ''), ${BOT_NICKNAME}) AS nickname,
+        NULL::text AS status,
+        NULL::text AS "reviewerNickname",
+        NULL AS "reviewedAt",
+        sc.change_type::text AS "changeType",
+        src.game_version AS version,
+        src.revision AS revision,
+        NULL::text AS "previousText",
+        NULL::text AS "proposedText",
+        old_sv.cn_s AS "beforeCnS",
+        old_sv.en AS "beforeEn",
+        old_sv.jp AS "beforeJp",
+        old_sv.cn_t AS "beforeCnT",
+        new_sv.cn_s AS "afterCnS",
+        new_sv.en AS "afterEn",
+        new_sv.jp AS "afterJp",
+        new_sv.cn_t AS "afterCnT",
+        sc.created_at AS "createdAt"
+      FROM source_changes sc
+      JOIN source_revision_change_summary src ON src.revision_id = sc.revision_id
+      JOIN app_users bot ON bot.google_sub = ${BOT_GOOGLE_SUB}
+      LEFT JOIN source_versions old_sv ON old_sv.id = sc.old_source_version_id
+      LEFT JOIN source_versions new_sv ON new_sv.id = sc.new_source_version_id
+      WHERE sc.unit_id = ${unitId}
+
+      UNION ALL
+
+      SELECT
+        concat(tc.id::text, ':translation') AS id,
+        'translation_changed'::text AS action,
+        CASE
+          WHEN creator.user_type = 'bot' THEN 'automation'::text
+          ELSE 'user'::text
+        END AS "actorType",
+        COALESCE(NULLIF(BTRIM(creator.nickname), ''), '알 수 없는 사용자') AS nickname,
+        tc.status::text AS status,
+        NULLIF(BTRIM(reviewer.nickname), '') AS "reviewerNickname",
+        tc.reviewed_at AS "reviewedAt",
+        NULL::text AS "changeType",
+        NULL::text AS version,
+        NULL::text AS revision,
+        tc.previous_text AS "previousText",
+        tc.proposed_text AS "proposedText",
+        NULL::text AS "beforeCnS",
+        NULL::text AS "beforeEn",
+        NULL::text AS "beforeJp",
+        NULL::text AS "beforeCnT",
+        NULL::text AS "afterCnS",
+        NULL::text AS "afterEn",
+        NULL::text AS "afterJp",
+        NULL::text AS "afterCnT",
+        tc.created_at AS "createdAt"
+      FROM translation_changes tc
+      LEFT JOIN app_users creator ON creator.google_sub = tc.created_by
+      LEFT JOIN app_users reviewer ON reviewer.google_sub = tc.reviewed_by
+      WHERE tc.unit_id = ${unitId}
+        AND tc.locale = 'ko'
+    ) AS history
+    ORDER BY "createdAt" DESC, id DESC
   `
 
   return { entries }

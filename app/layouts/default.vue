@@ -91,8 +91,8 @@ function login() {
         :class="isSidebarCollapsed ? 'lg:w-14' : 'lg:w-52'">
         <nav class="flex flex-1 flex-col gap-1 text-sm font-medium p-2 overflow-y-auto">
           <UTooltip v-for="item in navItem" :key="item.label" :text="item.label"
-            :disabled="!isSidebarEffectivelyCollapsed" :content="{ side: 'right', sideOffset: 8 }">
-            <NuxtLink :to="item.link" active-class="bg-elevated! text-default!" :aria-label="item.label" :class="[
+            :disabled="!isSidebarEffectivelyCollapsed" :delay-duration="0" :content="{ side: 'right', sideOffset: 8 }">
+            <NuxtLink :to="item.link" active-class="bg-elevated/80! text-default!" :aria-label="item.label" :class="[
               isSidebarEffectivelyCollapsed ? 'py-2' : 'py-1.5',
               'md:max-lg:py-2',
               'px-2 flex items-center gap-2 overflow-hidden hover:bg-muted rounded-md text-muted hover:text-toned transition-all shrink-0'
@@ -111,7 +111,7 @@ function login() {
 
         <div class="flex flex-col p-2 shrink-0 md:max-lg:hidden">
           <UTooltip :text="isSidebarCollapsed ? '사이드바 펼치기' : '사이드바 접기'" :disabled="!isSidebarEffectivelyCollapsed"
-            :content="{ side: 'right', sideOffset: 8 }">
+            :delay-duration="0" :content="{ side: 'right', sideOffset: 8 }">
             <button :aria-label="isSidebarCollapsed ? '사이드바 펼치기' : '사이드바 접기'"
               class="px-2 flex items-center gap-2 overflow-hidden hover:bg-muted rounded-md transition-colors text-sm font-medium text-muted hover:text-default"
               :class="isSidebarCollapsed ? 'py-2' : 'py-1.5'" @click="isSidebarCollapsed = !isSidebarCollapsed">

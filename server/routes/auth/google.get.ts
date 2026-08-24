@@ -16,7 +16,8 @@ export default defineOAuthGoogleEventHandler({
           name: appUser.name,
           handle: appUser.handle,
           nickname: appUser.nickname,
-          role: appUser.role
+          role: appUser.role,
+          userType: appUser.userType
         },
         loggedInAt: Date.now()
       })

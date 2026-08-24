@@ -1,4 +1,5 @@
 import { createError } from 'h3'
+import { ensureBotWorkMigration } from './auth-user'
 import type { DatabaseClient } from './database'
 import { getDatabase } from './database'
 import {
@@ -189,6 +190,7 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
 
 export async function getEditorItems(filters: EditorQueryFilters): Promise<EditorItemsResponse> {
   const database = getDatabase()
+  await ensureBotWorkMigration(database)
   const offset = (filters.page - 1) * EDITOR_PAGE_SIZE
   const countWhere = buildWhere(database, filters)
   const itemsWhere = buildWhere(database, filters)
@@ -245,6 +247,7 @@ export async function getEditorItems(filters: EditorQueryFilters): Promise<Edito
 
 export async function getEditorFilters(): Promise<EditorFiltersResponse> {
   const database = getDatabase()
+  await ensureBotWorkMigration(database)
 
   const [categoryRows, revisionRows] = await Promise.all([
     database<{ value: string }[]>`

@@ -86,19 +86,19 @@ const statusMeta: Record<EditorProgressStatus, {
 }> = {
   success: {
     label: '번역 완료',
-    color: 'bg-[#5eba6e]'
+    color: 'bg-[#81C995]'
   },
   info: {
     label: '승인 대기',
-    color: 'bg-[#578fff]'
+    color: 'bg-[#8AB4F8]'
   },
   warning: {
     label: '확인 필요',
-    color: 'bg-[#baba5e]'
+    color: 'bg-[#FDD663]'
   },
   untranslated: {
     label: '미번역',
-    color: 'bg-[#c0595a]'
+    color: 'bg-[#F28B82]'
   }
 }
 
@@ -368,8 +368,7 @@ function getVersionPath(version: string, revision: string): string {
           <div class="flex items-center gap-4 px-2 md:px-5">
             <!-- 파일 상태별 비율 -->
             <div class="hidden sm:flex gap-3">
-              <UTooltip v-for="status in visibleStatuses" :key="status" :text="statusMeta[status].label"
-                :delay-duration="0">
+              <UTooltip v-for="status in visibleStatuses" :key="status" :text="statusMeta[status].label">
                 <div class="flex items-center gap-1 text-xs font-mono">
                   <div class="size-1.5 rounded-full" :class="statusMeta[status].color" />
                   <span class="w-10 shrink-0">{{ formatPercent(row.counts[status], row.total) }}</span>

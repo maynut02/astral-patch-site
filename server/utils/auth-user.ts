@@ -3,6 +3,14 @@ import type { H3Event } from 'h3'
 import { getDatabase, type DatabaseClient } from './database'
 
 export type AppRole = 'admin' | 'user'
+export type AppUserType = 'user' | 'bot'
+
+export const BOT_GOOGLE_SUB = 'bot'
+export const BOT_HANDLE = 'but'
+export const BOT_NICKNAME = 'Bot'
+
+const BOT_EMAIL = 'bot@system.local'
+const BOT_WORK_MIGRATION_ID = 'assign-existing-work-to-bot-v1'
 
 export interface GoogleProfile {
   sub?: string
@@ -18,9 +26,11 @@ export interface AppUser {
   handle: string | null
   nickname: string | null
   role: AppRole
+  userType: AppUserType
 }
 
 let usersTableReady: Promise<void> | undefined
+let botWorkMigrationReady: Promise<void> | undefined
 
 export async function ensureUsersTable(database: DatabaseClient): Promise<void> {
   if (!usersTableReady) {
@@ -33,6 +43,8 @@ export async function ensureUsersTable(database: DatabaseClient): Promise<void> 
           avatar_url text NOT NULL DEFAULT '',
           handle text,
           nickname text,
+          user_type text NOT NULL DEFAULT 'user'
+            CHECK (user_type IN ('user', 'bot')),
           "role" text NOT NULL DEFAULT 'user'
             CHECK ("role" IN ('admin', 'user')),
           created_at timestamptz NOT NULL DEFAULT now(),
@@ -42,10 +54,53 @@ export async function ensureUsersTable(database: DatabaseClient): Promise<void> 
       `
       await database`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS handle text`
       await database`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS nickname text`
+      await database`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS user_type text NOT NULL DEFAULT 'user'`
+      await database`UPDATE app_users SET user_type = 'user' WHERE user_type IS NULL`
+      await database`ALTER TABLE app_users ALTER COLUMN user_type SET DEFAULT 'user'`
+      await database`ALTER TABLE app_users ALTER COLUMN user_type SET NOT NULL`
+      await database`
+        DO $$
+        BEGIN
+          ALTER TABLE app_users
+            ADD CONSTRAINT app_users_user_type_check
+            CHECK (user_type IN ('user', 'bot'));
+        EXCEPTION
+          WHEN duplicate_object THEN NULL;
+        END
+        $$
+      `
       await database`
         CREATE UNIQUE INDEX IF NOT EXISTS app_users_handle_unique_idx
         ON app_users (handle)
         WHERE handle IS NOT NULL
+      `
+      await database`
+        INSERT INTO app_users (
+          google_sub,
+          email,
+          name,
+          handle,
+          nickname,
+          user_type,
+          "role"
+        )
+        VALUES (
+          ${BOT_GOOGLE_SUB},
+          ${BOT_EMAIL},
+          ${BOT_NICKNAME},
+          ${BOT_HANDLE},
+          ${BOT_NICKNAME},
+          'bot',
+          'user'
+        )
+        ON CONFLICT (google_sub) DO UPDATE SET
+          email = EXCLUDED.email,
+          name = EXCLUDED.name,
+          handle = EXCLUDED.handle,
+          nickname = EXCLUDED.nickname,
+          user_type = 'bot',
+          "role" = 'user',
+          updated_at = now()
       `
     })().catch((error) => {
         usersTableReady = undefined
@@ -54,6 +109,60 @@ export async function ensureUsersTable(database: DatabaseClient): Promise<void> 
   }
 
   await usersTableReady
+}
+
+export async function ensureBotWorkMigration(database: DatabaseClient = getDatabase()): Promise<void> {
+  await ensureUsersTable(database)
+
+  if (!botWorkMigrationReady) {
+    botWorkMigrationReady = (async () => {
+      await database`
+        CREATE TABLE IF NOT EXISTS app_migrations (
+          id text PRIMARY KEY,
+          applied_at timestamptz NOT NULL DEFAULT now()
+        )
+      `
+
+      await database.begin(async (transaction) => {
+        const [migration] = await transaction<{ id: string }[]>`
+          INSERT INTO app_migrations (id)
+          VALUES (${BOT_WORK_MIGRATION_ID})
+          ON CONFLICT (id) DO NOTHING
+          RETURNING id
+        `
+
+        if (!migration) {
+          return
+        }
+
+        await transaction`
+          UPDATE translation_change_groups
+          SET created_by = ${BOT_GOOGLE_SUB}
+          WHERE created_by IS NOT NULL
+        `
+        await transaction`
+          UPDATE translation_changes
+          SET created_by = ${BOT_GOOGLE_SUB}
+          WHERE created_by IS NOT NULL
+        `
+        await transaction`
+          UPDATE translation_changes
+          SET reviewed_by = ${BOT_GOOGLE_SUB}
+          WHERE reviewed_by IS NOT NULL
+        `
+        await transaction`
+          UPDATE translations
+          SET approved_by = ${BOT_GOOGLE_SUB}
+          WHERE approved_by IS NOT NULL
+        `
+      })
+    })().catch((error) => {
+      botWorkMigrationReady = undefined
+      throw error
+    })
+  }
+
+  await botWorkMigrationReady
 }
 
 function configuredAdminEmails(): Set<string> {
@@ -112,6 +221,7 @@ export async function upsertGoogleUser(profile: GoogleProfile): Promise<AppUser>
       name,
       handle,
       nickname,
+      user_type AS "userType",
       "role" AS role
   `
 
@@ -184,6 +294,7 @@ export async function updateUserProfile(googleSub: string, input: { handle?: unk
         name,
         handle,
         nickname,
+        user_type AS "userType",
         "role" AS role
     `
 

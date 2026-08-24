@@ -6,6 +6,7 @@ declare module '#auth-utils' {
     handle: string | null
     nickname: string | null
     role: 'admin' | 'user'
+    userType: 'user' | 'bot'
   }
 
   interface UserSession {

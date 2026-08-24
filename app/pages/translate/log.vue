@@ -414,7 +414,7 @@ async function retryActiveLog() {
       <div class="flex flex-col gap-3 rounded-2xl border border-default bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p class="text-sm font-medium">게임 원문 변경</p>
-          <p class="mt-1 text-xs text-muted">자동화로 감지된 원문 변경만 표시합니다.</p>
+          <p class="mt-1 text-xs text-muted">Bot이 감지한 원문 변경만 표시합니다.</p>
         </div>
         <USelect :model-value="sourceRevisionId" :items="sourceRevisionItems" color="neutral" variant="soft"
           class="w-full sm:w-72" :disabled="!sourceRevisionItems.length" :ui="{ base: 'rounded-xl' }"
@@ -442,7 +442,7 @@ async function retryActiveLog() {
 
       <UAlert v-if="!sourceLoading && !sourceRevisions.length" color="neutral" variant="soft"
         icon="i-tabler-file-off" title="원문 변경 기록이 없습니다."
-        description="자동화로 감지된 원문 변경이 아직 등록되지 않았습니다." />
+        description="Bot이 감지한 원문 변경이 아직 등록되지 않았습니다." />
 
       <UAlert v-else-if="!sourceLoading && sourceRevisionId && !sourceEntries.length" color="neutral" variant="soft"
         icon="i-tabler-file-search" title="선택한 버전에 변경 항목이 없습니다."
@@ -543,7 +543,7 @@ async function retryActiveLog() {
               </div>
 
               <div class="mt-4 text-sm text-muted">
-                자동화로 감지된 원문 변경 · {{ formatDate(selectedSource.createdAt) }}
+                Bot이 감지한 원문 변경 · {{ formatDate(selectedSource.createdAt) }}
               </div>
 
               <div class="mt-6 flex flex-col gap-4">

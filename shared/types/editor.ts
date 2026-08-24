@@ -1,5 +1,7 @@
 export type EditorLanguage = 'cnS' | 'en' | 'jp' | 'cnT'
 
+export type EditorDiffMode = 'unified' | 'split'
+
 export const EDITOR_ALL_CATEGORY_VALUE = '__all_category__'
 export const EDITOR_ALL_REVISION_VALUE = '__all_revision__'
 
@@ -14,6 +16,10 @@ export interface EditorFiltersResponse {
 }
 
 export type EditorChangeStatus = 'pending' | 'approved' | 'rejected' | 'superseded'
+
+export type EditorHistoryAction = 'source_changed' | 'translation_changed'
+
+export type EditorHistoryActorType = 'automation' | 'user'
 
 export interface EditorItem {
   id: string
@@ -33,10 +39,25 @@ export interface EditorItem {
 
 export interface EditorHistoryEntry {
   id: string
+  action: EditorHistoryAction
+  actorType: EditorHistoryActorType
   nickname: string
+  status: EditorChangeStatus | null
+  reviewerNickname: string | null
+  reviewedAt: string | null
+  changeType: EditorSourceChangeType | null
+  version: string | null
+  revision: string | null
   previousText: string | null
-  proposedText: string
-  status: EditorChangeStatus
+  proposedText: string | null
+  beforeCnS: string | null
+  beforeEn: string | null
+  beforeJp: string | null
+  beforeCnT: string | null
+  afterCnS: string | null
+  afterEn: string | null
+  afterJp: string | null
+  afterCnT: string | null
   createdAt: string
 }
 
