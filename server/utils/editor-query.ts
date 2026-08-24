@@ -140,6 +140,7 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
         OR COALESCE(wb.en, '') ILIKE ${searchPattern}
         OR COALESCE(wb.jp, '') ILIKE ${searchPattern}
         OR COALESCE(wb.cn_t, '') ILIKE ${searchPattern}
+        OR CONCAT(COALESCE(wb.namespace, ''), '_', COALESCE(wb.unit_key, '')) ILIKE ${searchPattern}
         OR (
           CASE
             WHEN wb.latest_change_status = 'pending'

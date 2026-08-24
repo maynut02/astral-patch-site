@@ -2,7 +2,7 @@
 const navItem = [
   { link: '/', icon: 'i-tabler-home', label: '홈' },
   { link: '/download', icon: 'i-tabler-download', label: '다운로드' },
-  { link: '/release', icon: 'i-tabler-report-analytics', label: '릴리즈 노트' },
+  { link: '/release', icon: 'i-tabler-clipboard-check', label: '패치 릴리즈' },
   { link: '/translate', icon: 'i-tabler-edit', label: '번역 에디터' },
   { link: '/translate/log', icon: 'i-tabler-history-toggle', label: '변경 기록' },
   { link: '/translate/log', icon: 'i-tabler-package', label: '모드 허브' },

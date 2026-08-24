@@ -98,7 +98,7 @@ const statusMeta: Record<EditorProgressStatus, {
   },
   untranslated: {
     label: '미번역',
-    color: 'bg-elevated'
+    color: 'bg-[#c0595a]'
   }
 }
 
@@ -251,11 +251,12 @@ function getVersionPath(version: string, revision: string): string {
         <div class="flex items-end md:items-center gap-4 px-3 py-2 bg-elevated rounded-md">
           <!-- 전체 상태별 비율 -->
           <div class="hidden sm:flex gap-3 shrink-0">
-            <div v-for="status in visibleStatuses" :key="status" class="flex items-center gap-1 text-xs font-mono"
-              :title="statusMeta[status].label">
-              <div class="size-1.5 rounded-full" :class="statusMeta[status].color" />
-              <span class="w-10 shrink-0">{{ formatPercent(overview.overall[status], overview.overall.total) }}</span>
-            </div>
+            <UTooltip v-for="status in visibleStatuses" :key="status" :text="statusMeta[status].label">
+              <div class="flex items-center gap-1 text-xs font-mono">
+                <div class="size-1.5 rounded-full" :class="statusMeta[status].color" />
+                <span class="w-10 shrink-0">{{ formatPercent(overview.overall[status], overview.overall.total) }}</span>
+              </div>
+            </UTooltip>
           </div>
 
           <div class="flex items-center gap-4">
@@ -314,8 +315,8 @@ function getVersionPath(version: string, revision: string): string {
 
       <div class="flex flex-col md:flex-row gap-3 py-3 px-5">
         <!-- 목록 옵션 -->
-        <UTabs v-model="listMode" :content="false" :items="items" color="neutral" size="xs" :ui="{ trigger: 'px-3' }"
-          class="w-fit" />
+        <UTabs v-model="listMode" :content="false" :items="items" color="neutral" size="xs"
+          :ui="{ trigger: 'px-3', list: 'bg-muted' }" class="w-fit" />
 
         <div class="flex flex-1 justify-between gap-3">
           <!-- 파일 검색 -->
@@ -367,11 +368,13 @@ function getVersionPath(version: string, revision: string): string {
           <div class="flex items-center gap-4 px-2 md:px-5">
             <!-- 파일 상태별 비율 -->
             <div class="hidden sm:flex gap-3">
-              <div v-for="status in visibleStatuses" :key="status" class="flex items-center gap-1 text-xs font-mono"
-                :title="statusMeta[status].label">
-                <div class="size-1.5 rounded-full" :class="statusMeta[status].color" />
-                <span class="w-10 shrink-0">{{ formatPercent(row.counts[status], row.total) }}</span>
-              </div>
+              <UTooltip v-for="status in visibleStatuses" :key="status" :text="statusMeta[status].label"
+                :delay-duration="0">
+                <div class="flex items-center gap-1 text-xs font-mono">
+                  <div class="size-1.5 rounded-full" :class="statusMeta[status].color" />
+                  <span class="w-10 shrink-0">{{ formatPercent(row.counts[status], row.total) }}</span>
+                </div>
+              </UTooltip>
             </div>
 
             <!-- 파일 진행도 바 -->

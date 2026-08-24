@@ -1,25 +1,60 @@
 <script setup lang="ts">
+import type { EditorItem, EditorItemsResponse, EditorLanguage } from '#shared/types/editor'
 import {
-  EDITOR_ALL_CATEGORY_VALUE,
-  EDITOR_ALL_REVISION_VALUE,
-  type EditorFiltersResponse,
-  type EditorLanguage,
-  type EditorItemsResponse,
-  type EditorItem,
-  type EditorSaveResponse
-} from '#shared/types/editor'
+  EDITOR_PROGRESS_STATUSES,
+  type EditorOverviewResponse,
+  type EditorProgressCounts,
+  type EditorProgressStatus,
+  type EditorProgressSummary
+} from '#shared/types/editor-overview'
 
-const languageItems: { key: EditorLanguage, label: string }[] = [
-  { key: 'cnS', label: '중국어 간체' },
-  { key: 'en', label: '영어' },
-  { key: 'jp', label: '일본어' },
-  { key: 'cnT', label: '중국어 번체' }
-]
+type EditorItemStatus = EditorProgressStatus
+type EditorListMode = 'category' | 'version'
+type SidebarMenu = 'list' | 'changes' | 'history' | 'comments' | 'dictionary' | 'settings'
 
-const defaultFilters: EditorFiltersResponse = {
-  categories: [],
-  revisions: []
+interface SidebarMenuItem {
+  key: SidebarMenu
+  label: string
+  icon: string
 }
+
+interface SidebarListRow {
+  key: string
+  label: string
+  path: string
+  mode: EditorListMode
+  value: string
+  total: number
+  counts: EditorProgressCounts
+}
+
+interface PersistedItemState {
+  ko: string
+  pendingStatus: EditorItem['pendingStatus']
+  approvedForCurrentSource: EditorItem['approvedForCurrentSource']
+}
+
+definePageMeta({
+  layout: false
+})
+
+const isSidebarOpen = ref(true)
+const activeSidebarMenu = ref<SidebarMenu>('list')
+const page = ref(1)
+const pageInput = ref('1')
+const pagePopoverOpen = ref(false)
+const searchInput = ref('')
+const search = ref('')
+const sidebarListMode = ref<EditorListMode>('category')
+const sidebarListSearch = ref('')
+const selectedItemId = ref<string | null>(null)
+const historyReloadKey = ref(0)
+const selectFirstItemOnNextLoad = ref(false)
+const listContainer = ref<HTMLElement | null>(null)
+const scrollAfterLoad = ref(false)
+
+const route = useRoute()
+const router = useRouter()
 
 const defaultItems: EditorItemsResponse = {
   items: [],
@@ -29,9 +64,79 @@ const defaultItems: EditorItemsResponse = {
   totalPages: 1
 }
 
-const route = useRoute()
-const router = useRouter()
+function createEmptyProgress(): EditorProgressSummary {
+  return {
+    total: 0,
+    success: 0,
+    info: 0,
+    warning: 0,
+    untranslated: 0
+  }
+}
+
+const defaultOverview: EditorOverviewResponse = {
+  overall: createEmptyProgress(),
+  categories: [],
+  versions: []
+}
+
+const sourceLanguageItems: { key: EditorLanguage, label: string }[] = [
+  { key: 'cnS', label: 'zh' },
+  { key: 'en', label: 'en' },
+  { key: 'jp', label: 'ja' },
+  { key: 'cnT', label: 'tw' }
+]
+
+const displayLanguageOptions: { key: EditorLanguage, label: string }[] = [
+  { key: 'cnS', label: '중국어 간체' },
+  { key: 'en', label: '영어' },
+  { key: 'jp', label: '일본어' },
+  { key: 'cnT', label: '중국어 번체' }
+]
+
+const displayLanguages = ref<EditorLanguage[]>(displayLanguageOptions.map(language => language.key))
 const languageStorageKey = 'astral-editor-languages'
+const languagePreferencesReady = ref(false)
+
+function isEditorLanguage(value: unknown): value is EditorLanguage {
+  return value === 'cnS' || value === 'en' || value === 'jp' || value === 'cnT'
+}
+
+const visibleSourceLanguageItems = computed(() => sourceLanguageItems.filter(language =>
+  displayLanguages.value.includes(language.key)
+))
+
+const sidebarMenuItems: SidebarMenuItem[] = [
+  { key: 'list', label: '목록', icon: 'i-tabler-list-search' },
+  { key: 'changes', label: '변경된 항목', icon: 'i-tabler-switch-2' },
+  { key: 'history', label: '변경 기록', icon: 'i-tabler-history-toggle' },
+  { key: 'comments', label: '코멘트', icon: 'i-tabler-message' },
+  { key: 'dictionary', label: '사전', icon: 'i-tabler-book' },
+  { key: 'settings', label: '에디터 설정', icon: 'i-tabler-settings' }
+]
+
+const activeSidebarMenuItem = computed<SidebarMenuItem>(() =>
+  sidebarMenuItems.find(item => item.key === activeSidebarMenu.value) ?? sidebarMenuItems[0]!
+)
+
+const itemStatusMeta: Record<EditorItemStatus, { label: string, color: string }> = {
+  success: {
+    label: '번역 완료',
+    color: 'bg-[#5eba6e]'
+  },
+  info: {
+    label: '승인 대기',
+    color: 'bg-[#578fff]'
+  },
+  warning: {
+    label: '확인 필요',
+    color: 'bg-[#baba5e]'
+  },
+  untranslated: {
+    label: '미번역',
+    color: 'bg-[#c0595a]'
+  }
+}
 
 function getQueryString(value: unknown): string {
   if (Array.isArray(value)) {
@@ -41,19 +146,35 @@ function getQueryString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function getQueryPage(value: unknown): number {
-  const page = Number(getQueryString(value) || '1')
+onMounted(() => {
+  const storedLanguages = window.localStorage.getItem(languageStorageKey)
 
-  if (!Number.isInteger(page) || page < 1) {
-    return 1
+  if (storedLanguages) {
+    try {
+      const parsedLanguages: unknown = JSON.parse(storedLanguages)
+
+      if (Array.isArray(parsedLanguages) && parsedLanguages.every(isEditorLanguage)) {
+        displayLanguages.value = parsedLanguages
+      }
+    } catch {
+      // 저장된 설정이 손상된 경우 기본 언어를 사용한다.
+    }
   }
 
-  return Math.min(page, 100000)
-}
+  languagePreferencesReady.value = true
+})
 
-function getQueryBoolean(value: unknown): boolean {
-  return ['true', '1', 'on'].includes(getQueryString(value).toLowerCase())
-}
+watch(displayLanguages, (languages) => {
+  if (!languagePreferencesReady.value || !import.meta.client) {
+    return
+  }
+
+  window.localStorage.setItem(languageStorageKey, JSON.stringify(languages))
+}, { deep: true })
+
+const initialSearch = getQueryString(route.query.search).trim()
+searchInput.value = initialSearch
+search.value = initialSearch
 
 function normalizeVersion(value: string): string {
   return value.trim().replace(/^v/i, '')
@@ -63,557 +184,738 @@ function normalizeRevision(value: string): string {
   return value.trim().replace(/^r/i, '')
 }
 
-function getRevisionLabel(version: string, revision: string): string {
-  return `v${normalizeVersion(version)}_r${normalizeRevision(revision)}`
-}
+const category = computed(() => getQueryString(route.query.file).trim())
+const version = computed(() => normalizeVersion(getQueryString(route.query.version)))
+const revision = computed(() => normalizeRevision(getQueryString(route.query.revision)))
+const isFileMode = computed(() => Boolean(category.value))
+const isTagMode = computed(() => Boolean(version.value && revision.value))
+const isAllMode = computed(() => !isFileMode.value && !isTagMode.value)
 
-function getRevisionParts(label: string): { version: string, revision: string } | null {
-  const match = /^v(.+)_r(.+)$/.exec(label)
+watch([isFileMode, isTagMode], ([fileMode, tagMode]) => {
+  if (fileMode) {
+    sidebarListMode.value = 'category'
+  } else if (tagMode) {
+    sidebarListMode.value = 'version'
+  }
+}, { immediate: true })
 
-  if (!match) {
-    return null
+const headerTitle = computed(() => {
+  if (isFileMode.value) {
+    return category.value
   }
 
-  return {
-    version: normalizeVersion(match[1] ?? ''),
-    revision: normalizeRevision(match[2] ?? '')
+  if (isTagMode.value) {
+    return `v${version.value} · r${revision.value}`
   }
+
+  return '전체 번역'
+})
+
+const activeFilterTags = computed(() => search.value
+  ? [{ key: 'search', label: '검색', value: search.value }]
+  : [])
+
+const backPath = computed(() => {
+  const query = new URLSearchParams()
+
+  if (isFileMode.value) {
+    query.set('view', 'category')
+    query.set('file', category.value)
+  } else if (isTagMode.value) {
+    query.set('view', 'version')
+    query.set('version', version.value)
+    query.set('revision', revision.value)
+  }
+
+  const queryString = query.toString()
+  return queryString ? `/translate?${queryString}` : '/translate'
+})
+
+function getVersionLabel(versionValue: string, revisionValue: string): string {
+  return `v${normalizeVersion(versionValue)} · r${normalizeRevision(revisionValue)}`
 }
 
-function getAllLanguages(): EditorLanguage[] {
-  return languageItems.map(language => language.key)
+function getCategoryPath(categoryValue: string): string {
+  return `/translate/editor?file=${encodeURIComponent(categoryValue)}`
 }
 
-function isEditorLanguage(value: unknown): value is EditorLanguage {
-  return value === 'cnS' || value === 'en' || value === 'jp' || value === 'cnT'
+function getVersionPath(versionValue: string, revisionValue: string): string {
+  return `/translate/editor?version=${encodeURIComponent(normalizeVersion(versionValue))}&revision=${encodeURIComponent(normalizeRevision(revisionValue))}`
 }
-
-const initialVersion = normalizeVersion(getQueryString(route.query.version))
-const initialRevision = normalizeRevision(getQueryString(route.query.revision))
-const hasInitialVersion = Boolean(initialVersion && initialRevision)
-
-const search = ref(getQueryString(route.query.search))
-const category = ref(hasInitialVersion ? EDITOR_ALL_CATEGORY_VALUE : getQueryString(route.query.file) || EDITOR_ALL_CATEGORY_VALUE)
-const version = ref(initialVersion)
-const revision = ref(initialRevision)
-const revisionId = ref(EDITOR_ALL_REVISION_VALUE)
-const itemId = ref(getQueryString(route.query.itemId))
-const editRequested = ref(getQueryBoolean(route.query.edit))
-const selectedLanguages = ref<EditorLanguage[]>(getAllLanguages())
-const untranslatedOnly = ref(getQueryBoolean(route.query.untranslated))
-const page = ref(getQueryPage(route.query.page))
-let applyingRouteQuery = false
-let searchQueryTimer: ReturnType<typeof setTimeout> | undefined
-const languageStorageReady = ref(false)
-
-const { ready: sessionReady, loggedIn } = useUserSession()
-const canEdit = computed(() => sessionReady.value && loggedIn.value)
-const editingItemId = ref<string | null>(null)
-const draftKo = ref('')
-const originalKo = ref('')
-const editError = ref('')
-const saving = ref(false)
-const historyOpen = ref(false)
-const historyItemId = ref<string | null>(null)
-const historyReloadKey = ref(0)
-const toast = useToast()
 
 const requestQuery = computed(() => ({
   page: page.value,
   search: search.value || undefined,
-  category: category.value && category.value !== EDITOR_ALL_CATEGORY_VALUE ? category.value : undefined,
-  version: version.value || undefined,
-  revision: revision.value || undefined,
-  revisionId: !version.value && !revision.value && revisionId.value && revisionId.value !== EDITOR_ALL_REVISION_VALUE
-    ? revisionId.value
-    : undefined,
-  itemId: itemId.value || undefined,
-  untranslated: untranslatedOnly.value ? 'true' : undefined
+  category: isFileMode.value ? category.value : undefined,
+  version: isTagMode.value ? version.value : undefined,
+  revision: isTagMode.value ? revision.value : undefined
 }))
 
-const { data: filterData, status: filterStatus, error: filterError } = await useFetch<EditorFiltersResponse>('/api/editor/filters', {
-  default: () => defaultFilters
-})
-
-const { data: editorData, status: editorStatus, error: editorError, refresh: refreshItems } = await useFetch<EditorItemsResponse>('/api/editor/items', {
+const {
+  data: itemsData,
+  error: itemsError,
+  status: itemsStatus,
+  refresh: refreshItems
+} = await useFetch<EditorItemsResponse>('/api/editor/items', {
   query: requestQuery,
   default: () => defaultItems,
+  server: false,
   watch: [requestQuery]
 })
 
-const categoryItems = computed(() => filterData.value?.categories ?? defaultFilters.categories)
-const revisionItems = computed(() => filterData.value?.revisions ?? defaultFilters.revisions)
-const items = computed(() => editorData.value?.items ?? [])
-const total = computed(() => editorData.value?.total ?? 0)
-const totalPages = computed(() => editorData.value?.totalPages ?? 1)
-const displayedPage = computed(() => editorData.value?.page ?? page.value)
-const isLoading = computed(() => filterStatus.value === 'pending' || editorStatus.value === 'pending')
-const hasError = computed(() => Boolean(filterError.value || editorError.value))
-const visibleLanguageItems = computed(() => languageItems.filter(language => selectedLanguages.value.includes(language.key)))
+const {
+  data: overviewData,
+  status: overviewStatus,
+  error: overviewError,
+  refresh: refreshOverview
+} = await useFetch<EditorOverviewResponse>('/api/editor/overview', {
+  server: false,
+  lazy: true,
+  default: () => defaultOverview
+})
 
-function resolveRevisionId() {
-  if (!version.value || !revision.value) {
-    if (revisionId.value !== EDITOR_ALL_REVISION_VALUE) {
-      revisionId.value = EDITOR_ALL_REVISION_VALUE
-    }
+const items = computed(() => itemsData.value?.items ?? [])
+const total = computed(() => itemsData.value?.total ?? 0)
+const totalPages = computed(() => Math.max(1, itemsData.value?.totalPages ?? 1))
+const isLoading = computed(() => itemsStatus.value === 'idle' || itemsStatus.value === 'pending')
+const overview = computed(() => overviewData.value ?? defaultOverview)
+const isSidebarListLoading = computed(() => overviewStatus.value === 'idle' || overviewStatus.value === 'pending')
+const sidebarListHasError = computed(() => Boolean(overviewError.value))
+const persistedItemStates = ref<Record<string, PersistedItemState>>({})
+
+const sidebarCategoryRows = computed<SidebarListRow[]>(() => {
+  const query = sidebarListSearch.value.trim().toLowerCase()
+
+  return overview.value.categories
+    .filter(item => !query || item.category.toLowerCase().includes(query))
+    .map(item => ({
+      key: `category:${item.category}`,
+      label: item.category,
+      path: getCategoryPath(item.category),
+      mode: 'category',
+      value: item.category,
+      total: item.total,
+      counts: item.counts
+    }))
+})
+
+const sidebarVersionRows = computed<SidebarListRow[]>(() => {
+  const query = sidebarListSearch.value.trim().toLowerCase()
+
+  return overview.value.versions
+    .filter(item => !query || getVersionLabel(item.version, item.revision).toLowerCase().includes(query))
+    .map(item => ({
+      key: `version:${item.id}`,
+      label: getVersionLabel(item.version, item.revision),
+      path: getVersionPath(item.version, item.revision),
+      mode: 'version',
+      value: `${normalizeVersion(item.version)}:${normalizeRevision(item.revision)}`,
+      total: item.total,
+      counts: item.counts
+    }))
+})
+
+const sidebarListRows = computed(() => sidebarListMode.value === 'category'
+  ? sidebarCategoryRows.value
+  : sidebarVersionRows.value)
+
+const sidebarListHasRows = computed(() => sidebarListMode.value === 'category'
+  ? overview.value.categories.length > 0
+  : overview.value.versions.length > 0)
+
+watch(itemsData, (data) => {
+  if (!data) {
     return
   }
 
-  const revisionOption = revisionItems.value.find(option => option.label === getRevisionLabel(version.value, revision.value))
-  const nextRevisionId = revisionOption?.value ?? EDITOR_ALL_REVISION_VALUE
+  const nextStates = { ...persistedItemStates.value }
 
-  if (revisionId.value !== nextRevisionId) {
-    revisionId.value = nextRevisionId
+  for (const item of data.items) {
+    nextStates[item.id] = {
+      ko: item.ko,
+      pendingStatus: item.pendingStatus,
+      approvedForCurrentSource: item.approvedForCurrentSource
+    }
+  }
+
+  persistedItemStates.value = nextStates
+}, { immediate: true })
+
+const currentProgress = computed<EditorProgressSummary>(() => {
+  if (isFileMode.value) {
+    const categoryProgress = overview.value.categories.find(item => item.category === category.value)
+
+    return categoryProgress
+      ? { total: categoryProgress.total, ...categoryProgress.counts }
+      : createEmptyProgress()
+  }
+
+  if (isTagMode.value) {
+    const versionProgress = overview.value.versions.find(item =>
+      normalizeVersion(item.version) === version.value
+      && normalizeRevision(item.revision) === revision.value
+    )
+
+    return versionProgress
+      ? { total: versionProgress.total, ...versionProgress.counts }
+      : createEmptyProgress()
+  }
+
+  return overview.value.overall
+})
+
+function getProgressSegments(progress: EditorProgressSummary) {
+  const segments = EDITOR_PROGRESS_STATUSES
+    .filter(status => progress[status] > 0)
+    .map(status => ({
+      status,
+      percentage: progress.total > 0 ? (progress[status] / progress.total) * 100 : 0
+    }))
+
+  return segments.map((segment, index) => ({
+    ...segment,
+    isLast: index === segments.length - 1
+  }))
+}
+
+function formatPercent(count: number, totalCount: number): string {
+  if (!totalCount) {
+    return '0.0%'
+  }
+
+  const percentage = (count / totalCount) * 100
+
+  if (count > 0 && percentage < 0.1) {
+    return '<0.1%'
+  }
+
+  return `${percentage.toFixed(1)}%`
+}
+
+function formatCount(value: number): string {
+  return value.toLocaleString('ko-KR')
+}
+
+function toggleDisplayLanguage(language: EditorLanguage): void {
+  displayLanguages.value = displayLanguages.value.includes(language)
+    ? displayLanguages.value.filter(value => value !== language)
+    : [...displayLanguages.value, language]
+}
+
+function selectSidebarMenu(menu: SidebarMenu): void {
+  activeSidebarMenu.value = menu
+
+  if (!isSidebarOpen.value) {
+    isSidebarOpen.value = true
   }
 }
 
-watch([revisionItems, version, revision], resolveRevisionId, { immediate: true })
-
-watch(category, (value) => {
-  if (applyingRouteQuery || value === EDITOR_ALL_CATEGORY_VALUE) {
-    return
+function isActiveSidebarRow(row: SidebarListRow): boolean {
+  if (row.mode === 'category') {
+    return isFileMode.value && row.value === category.value
   }
 
-  version.value = ''
-  revision.value = ''
-  revisionId.value = EDITOR_ALL_REVISION_VALUE
-})
-
-watch(revisionId, (value) => {
-  if (applyingRouteQuery || value === EDITOR_ALL_REVISION_VALUE) {
-    return
-  }
-
-  const revisionOption = revisionItems.value.find(option => option.value === value)
-  const parts = revisionOption ? getRevisionParts(revisionOption.label) : null
-
-  if (parts) {
-    version.value = parts.version
-    revision.value = parts.revision
-  }
-})
-
-onMounted(() => {
-  try {
-    const stored = window.localStorage.getItem(languageStorageKey)
-
-    if (stored !== null) {
-      const parsed: unknown = JSON.parse(stored)
-
-      if (Array.isArray(parsed)) {
-        const languages = parsed
-          .filter(isEditorLanguage)
-          .filter((language, index, values) => values.indexOf(language) === index)
-
-        if (languages.length > 0 || parsed.length === 0) {
-          selectedLanguages.value = languages
-        }
-      }
-    }
-  } catch {
-    // Ignore unavailable or malformed browser storage and keep the defaults.
-  } finally {
-    languageStorageReady.value = true
-  }
-})
-
-watch(selectedLanguages, (value) => {
-  if (!languageStorageReady.value) {
-    return
-  }
-
-  try {
-    window.localStorage.setItem(languageStorageKey, JSON.stringify(value))
-  } catch {
-    // Ignore browsers that block localStorage access.
-  }
-}, { deep: true })
-
-watch([search, category, revisionId, version, revision, untranslatedOnly], () => {
-  if (!applyingRouteQuery && page.value !== 1) {
-    page.value = 1
-  }
-})
-
-function getEditorRouteQuery(): Record<string, string> {
-  const query: Record<string, string> = {}
-
-  if (search.value) {
-    query.search = search.value
-  }
-
-  if (itemId.value) {
-    query.itemId = itemId.value
-  }
-
-  if (editRequested.value) {
-    query.edit = 'true'
-  }
-
-  if (version.value && revision.value) {
-    query.version = normalizeVersion(version.value)
-    query.revision = normalizeRevision(revision.value)
-  } else if (category.value && category.value !== EDITOR_ALL_CATEGORY_VALUE) {
-    query.file = category.value
-  }
-
-  if (untranslatedOnly.value) {
-    query.untranslated = 'true'
-  }
-
-  if (page.value > 1) {
-    query.page = String(page.value)
-  }
-
-  return query
+  return isTagMode.value && row.value === `${version.value}:${revision.value}`
 }
 
-function syncEditorRouteQuery() {
-  if (applyingRouteQuery) {
-    return
-  }
-
-  const nextQuery = getEditorRouteQuery()
-  const currentQuery = {
-    search: getQueryString(route.query.search),
-    itemId: getQueryString(route.query.itemId),
-    edit: getQueryString(route.query.edit),
-    file: getQueryString(route.query.file),
-    version: getQueryString(route.query.version),
-    revision: getQueryString(route.query.revision),
-    untranslated: getQueryString(route.query.untranslated),
-    page: getQueryString(route.query.page)
-  }
-
-  if (
-    currentQuery.search === (nextQuery.search || '')
-    && currentQuery.itemId === (nextQuery.itemId || '')
-    && currentQuery.edit === (nextQuery.edit || '')
-    && currentQuery.file === (nextQuery.file || '')
-    && currentQuery.version === (nextQuery.version || '')
-    && currentQuery.revision === (nextQuery.revision || '')
-    && currentQuery.untranslated === (nextQuery.untranslated || '')
-    && currentQuery.page === (nextQuery.page || '')
-  ) {
-    return
-  }
-
-  void router.push({ query: nextQuery })
-}
-
-watch([category, revisionId, version, revision, untranslatedOnly, page], syncEditorRouteQuery)
-
-watch(search, () => {
-  if (applyingRouteQuery) {
-    return
-  }
-
-  if (searchQueryTimer) {
-    clearTimeout(searchQueryTimer)
-  }
-
-  searchQueryTimer = setTimeout(() => {
-    searchQueryTimer = undefined
-    syncEditorRouteQuery()
-  }, 300)
-})
-
-watch(
-  () => [route.query.search, route.query.itemId, route.query.edit, route.query.file, route.query.version, route.query.revision, route.query.untranslated, route.query.page],
-  () => {
-    if (searchQueryTimer) {
-      clearTimeout(searchQueryTimer)
-      searchQueryTimer = undefined
-    }
-
-    applyingRouteQuery = true
-    search.value = getQueryString(route.query.search)
-    itemId.value = getQueryString(route.query.itemId)
-    editRequested.value = getQueryBoolean(route.query.edit)
-    version.value = normalizeVersion(getQueryString(route.query.version))
-    revision.value = normalizeRevision(getQueryString(route.query.revision))
-    category.value = version.value && revision.value
-      ? EDITOR_ALL_CATEGORY_VALUE
-      : getQueryString(route.query.file) || EDITOR_ALL_CATEGORY_VALUE
-    revisionId.value = EDITOR_ALL_REVISION_VALUE
-    untranslatedOnly.value = getQueryBoolean(route.query.untranslated)
-    page.value = getQueryPage(route.query.page)
-
-    nextTick(() => {
-      applyingRouteQuery = false
+function scrollListToTop(): void {
+  nextTick(() => {
+    listContainer.value?.scrollTo({
+      top: 0,
+      behavior: 'auto'
     })
-  }
-)
+  })
+}
 
-onBeforeUnmount(() => {
-  if (searchQueryTimer) {
-    clearTimeout(searchQueryTimer)
-  }
-})
+async function applySearch(): Promise<void> {
+  const nextSearch = searchInput.value.trim()
 
-watch(totalPages, (value) => {
-  if (page.value > value) {
-    page.value = value
+  if (nextSearch === search.value && getQueryString(route.query.search).trim() === nextSearch) {
+    return
   }
-})
 
-watch(isLoading, (loading, wasLoading) => {
-  if (wasLoading && !loading && import.meta.client) {
-    nextTick(() => {
-      window.scrollTo({ top: 0, behavior: 'auto' })
-    })
-  }
-})
-
-function resetFilters() {
-  search.value = ''
-  category.value = EDITOR_ALL_CATEGORY_VALUE
-  version.value = ''
-  revision.value = ''
-  revisionId.value = EDITOR_ALL_REVISION_VALUE
-  selectedLanguages.value = getAllLanguages()
-  untranslatedOnly.value = false
+  search.value = nextSearch
   page.value = 1
-}
+  scrollAfterLoad.value = true
 
-function isEditing(itemId: string): boolean {
-  return editingItemId.value === itemId
-}
-
-function startEdit(item: EditorItem) {
-  if (!canEdit.value || saving.value) {
-    return
-  }
-
-  editingItemId.value = item.id
-  originalKo.value = item.ko
-  draftKo.value = item.ko
-  editError.value = ''
-}
-
-let focusedItemId: string | null = null
-
-function focusRequestedItem() {
-  const requestedItemId = itemId.value
-
-  if (!requestedItemId || editorStatus.value !== 'success') {
-    return
-  }
-
-  const item = items.value.find(value => value.id === requestedItemId)
-
-  if (!item) {
-    return
-  }
-
-  if (focusedItemId !== requestedItemId) {
-    focusedItemId = requestedItemId
-    nextTick(() => {
-      if (!import.meta.client) {
-        return
-      }
-
-      document.getElementById(`editor-item-${requestedItemId}`)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-      })
-    })
-  }
-
-  if (editRequested.value && canEdit.value && editingItemId.value !== requestedItemId) {
-    startEdit(item)
-  }
-}
-
-watch([items, editorStatus, canEdit, itemId, editRequested], focusRequestedItem)
-
-function cancelEdit() {
-  editingItemId.value = null
-  originalKo.value = ''
-  draftKo.value = ''
-  editError.value = ''
-}
-
-function getErrorStatus(error: unknown): number | undefined {
-  if (typeof error !== 'object' || error === null) {
-    return undefined
-  }
-
-  if ('status' in error && typeof error.status === 'number') {
-    return error.status
-  }
-
-  if ('statusCode' in error && typeof error.statusCode === 'number') {
-    return error.statusCode
-  }
-
-  return undefined
-}
-
-async function saveEdit(item: EditorItem) {
-  if (!canEdit.value || editingItemId.value !== item.id || saving.value) {
-    return
-  }
-
-  const text = draftKo.value.trim()
-
-  if (!text) {
-    editError.value = '한국어 번역은 비워 둘 수 없습니다.'
-    return
-  }
-
-  editError.value = ''
-  saving.value = true
-
-  try {
-    const response = await $fetch<EditorSaveResponse>(`/api/editor/items/${item.id}`, {
-      method: 'PATCH',
-      body: {
-        text,
-        expectedText: originalKo.value
-      }
-    })
-
-    await refreshItems()
-    cancelEdit()
-
-    toast.add({
-      title: response.changed ? '번역 수정이 저장되었습니다.' : '변경된 내용이 없습니다.',
-      description: response.changed ? '관리자 승인 대기 상태로 등록되었습니다.' : undefined,
-      color: response.changed ? 'success' : 'neutral',
-      icon: response.changed ? 'i-tabler-check' : 'i-tabler-info-circle'
-    })
-  } catch (error: unknown) {
-    if (getErrorStatus(error) === 409) {
-      editError.value = '다른 사용자가 먼저 수정했습니다. 항목을 새로 불러온 뒤 다시 시도해 주세요.'
-    } else if (getErrorStatus(error) === 401) {
-      editError.value = '로그인한 사용자만 번역을 수정할 수 있습니다.'
-    } else {
-      editError.value = '번역을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+  await router.push({
+    query: {
+      ...route.query,
+      search: nextSearch || undefined
     }
-  } finally {
-    saving.value = false
+  })
+}
+
+function removeFilterTag(key: string): void {
+  if (key !== 'search') {
+    return
   }
+
+  searchInput.value = ''
+  void applySearch()
 }
 
-function openHistory(itemId: string) {
-  historyItemId.value = itemId
+function getItemStatus(item: EditorItem): EditorItemStatus {
+  const persistedState = persistedItemStates.value[item.id] ?? item
+
+  if (persistedState.pendingStatus === 'pending') {
+    return 'info'
+  }
+
+  if (!persistedState.ko.trim()) {
+    return 'untranslated'
+  }
+
+  return persistedState.approvedForCurrentSource === true ? 'success' : 'warning'
+}
+
+function getItemStatusColor(item: EditorItem): string {
+  return itemStatusMeta[getItemStatus(item)].color
+}
+
+function getItemStatusLabel(item: EditorItem): string {
+  return itemStatusMeta[getItemStatus(item)].label
+}
+
+function setPage(nextPage: number): void {
+  const targetPage = Math.min(Math.max(Math.trunc(nextPage), 1), totalPages.value)
+  pageInput.value = String(targetPage)
+  pagePopoverOpen.value = false
+
+  if (targetPage === page.value) {
+    return
+  }
+
+  selectFirstItemOnNextLoad.value = true
+  scrollAfterLoad.value = true
+  page.value = targetPage
+}
+
+function goToInputPage(): void {
+  const requestedPage = Number(pageInput.value)
+
+  if (!Number.isFinite(requestedPage)) {
+    pageInput.value = String(page.value)
+    pagePopoverOpen.value = false
+    return
+  }
+
+  setPage(requestedPage)
+}
+
+function selectItem(item: EditorItem): void {
+  selectedItemId.value = item.id
+}
+
+function handleHistoryChanged(): void {
   historyReloadKey.value += 1
-  historyOpen.value = true
+  void refreshItems()
+  void refreshOverview()
 }
 
-watch(canEdit, (value) => {
-  if (!value && editingItemId.value) {
-    cancelEdit()
+watch([search, category, version, revision], () => {
+  selectFirstItemOnNextLoad.value = true
+  scrollAfterLoad.value = true
+  page.value = 1
+})
+
+watch(itemsStatus, (status) => {
+  if (status === 'success') {
+    if (!items.value.length) {
+      selectedItemId.value = null
+      selectFirstItemOnNextLoad.value = false
+    }
+
+    if (scrollAfterLoad.value) {
+      scrollAfterLoad.value = false
+      scrollListToTop()
+    }
+  } else if (status === 'error') {
+    scrollAfterLoad.value = false
   }
 })
+
+watch(page, (value) => {
+  pageInput.value = String(value)
+  selectFirstItemOnNextLoad.value = true
+})
+
+watch(() => route.query.search, (value) => {
+  const nextSearch = getQueryString(value).trim()
+
+  if (searchInput.value !== nextSearch) {
+    searchInput.value = nextSearch
+  }
+
+  if (search.value !== nextSearch) {
+    search.value = nextSearch
+  }
+})
+
+watch(totalPages, (nextTotalPages) => {
+  if (page.value > nextTotalPages) {
+    page.value = nextTotalPages
+  }
+})
+
+watch(items, (nextItems) => {
+  if (!nextItems.length) {
+    if (!selectFirstItemOnNextLoad.value) {
+      selectedItemId.value = null
+    }
+
+    return
+  }
+
+  if (selectFirstItemOnNextLoad.value || !nextItems.some(item => item.id === selectedItemId.value)) {
+    selectedItemId.value = nextItems[0]?.id ?? null
+    selectFirstItemOnNextLoad.value = false
+  }
+}, { immediate: true })
 </script>
 
 <template>
-  <div class="flex flex-1 flex-col lg:flex-row gap-6 px-2 pb-6 md:px-6 max-w-400 mx-auto">
-    <section class="hidden lg:flex flex-col shrink-0 w-60">
-      <div class="sticky top-19 pb-8 max-h-[calc(100dvh-4.8rem)]">
-        <EditorFilterDesktop :search="search" :category="category" :category-items="categoryItems"
-          :revision-id="revisionId" :revision-items="revisionItems" :selected-languages="selectedLanguages"
-          :untranslated-only="untranslatedOnly" :page="displayedPage" :total-pages="totalPages" :loading="isLoading"
-          @update:search="search = $event" @update:category="category = $event"
-          @update:revision-id="revisionId = $event" @update:selected-languages="selectedLanguages = $event"
-          @update:untranslated-only="untranslatedOnly = $event" @update:page="page = $event" />
-      </div>
-    </section>
+  <div class="flex h-dvh flex-col overflow-hidden">
+    <header class="flex items-center h-16 px-3 bg-muted border-b border-default shrink-0">
+      <UButton :to="backPath" icon="i-tabler-chevron-left" color="neutral" variant="soft" size="xl" class="mr-4" />
 
-    <section class="flex flex-1 flex-col gap-4">
-      <div v-if="hasError && !items.length" class="rounded-xl border border-error/30 bg-error/10 p-4">
-        <UAlert color="error" variant="soft" title="에디터 데이터를 불러오지 못했습니다." description="잠시 후 다시 시도해 주세요." />
-      </div>
-
-      <UAlert v-else-if="!isLoading && !items.length" color="neutral" variant="soft" icon="i-tabler-search-off"
-        title="조건에 맞는 항목이 없습니다." description="검색어나 필터 조건을 바꿔 보세요." />
-
-      <template v-else-if="items.length">
-        <div class="flex items-center justify-between text-xs">
-          <span class="px-4 py-2 bg-muted rounded-xl">{{ total.toLocaleString() }}개 항목</span>
-          <span class="px-4 py-2 bg-muted rounded-xl">{{ displayedPage }} / {{ totalPages }} 페이지</span>
-        </div>
-
-        <div v-for="item in items" :id="`editor-item-${item.id}`" :key="item.id"
-          class="flex flex-col bg-muted rounded-xl px-2">
-          <div class="flex items-center gap-4 p-4">
-            <span class="text-base font-semibold">{{ item.category }}</span>
-            <span class="text-sm font-medium text-muted">{{ item.unitKey }}</span>
-          </div>
-
-          <div class="flex flex-col gap-3 text-sm rounded-lg bg-default/50 p-4">
-            <div v-for="language in visibleLanguageItems" :key="language.key" class="flex gap-4">
-              <span class="w-20 text-right text-muted font-medium shrink-0">{{ language.label }}</span>
-              <span class="whitespace-pre-wrap wrap-break-word">{{ item[language.key] || '—' }}</span>
-            </div>
-            <div class="flex gap-4">
-              <span class="w-20 text-right text-muted font-medium shrink-0">한국어</span>
-              <UTextarea v-if="isEditing(item.id)" v-model="draftKo" color="neutral" variant="outline" autoresize
-                :disabled="saving" placeholder="한국어 번역" :ui="{ base: 'bg-transparent' }" class="w-full" />
-              <div v-else class="min-w-0 flex-1">
-                <p class="whitespace-pre-wrap wrap-break-word">
-                  {{ item.ko || '미번역' }}
-                </p>
-                <UBadge v-if="item.pendingStatus === 'pending'" color="warning" variant="soft" class="mt-2">
-                  승인 대기
-                </UBadge>
+      <div class="flex flex-1 flex-col">
+        <div class="flex gap-3">
+          <h1 class="truncate font-medium" :title="headerTitle">{{ headerTitle }}</h1>
+          <!-- 현재 파일/태그 진행도 -->
+          <UPopover mode="hover" enable-touch :content="{ side: 'bottom', align: 'center', sideOffset: 8 }">
+            <div class="flex items-center">
+              <div class="w-20 sm:w-28 h-1.5 flex bg-elevated rounded-xl relative overflow-hidden shrink-0"
+                aria-label="현재 번역 진행률" role="img">
+                <div class="absolute inset-0 flex">
+                  <div v-for="segment in getProgressSegments(currentProgress)" :key="segment.status"
+                    class="h-full shrink-0" :class="[
+                      itemStatusMeta[segment.status].color,
+                      segment.isLast ? '' : 'border-r-2 border-default'
+                    ]" :style="{ width: `${segment.percentage}%` }" />
+                </div>
               </div>
             </div>
+
+            <template #content>
+              <div class="w-64 max-w-[calc(100vw-2rem)] p-3 text-xs">
+                <div class="flex items-center justify-between gap-4">
+                  <h3 class="min-w-0 truncate text-sm font-semibold">{{ headerTitle }} 진행도</h3>
+                  <span class="font-mono text-muted shrink-0">
+                    {{ formatPercent(currentProgress.success, currentProgress.total) }}
+                  </span>
+                </div>
+
+                <div class="mt-3 flex items-center justify-between border-t border-default pt-3">
+                  <span class="text-muted">완료 항목</span>
+                  <span class="font-mono">
+                    {{ formatCount(currentProgress.success) }} / {{ formatCount(currentProgress.total) }}
+                  </span>
+                </div>
+
+                <div class="mt-3 flex flex-col gap-2 border-t border-default pt-3">
+                  <div v-for="status in EDITOR_PROGRESS_STATUSES" :key="status"
+                    class="flex items-center justify-between gap-4">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <span class="size-1.5 shrink-0 rounded-full" :class="itemStatusMeta[status].color" />
+                      <span class="truncate text-muted">{{ itemStatusMeta[status].label }}</span>
+                    </div>
+                    <div class="shrink-0 text-right font-mono flex">
+                      <span>{{ formatCount(currentProgress[status]) }}</span>
+                      <span class="mx-1.5">·</span>
+                      <span class="w-10">{{ formatPercent(currentProgress[status], currentProgress.total) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </UPopover>
+        </div>
+
+        <span class="text-xs text-muted">{{ formatCount(total) }}개 항목</span>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <UButton icon="i-tabler-bell" color="neutral" variant="ghost" size="xl"
+          :ui="{ leadingIcon: 'size-5', base: 'p-2.5' }" />
+        <UButton icon="i-tabler-user" color="neutral" variant="soft" size="xl"
+          :ui="{ leadingIcon: 'size-5', base: 'p-2.5' }" />
+      </div>
+    </header>
+
+    <div class="flex min-h-0 flex-1 overflow-hidden">
+      <main class="flex min-h-0 flex-1 flex-col border-r border-default">
+        <!-- 툴바 -->
+        <div class="flex gap-2 bg-muted border-b border-default p-2 shrink-0">
+          <div class="flex flex-1 gap-1 shrink-0">
+            <UInput v-model="searchInput" size="lg" color="neutral" variant="ghost" placeholder="검색"
+              :ui="{ base: 'px-2', trailing: 'pe-1.5' }" @keydown.enter.prevent="applySearch">
+              <template #trailing>
+                <UButton icon="i-tabler-search" color="neutral" variant="link" size="md" aria-label="검색"
+                  :disabled="searchInput.trim() === search" @click="applySearch" />
+              </template>
+            </UInput>
+            <div class="my-1 border-x border-default mx-1" />
+            <UTooltip text="필터" :delay-duration="0">
+              <UButton icon="i-tabler-filter" color="neutral" variant="ghost" size="lg" />
+            </UTooltip>
           </div>
 
-          <div class="flex flex-col gap-2 p-3">
-            <p v-if="isEditing(item.id) && editError" class="text-right text-xs text-error">
-              {{ editError }}
-            </p>
-
-            <div class="flex justify-end gap-2">
-              <UButton icon="i-tabler-history" color="neutral" variant="soft" size="md" class="px-4 rounded-xl"
-                @click="openHistory(item.id)">
-                변경 기록
-              </UButton>
-
-              <template v-if="isEditing(item.id)">
-                <UButton icon="i-tabler-x" color="neutral" variant="ghost" size="md" class="px-4 rounded-xl"
-                  :disabled="saving" @click="cancelEdit">
-                  취소
-                </UButton>
-                <UButton icon="i-tabler-device-floppy" color="info" variant="soft" size="md" class="px-4 rounded-xl"
-                  :loading="saving" @click="saveEdit(item)">
-                  저장
-                </UButton>
-              </template>
-
-              <UButton v-else-if="canEdit" icon="i-tabler-edit" color="info" variant="soft" size="md"
-                class="px-4 rounded-xl" @click="startEdit(item)">
-                번역 수정
-              </UButton>
-            </div>
+          <div class="flex gap-2 shrink-0">
+            <UTooltip text="저장" :delay-duration="0">
+              <UButton icon="i-tabler-device-floppy-filled" color="info" variant="soft" size="lg" />
+            </UTooltip>
+            <UTooltip text="변경사항 되돌리기" :delay-duration="0">
+              <UButton icon="i-tabler-arrow-back-up" color="neutral" variant="ghost" size="lg" />
+            </UTooltip>
+            <UTooltip text="AI 번역" :delay-duration="0">
+              <UButton icon="i-tabler-sparkles-2" color="neutral" variant="ghost" size="lg" />
+            </UTooltip>
+            <UTooltip text="옵션" :delay-duration="0">
+              <UButton icon="i-tabler-dots-vertical" color="neutral" variant="ghost" size="lg" />
+            </UTooltip>
           </div>
         </div>
-      </template>
-    </section>
 
-    <USlideover v-model:open="historyOpen" side="right" inset :ui="{ content: 'max-w-2xl' }">
-      <template #content>
-        <EditorChangeHistory :item-id="historyItemId" :reload-key="historyReloadKey" @changed="refreshItems" />
-      </template>
-    </USlideover>
+        <!-- 목록 -->
+        <div class="relative flex min-h-0 flex-1">
+          <div v-if="isLoading" class="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center">
+            <div
+              class="flex items-center gap-3 rounded-md bg-elevated/50 backdrop-blur-lg px-3 py-2 text-sm text-muted">
+              <UIcon name="i-tabler-loader-2" class="size-4 animate-spin" />
+              <span>불러오는 중...</span>
+            </div>
+          </div>
 
-    <div v-if="isLoading" class="fixed size-100 z-100 flex items-center justify-center bg-default/30 backdrop-blur-sm"
-      role="status" aria-live="polite" aria-label="데이터를 불러오는 중">
-      <UIcon name="i-tabler-loader-2" class="size-10 animate-spin text-default" />
-      <span class="sr-only">데이터를 불러오는 중입니다.</span>
+          <div ref="listContainer" class="flex min-h-0 flex-1 flex-col overflow-y-auto pb-20">
+            <div class="flex flex-col bg-muted/60">
+              <div v-if="activeFilterTags.length" class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1">
+                <div v-for="tag in activeFilterTags" :key="tag.key"
+                  class="flex min-w-0 max-w-full items-center gap-1 rounded-md bg-elevated px-2 py-1">
+                  <span class="truncate text-xs">{{ tag.label }}: {{ tag.value }}</span>
+                  <UButton icon="i-tabler-x" color="neutral" variant="link" size="xs"
+                    class="size-5 justify-center shrink-0 p-0" :aria-label="`${tag.label} 제거`"
+                    @click="removeFilterTag(tag.key)" />
+                </div>
+              </div>
+              <div class="flex text-xs font-medium text-muted">
+                <span class="flex flex-1 shrink-0 px-5 py-2">원문</span>
+                <span class="flex flex-1 shrink-0 px-5 py-2">번역</span>
+              </div>
+            </div>
+            <div v-if="itemsError && !items.length" class="p-5 text-sm text-error">
+              항목을 불러오지 못했습니다.
+            </div>
+            <div v-else-if="!isLoading && !items.length" class="p-5 text-sm text-muted">
+              검색 결과가 없습니다.
+            </div>
+            <template v-else-if="items.length">
+              <article v-for="item in items" :key="item.id" class="flex shrink-0 transition-colors duration-150"
+                :class="selectedItemId === item.id ? 'bg-elevated/70' : 'odd:bg-muted/60'" @click="selectItem(item)">
+                <!-- 원문 -->
+                <div class="flex min-w-0 flex-1 shrink-0">
+                  <div class="flex shrink-0">
+                    <!-- 항목 상태 -->
+                    <div class="w-0.5" :class="getItemStatusColor(item)" :title="getItemStatusLabel(item)" />
+                  </div>
+                  <div class="flex min-w-0 flex-1 flex-col gap-2 py-2.5 pl-4.5 pr-2">
+                    <!-- 원문 내용 -->
+                    <div v-for="source in visibleSourceLanguageItems" :key="source.key"
+                      class="flex flex-col min-w-0 gap-0.5 text-sm">
+                      <span class="shrink-0 text-[10px] text-dimmed">{{ source.label }}</span>
+                      <p class="min-w-0 whitespace-pre-wrap">{{ item[source.key] || '—' }}</p>
+                    </div>
+
+                    <!-- 키 -->
+                    <span class="break-all text-xs font-medium text-dimmed">
+                      {{ item.category }}_{{ item.unitKey }}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- 번역 -->
+                <div class="flex min-w-0 flex-1 shrink-0">
+                  <!-- 번역 내용 -->
+                  <UTextarea v-model="item.ko" color="neutral" variant="none" autoresize placeholder="미번역"
+                    :ui="{ base: 'py-2.5 px- h-full' }" class="w-full min-w-0" @focus="selectItem(item)" />
+
+                  <!-- 변경 상태 -->
+                  <div class="flex shrink-0 p-2 pl-0 text-info">
+                    <UIcon v-if="item.pendingStatus" name="i-tabler-switch-2" class="size-4" title="수정됨" />
+                    <div v-else class="size-4" />
+                  </div>
+                </div>
+              </article>
+            </template>
+          </div>
+
+          <!-- 컨트롤러 -->
+          <div class="flex self-end p-1 bg-elevated/50 backdrop-blur-lg rounded-lg absolute bottom-4 right-4">
+            <UPopover v-model:open="pagePopoverOpen" :content="{ align: 'center', side: 'top', sideOffset: 8 }">
+              <UButton color="neutral" variant="ghost" size="lg" class="text-muted hover:text-default font-medium">
+                <span>{{ page }}</span>
+                <span class="text-dimmed">/</span>
+                <span>{{ totalPages }}</span>
+              </UButton>
+
+              <template #content>
+                <div class="flex flex-col gap-2 p-2">
+                  <UInput v-model="pageInput" type="number" color="neutral" class="w-18" :min="1" :max="totalPages"
+                    aria-label="이동할 페이지"
+                    :ui="{ base: '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none' }"
+                    @keydown.enter.prevent="goToInputPage" />
+                  <div class="flex">
+                    <UTooltip text="첫 페이지" :delay-duration="0">
+                      <UButton icon="i-tabler-chevrons-left" color="neutral" variant="ghost" size="lg"
+                        :disabled="page <= 1" @click="setPage(1)" />
+                    </UTooltip>
+                    <UTooltip text="마지막 페이지" :delay-duration="0">
+                      <UButton icon="i-tabler-chevrons-right" color="neutral" variant="ghost" size="lg"
+                        :disabled="page >= totalPages" @click="setPage(totalPages)" />
+                    </UTooltip>
+                  </div>
+                </div>
+              </template>
+            </UPopover>
+            <UTooltip text="이전 페이지" :delay-duration="0">
+              <UButton icon="i-tabler-chevron-left" color="neutral" variant="ghost" size="lg" :disabled="page <= 1"
+                @click="setPage(page - 1)" />
+            </UTooltip>
+            <UTooltip text="다음 페이지" :delay-duration="0">
+              <UButton icon="i-tabler-chevron-right" color="neutral" variant="ghost" size="lg"
+                :disabled="page >= totalPages" @click="setPage(page + 1)" />
+            </UTooltip>
+          </div>
+        </div>
+      </main>
+
+      <!-- 사이드바 -->
+      <aside class="flex shrink-0 overflow-hidden bg-muted transition-[width] duration-300 ease-in-out"
+        :style="{ width: isSidebarOpen ? 'max(25%, 28rem)' : '4rem' }">
+        <!-- 사이드바 내용 -->
+        <section class="flex min-w-0 flex-1 flex-col border-r border-default transition-opacity" :class="isSidebarOpen
+          ? 'opacity-100 duration-500 ease-out'
+          : 'pointer-events-none opacity-0 duration-150 ease-in'">
+          <!-- 사이드바 헤더 -->
+          <div class="flex items-center gap-2 px-4 pt-4 text-sm font-medium text-muted">
+            <UIcon :name="activeSidebarMenuItem.icon" class="size-4" />
+            <span>{{ activeSidebarMenuItem.label }}</span>
+          </div>
+
+          <template v-if="activeSidebarMenu === 'list'">
+            <div class="flex shrink-0 gap-3 border-b border-default p-3">
+              <!-- 목록 옵션 -->
+              <UTabs v-model="sidebarListMode" :content="false"
+                :items="[{ label: '파일', value: 'category' }, { label: '버전', value: 'version' }]" color="neutral"
+                size="xs" :ui="{ trigger: 'px-3', list: 'bg-elevated/50' }" class="w-fit" />
+
+              <!-- 파일/버전 검색 -->
+              <UInput v-model="sidebarListSearch" icon="i-tabler-search" color="neutral" variant="soft" class="w-full"
+                :placeholder="sidebarListMode === 'category' ? '파일 검색' : '버전 검색'"
+                :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }">
+                <template v-if="sidebarListSearch.length" #trailing>
+                  <UButton color="neutral" variant="link" size="sm" icon="i-tabler-x" aria-label="검색어 지우기"
+                    @click="sidebarListSearch = ''" />
+                </template>
+              </UInput>
+            </div>
+
+            <div class="relative min-h-0 flex-1 overflow-y-auto">
+              <div v-if="isSidebarListLoading && !sidebarListRows.length"
+                class="flex items-center justify-center p-5 text-muted">
+                <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
+              </div>
+
+              <div v-else-if="sidebarListHasError && !sidebarListRows.length" class="p-4 text-sm text-error">
+                목록을 불러오지 못했습니다.
+              </div>
+
+              <nav v-else class="flex flex-col">
+                <!-- 전체 번역 -->
+                <NuxtLink to="/translate/editor"
+                  class="flex min-w-0 items-center gap-2 border-b border-default px-4 py-2.5 text-sm transition-colors"
+                  :class="isAllMode ? 'bg-elevated text-default' : 'text-muted hover:bg-elevated hover:text-default'"
+                  title="전체 번역">
+                  <UIcon name="i-tabler-language" class="size-4 shrink-0" />
+                  <span class="min-w-0 flex-1 truncate">전체 번역</span>
+                  <span class="shrink-0 font-mono text-xs text-[#5eba6e]">
+                    {{ formatPercent(overview.overall.success, overview.overall.total) }}
+                  </span>
+                </NuxtLink>
+
+                <div v-if="!sidebarListRows.length" class="p-4 text-sm text-muted">
+                  {{ sidebarListHasRows ? '검색 결과가 없습니다.' : sidebarListMode === 'category' ?
+                    '등록된 파일이 없습니다.' : '등록된 버전이 없습니다.' }}
+                </div>
+
+                <NuxtLink v-for="row in sidebarListRows" :key="row.key" :to="row.path"
+                  class="flex min-w-0 items-center gap-2 border-b border-default px-4 py-2.5 text-sm transition-colors"
+                  :class="isActiveSidebarRow(row) ? 'bg-elevated text-default' : 'text-muted hover:bg-elevated hover:text-default'"
+                  :title="row.label">
+                  <UIcon :name="row.mode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
+                    class="size-4 shrink-0" />
+                  <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
+                  <span class="shrink-0 font-mono text-xs text-[#5eba6e]">
+                    {{ formatPercent(row.counts.success, row.total) }}
+                  </span>
+                </NuxtLink>
+              </nav>
+            </div>
+          </template>
+
+          <template v-else-if="activeSidebarMenu === 'history'">
+            <EditorChangeHistory :item-id="selectedItemId" :reload-key="historyReloadKey"
+              @changed="handleHistoryChanged" />
+          </template>
+
+          <template v-else-if="activeSidebarMenu === 'settings'">
+            <div class="flex flex-col gap-4 p-4">
+              <div class="flex flex-col gap-2">
+                <p class="text-xs font-medium text-muted">
+                  원문 표시 언어
+                </p>
+
+                <div class="flex flex-col text-sm">
+                  <button v-for="language in displayLanguageOptions" :key="language.key" type="button"
+                    class="flex items-center gap-2 rounded-xl py-1 pl-1 transition-colors hover:bg-muted"
+                    :class="displayLanguages.includes(language.key) ? 'text-default' : 'text-dimmed hover:text-toned'"
+                    :aria-pressed="displayLanguages.includes(language.key)"
+                    @click="toggleDisplayLanguage(language.key)">
+                    <UIcon v-if="displayLanguages.includes(language.key)" name="i-tabler-check" class="size-4" />
+                    <span v-else class="size-4" />
+                    <span>{{ language.label }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <div v-else class="flex flex-1 items-center justify-center p-5 text-center">
+            <span class="text-sm text-muted">{{ activeSidebarMenuItem.label }} 기능은 준비 중입니다.</span>
+          </div>
+        </section>
+
+        <!-- 사이드바 네비게이션 -->
+        <nav class="flex w-16 shrink-0 flex-col gap-2 p-3 bg-muted z-20">
+          <div class="flex flex-1 flex-col gap-2">
+            <UTooltip v-for="menu in sidebarMenuItems" :key="menu.key" :text="menu.label" :delay-duration="0"
+              :content="{ side: 'left' }">
+              <UButton :icon="menu.icon" color="neutral" variant="ghost" size="xl"
+                :class="activeSidebarMenu === menu.key ? 'bg-elevated text-default' : 'text-dimmed hover:text-default'"
+                :aria-label="menu.label" :aria-current="activeSidebarMenu === menu.key ? 'page' : undefined"
+                @click="selectSidebarMenu(menu.key)" />
+            </UTooltip>
+          </div>
+
+          <UTooltip :text="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :delay-duration="0" :content="{ side: 'left' }">
+            <UButton :icon="isSidebarOpen ? 'i-tabler-layout-sidebar-right-filled' : 'i-tabler-layout-sidebar-right'"
+              color="neutral" variant="ghost" size="xl"
+              :class="isSidebarOpen ? 'text-default' : 'text-dimmed hover:text-default'"
+              :aria-label="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :aria-pressed="isSidebarOpen"
+              @click="isSidebarOpen = !isSidebarOpen" />
+          </UTooltip>
+        </nav>
+      </aside>
     </div>
-
-    <section class="w-fit mx-auto lg:hidden sticky bottom-2 bg-elevated/60 backdrop-blur-lg rounded-xl p-1">
-      <EditorFilterMobile :search="search" :category="category" :category-items="categoryItems"
-        :revision-id="revisionId" :revision-items="revisionItems" :selected-languages="selectedLanguages"
-        :untranslated-only="untranslatedOnly" :page="displayedPage" :total-pages="totalPages" :loading="isLoading"
-        @update:search="search = $event" @update:category="category = $event" @update:revision-id="revisionId = $event"
-        @update:selected-languages="selectedLanguages = $event" @update:untranslated-only="untranslatedOnly = $event"
-        @update:page="page = $event" @reset="resetFilters" />
-    </section>
   </div>
 </template>

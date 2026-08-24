@@ -80,12 +80,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
 
 <template>
   <div class="flex h-full flex-col">
-    <div class="border-b border-default px-5 py-4">
-      <h2 class="text-lg font-semibold">변경 기록</h2>
-      <p class="mt-1 text-sm text-muted">이 항목의 번역 수정 내역입니다.</p>
-    </div>
-
-    <div class="flex-1 overflow-y-auto p-5">
+    <div class="flex-1 overflow-y-auto p-4">
       <div v-if="status === 'pending'" class="flex flex-col gap-3">
         <USkeleton v-for="index in 3" :key="index" class="h-32 w-full rounded-xl" />
       </div>
@@ -99,7 +94,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
       <div v-else class="flex flex-col gap-4">
         <UAlert v-if="reviewError" color="error" variant="soft" title="검토에 실패했습니다." :description="reviewError" />
 
-        <article v-for="entry in entries" :key="entry.id" class="rounded-xl border border-default p-4">
+        <article v-for="entry in entries" :key="entry.id" class="">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2 text-sm">
               <span class="font-semibold">{{ entry.nickname }}</span>
