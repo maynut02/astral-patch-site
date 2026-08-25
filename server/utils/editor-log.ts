@@ -90,7 +90,7 @@ function buildTranslationLogWhere(sql: DatabaseClient, filters: EditorTranslatio
       NOT ${hasSearch}
       OR tu.namespace ILIKE ${searchPattern}
       OR tu.unit_key ILIKE ${searchPattern}
-      OR COALESCE(au.nickname, '') ILIKE ${searchPattern}
+      OR COALESCE(au.handle, '') ILIKE ${searchPattern}
       OR COALESCE(tc.previous_text, '') ILIKE ${searchPattern}
       OR tc.proposed_text ILIKE ${searchPattern}
     )
@@ -125,7 +125,11 @@ export async function getEditorTranslationLogs(
         tu.kind,
         tu.namespace AS category,
         tu.unit_key AS "unitKey",
-        COALESCE(NULLIF(BTRIM(au.nickname), ''), '알 수 없는 사용자') AS nickname,
+        CASE
+          WHEN au."role" IN ('admin', 'verified', 'user', 'bot') THEN au."role"
+          ELSE 'user'::text
+        END AS "actorRole",
+        NULLIF(BTRIM(au.handle), '') AS handle,
         tc.previous_text AS "previousText",
         tc.proposed_text AS "proposedText",
         tc.status,

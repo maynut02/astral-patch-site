@@ -13,24 +13,25 @@ export default defineOAuthGoogleEventHandler({
         user: {
           id: appUser.googleSub,
           email: appUser.email,
-          name: appUser.name,
           handle: appUser.handle,
-          nickname: appUser.nickname,
-          role: appUser.role,
-          userType: appUser.userType
+          role: appUser.role
         },
         loggedInAt: Date.now()
       })
 
-      return sendRedirect(event, appUser.handle && appUser.nickname ? '/' : '/profile/setup')
+      if (!appUser.handle) {
+        return sendRedirect(event, '/setup')
+      }
+
+      return sendRedirect(event, consumeAuthReturnTo(event))
     } catch (error) {
       console.error('[auth/google] failed to create session', error)
-      return sendRedirect(event, '/?authError=google')
+      return sendRedirect(event, withAuthError(consumeAuthReturnTo(event)))
     }
   },
 
   onError(event, error) {
     console.error('[auth/google] OAuth error', error)
-    return sendRedirect(event, '/?authError=google')
+    return sendRedirect(event, withAuthError(consumeAuthReturnTo(event)))
   }
 })

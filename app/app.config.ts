@@ -61,6 +61,12 @@ export default defineAppConfig({
       slots: {
         overlay: 'backdrop-blur'
       }
+    },
+
+    toast: {
+      slots: {
+        root: 'bg-default/75 backdrop-blur-lg ring-0'
+      }
     }
   }
 })

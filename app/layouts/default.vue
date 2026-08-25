@@ -11,6 +11,7 @@ const navItem = [
 ]
 
 const isSidebarCollapsed = ref(false)
+const isMobileNavigationOpen = ref(false)
 const isMediumSidebarViewport = ref(false)
 let mediumSidebarMediaQuery: MediaQueryList | undefined
 
@@ -32,24 +33,11 @@ onBeforeUnmount(() => {
   mediumSidebarMediaQuery?.removeEventListener('change', syncSidebarViewport)
 })
 
-const { ready, loggedIn, user, clear } = useUserSession()
+const route = useRoute()
 
-const userMenuItems = computed(() => [[{
-  label: user.value?.email ?? '로그인한 사용자',
-  icon: 'i-tabler-user',
-  disabled: true
-}], [{
-  label: user.value?.role === 'admin' ? '관리자' : '사용자',
-  disabled: true
-}], [{
-  label: '로그아웃',
-  icon: 'i-tabler-logout',
-  onSelect: () => clear()
-}]])
-
-function login() {
-  return navigateTo('/auth/google', { external: true })
-}
+watch(() => route.fullPath, () => {
+  isMobileNavigationOpen.value = false
+})
 </script>
 
 <template>
@@ -59,31 +47,33 @@ function login() {
         <img src="/favicon.ico" alt="icon" class="size-5">
       </NuxtLink>
 
-      <div class="flex items-center gap-2 px-5">
-        <UDropdownMenu v-if="ready && loggedIn" :items="userMenuItems" :content="{ align: 'end' }">
-          <button aria-label="사용자 메뉴"
-            class="size-9 shrink-0 flex justify-center items-center rounded-md bg-muted hover:bg-elevated text-muted hover:text-default transition-colors">
-            <UIcon name="i-tabler-user" class="size-5" />
-          </button>
-        </UDropdownMenu>
+      <div class="flex items-center px-3 md:px-5">
+        <AppUserMenu />
 
-        <button v-else-if="ready" aria-label="Google 로그인" @click="login"
-          class="size-9 shrink-0 flex justify-center items-center rounded-md bg-muted hover:bg-elevated text-muted hover:text-default transition-colors">
-          <UIcon name="i-tabler-login-2" class="size-5" />
-        </button>
-
-        <div v-else
-          class="flex items-center justify-center size-9 shrink-0 rounded-md bg-elevated/60 backdrop-blur-lg text-muted border border-accented/30"
-          aria-label="로그인 상태 확인 중">
-          <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
-        </div>
-
-        <button aria-label="메뉴"
-          class="size-9 shrink-0 flex md:hidden justify-center items-center rounded-md hover:bg-elevated text-muted hover:text-default transition-colors">
+        <button aria-label="메뉴" :aria-expanded="isMobileNavigationOpen"
+          class="size-9 shrink-0 flex md:hidden justify-center items-center rounded-md hover:bg-elevated text-muted hover:text-default transition-colors"
+          :class="isMobileNavigationOpen ? 'bg-elevated text-default' : ''" @click="isMobileNavigationOpen = true">
           <UIcon name="i-tabler-menu" class="size-5" />
         </button>
       </div>
     </div>
+
+    <USlideover v-model:open="isMobileNavigationOpen" side="right"
+      :ui="{ overlay: 'z-200', content: 'z-200 max-w-80', header: 'min-h-14 px-4 py-3', body: 'p-2 sm:p-2' }">
+      <template #body>
+        <nav class="flex flex-col text-sm font-medium">
+          <NuxtLink v-for="item in navItem" :key="item.label" :to="item.link"
+            active-class="bg-elevated/80! text-default!"
+            class="flex min-w-0 items-center gap-3 rounded-md px-3 py-2.5 text-muted transition-colors hover:bg-muted hover:text-toned"
+            @click="isMobileNavigationOpen = false">
+            <div class="flex size-6 shrink-0 items-center justify-center">
+              <UIcon :name="item.icon" class="size-5" />
+            </div>
+            <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+          </NuxtLink>
+        </nav>
+      </template>
+    </USlideover>
 
     <div class="flex flex-1">
       <aside

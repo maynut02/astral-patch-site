@@ -1,5 +1,15 @@
 export type EditorLanguage = 'cnS' | 'en' | 'jp' | 'cnT'
 
+export type EditorRole = 'admin' | 'verified' | 'user' | 'bot'
+
+export function resolveEditorRole(user: { role?: unknown } | null | undefined): EditorRole {
+  if (user?.role === 'admin' || user?.role === 'verified' || user?.role === 'bot' || user?.role === 'user') {
+    return user.role
+  }
+
+  return 'user'
+}
+
 export type EditorSearchType = 'all' | 'content' | 'key' | 'source' | 'translation'
 
 export type EditorSearchMatch = 'contains' | 'exact'
@@ -47,9 +57,11 @@ export interface EditorHistoryEntry {
   id: string
   action: EditorHistoryAction
   actorType: EditorHistoryActorType
-  nickname: string
+  actorRole: EditorRole
+  handle: string | null
   status: EditorChangeStatus | null
-  reviewerNickname: string | null
+  reviewerRole: EditorRole | null
+  reviewerHandle: string | null
   reviewedAt: string | null
   changeType: EditorSourceChangeType | null
   version: string | null
@@ -99,7 +111,8 @@ export interface EditorTranslationLogEntry {
   kind: 'lang' | 'str'
   category: string
   unitKey: string
-  nickname: string
+  actorRole: EditorRole
+  handle: string | null
   previousText: string | null
   proposedText: string
   status: EditorChangeStatus

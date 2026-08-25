@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
 import { ensureBotWorkMigration } from './auth-user'
 import { getDatabase } from './database'
-import type { EditorReviewAction, EditorReviewResponse } from '../../shared/types/editor'
+import { resolveEditorRole, type EditorReviewAction, type EditorReviewResponse } from '../../shared/types/editor'
 
 interface PendingEditorChange {
   id: string
@@ -37,9 +37,20 @@ function parseReviewAction(value: unknown): EditorReviewAction {
   return value
 }
 
+export function assertEditorReviewPermission(user: { role?: unknown } | null | undefined): void {
+  const role = resolveEditorRole(user)
+
+  if (role !== 'admin' && role !== 'verified') {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Verified user permission is required to review translations'
+    })
+  }
+}
+
 export async function reviewEditorChange(
   changeId: string,
-  adminId: string,
+  reviewerId: string,
   input: { action?: unknown }
 ): Promise<EditorReviewResponse> {
   const action = parseReviewAction(input.action)
@@ -80,7 +91,7 @@ export async function reviewEditorChange(
       UPDATE translation_changes
       SET
         status = ${nextStatus},
-        reviewed_by = ${adminId},
+        reviewed_by = ${reviewerId},
         reviewed_at = now()
       WHERE id = ${change.id}
     `
@@ -105,7 +116,7 @@ export async function reviewEditorChange(
           ${change.proposedText},
           ${change.sourceVersionId},
           ${change.id},
-          ${adminId},
+          ${reviewerId},
           now(),
           now()
         )

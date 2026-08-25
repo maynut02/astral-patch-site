@@ -11,9 +11,11 @@ import type {
 
 type LogTab = 'translations' | 'source'
 type SourceLanguageKey = 'cnS' | 'en' | 'jp' | 'cnT'
+type TranslationLogEntryWithHandle = EditorTranslationLogEntry & { handle?: string | null }
 
 const ALL_STATUS_VALUE = '__all_status__'
 const LOG_PAGE_SIZE = 50
+const BOT_HANDLE = 'Bot'
 
 const route = useRoute()
 const { loggedIn } = useUserSession()
@@ -90,6 +92,22 @@ function getQueryString(value: unknown): string {
   }
 
   return typeof value === 'string' ? value : ''
+}
+
+function normalizeHandle(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/^@+/, '') : ''
+}
+
+function getUserPath(handle: string): string {
+  return `/@${encodeURIComponent(handle)}`
+}
+
+function formatHandle(handle: string): string {
+  return `@${handle}`
+}
+
+function getTranslationHandle(entry: EditorTranslationLogEntry): string {
+  return normalizeHandle((entry as TranslationLogEntryWithHandle).handle)
 }
 
 function getPage(value: unknown): number {
@@ -396,7 +414,17 @@ async function retryActiveLog() {
           </div>
 
           <div class="mt-4 flex items-center justify-between gap-3 text-xs text-muted">
-            <span>{{ entry.nickname }} · {{ formatDate(entry.createdAt) }}</span>
+            <span class="flex min-w-0 items-center gap-1">
+              <NuxtLink v-if="getTranslationHandle(entry)" :to="getUserPath(getTranslationHandle(entry))"
+                class="hover:underline underline-offset-2"
+                :class="hasUserRoleIcon(entry.actorRole) ? '-mt-0.5' : ''" @click.stop>
+                {{ formatHandle(getTranslationHandle(entry)) }}
+              </NuxtLink>
+              <span v-else>알 수 없는 사용자</span>
+              <AppUserRoleIcon :role="entry.actorRole" icon-class="size-3.5" />
+              <span aria-hidden="true">·</span>
+              <span>{{ formatDate(entry.createdAt) }}</span>
+            </span>
             <span class="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100">
               상세 보기 <UIcon name="i-tabler-arrow-up-right" class="size-4" />
             </span>
@@ -475,7 +503,13 @@ async function retryActiveLog() {
           </div>
 
           <div class="mt-4 flex items-center justify-between gap-3 text-xs text-muted">
-            <span>자동 원문 변경 · {{ formatDate(entry.createdAt) }}</span>
+            <span class="flex items-center gap-1">
+              <NuxtLink :to="getUserPath(BOT_HANDLE)" class="-mt-0.5 hover:underline underline-offset-2" @click.stop>
+                {{ formatHandle(BOT_HANDLE) }}
+              </NuxtLink>
+              <AppUserRoleIcon role="bot" icon-class="size-3.5" />
+              <span>이 감지한 원문 변경 · {{ formatDate(entry.createdAt) }}</span>
+            </span>
             <span class="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100">
               상세 보기 <UIcon name="i-tabler-arrow-up-right" class="size-4" />
             </span>
@@ -513,7 +547,16 @@ async function retryActiveLog() {
               </div>
 
               <div class="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
-                <span>{{ selectedTranslation.nickname }}</span>
+                <span class="flex items-center gap-1">
+                  <NuxtLink v-if="getTranslationHandle(selectedTranslation)"
+                    :to="getUserPath(getTranslationHandle(selectedTranslation))"
+                    class="hover:underline underline-offset-2"
+                    :class="hasUserRoleIcon(selectedTranslation.actorRole) ? '-mt-0.5' : ''" @click.stop>
+                    {{ formatHandle(getTranslationHandle(selectedTranslation)) }}
+                  </NuxtLink>
+                  <span v-else>알 수 없는 사용자</span>
+                  <AppUserRoleIcon :role="selectedTranslation.actorRole" icon-class="size-4" />
+                </span>
                 <span>{{ formatDate(selectedTranslation.createdAt) }}</span>
                 <span v-if="selectedTranslation.reviewedAt">검토 {{ formatDate(selectedTranslation.reviewedAt) }}</span>
               </div>
@@ -542,8 +585,12 @@ async function retryActiveLog() {
                 </UBadge>
               </div>
 
-              <div class="mt-4 text-sm text-muted">
-                Bot이 감지한 원문 변경 · {{ formatDate(selectedSource.createdAt) }}
+              <div class="mt-4 flex items-center gap-1 text-sm text-muted">
+                <NuxtLink :to="getUserPath(BOT_HANDLE)" class="-mt-0.5 hover:underline underline-offset-2" @click.stop>
+                  {{ formatHandle(BOT_HANDLE) }}
+                </NuxtLink>
+                <AppUserRoleIcon role="bot" />
+                <span>이 감지한 원문 변경 · {{ formatDate(selectedSource.createdAt) }}</span>
               </div>
 
               <div class="mt-6 flex flex-col gap-4">

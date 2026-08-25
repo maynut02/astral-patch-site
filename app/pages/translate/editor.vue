@@ -55,6 +55,26 @@ interface EditorDictionarySearchField {
   text: string
 }
 
+function normalizeHandle(value: string | null | undefined): string {
+  return value?.trim().replace(/^@+/, '') ?? ''
+}
+
+function getUserPath(handle: string): string {
+  return `/@${encodeURIComponent(handle)}`
+}
+
+function formatHandle(handle: string): string {
+  return `@${handle}`
+}
+
+function getDictionaryOwnerHandle(dictionary: EditorDictionary): string {
+  return normalizeHandle(dictionary.ownerHandle)
+}
+
+function getDictionaryCreatorHandle(entry: EditorDictionaryEntry): string {
+  return normalizeHandle(entry.creatorHandle)
+}
+
 interface SidebarListRow {
   key: string
   label: string
@@ -84,6 +104,7 @@ definePageMeta({
 })
 
 const isSidebarOpen = ref(true)
+const isMobileSidebarOpen = ref(false)
 const activeSidebarMenu = ref<SidebarMenu>('list')
 const page = ref(1)
 const pageInput = ref('1')
@@ -693,6 +714,7 @@ async function runDictionarySearch(): Promise<void> {
 async function openDictionarySearchItem(item: EditorItem): Promise<void> {
   const key = `${item.category}_${item.unitKey}`
   dictionarySelection.value = null
+  isMobileSidebarOpen.value = false
   selectFirstItemOnNextLoad.value = true
   scrollAfterLoad.value = true
 
@@ -792,7 +814,7 @@ function runDictionaryEntrySearch(): void {
 function openCreateDictionary(): void {
   if (!loggedIn.value) {
     toast.add({
-      id: 'loginplz',
+      id: 'editor-dictionary-login-required',
       title: '로그인이 필요한 기능입니다.',
       color: 'warning',
       icon: 'i-tabler-user-key',
@@ -936,6 +958,10 @@ function selectDictionaryReference(reference: AstralReference): void {
   dictionarySelection.value = reference
   activeSidebarMenu.value = 'dictionary'
   isSidebarOpen.value = true
+
+  if (import.meta.client && window.matchMedia('(max-width: 1023px)').matches) {
+    isMobileSidebarOpen.value = true
+  }
 }
 
 async function editDictionaryItem(): Promise<void> {
@@ -947,6 +973,7 @@ async function editDictionaryItem(): Promise<void> {
 
   const key = `${item.category}_${item.unitKey}`
   dictionarySelection.value = null
+  isMobileSidebarOpen.value = false
   selectFirstItemOnNextLoad.value = true
   scrollAfterLoad.value = true
 
@@ -1395,6 +1422,7 @@ async function saveCurrentPage(): Promise<void> {
 
   if (!loggedIn.value) {
     toast.add({
+      id: 'editor-save-login-required',
       title: '로그인이 필요합니다.',
       description: '번역을 저장하려면 로그인해 주세요.',
       color: 'warning',
@@ -1405,6 +1433,7 @@ async function saveCurrentPage(): Promise<void> {
 
   if (entries.some(({ draft }) => !draft.text.trim())) {
     toast.add({
+      id: 'editor-save-empty-translation',
       title: '번역을 저장할 수 없습니다.',
       description: '번역 내용이 비어 있는 항목을 먼저 입력해 주세요.',
       color: 'warning',
@@ -1477,6 +1506,7 @@ async function saveCurrentPage(): Promise<void> {
 
     if (failedCount) {
       toast.add({
+        id: 'editor-save-partial',
         title: `${savedCount}개 항목을 저장했습니다.`,
         description: `${failedCount}개 항목은 저장하지 못했습니다. 임시저장 상태로 남아 있습니다.`,
         color: 'warning',
@@ -1484,6 +1514,7 @@ async function saveCurrentPage(): Promise<void> {
       })
     } else {
       toast.add({
+        id: 'editor-save-success',
         title: `${savedCount}개 항목을 저장했습니다.`,
         color: 'success',
         progress: false
@@ -1545,12 +1576,14 @@ async function copySelectedItemLink(): Promise<void> {
 
     await navigator.clipboard.writeText(url)
     toast.add({
+      id: 'editor-share-link-copied',
       title: '항목 링크를 복사했습니다.',
       color: 'success',
       progress: false
     })
   } catch {
     toast.add({
+      id: 'editor-share-link-copy-failed',
       title: '항목 링크를 복사하지 못했습니다.',
       description: '브라우저의 클립보드 권한을 확인해 주세요.',
       color: 'error',
@@ -1576,6 +1609,7 @@ function revertCurrentPageDrafts(): void {
 
   optionsPopoverOpen.value = false
   toast.add({
+    id: 'editor-page-drafts-reset',
     title: `${entries.length}개 항목의 임시저장을 되돌렸습니다.`,
     color: 'neutral',
     progress: false
@@ -1669,15 +1703,16 @@ watch(items, (nextItems) => {
 
 <template>
   <div class="flex h-dvh flex-col overflow-hidden">
-    <header class="flex items-center h-16 px-3 bg-muted border-b border-default shrink-0">
-      <UButton :to="backPath" icon="i-tabler-chevron-left" color="neutral" variant="soft" size="xl" class="mr-4" />
+    <header class="relative z-50 flex h-16 shrink-0 items-center border-b border-default bg-muted px-2 sm:px-3">
+      <UButton :to="backPath" icon="i-tabler-chevron-left" color="neutral" variant="soft" size="lg" class="mr-2 sm:mr-4"
+        :ui="{ leadingIcon: 'size-5 lg:size-6' }" />
 
-      <div class="flex flex-1 flex-col">
-        <div class="flex gap-3">
+      <div class="flex min-w-0 flex-1 flex-col">
+        <div class="flex min-w-0 items-center gap-2 sm:gap-3">
           <h1 class="truncate font-medium" :title="headerTitle">{{ headerTitle }}</h1>
           <!-- 현재 파일/태그 진행도 -->
           <UPopover mode="hover" enable-touch :content="{ side: 'bottom', align: 'center', sideOffset: 8 }">
-            <div class="flex items-center">
+            <div class="hidden items-center sm:flex">
               <div class="w-20 sm:w-28 h-1.5 flex bg-elevated rounded-xl relative overflow-hidden shrink-0"
                 aria-label="현재 번역 진행률" role="img">
                 <div class="absolute inset-0 flex">
@@ -1725,24 +1760,35 @@ watch(items, (nextItems) => {
           </UPopover>
         </div>
 
-        <span class="text-xs text-muted">{{ formatCount(total) }}개 항목</span>
+        <span class="flex items-center gap-1.5 text-xs text-muted">
+          <span>{{ formatCount(total) }}개 항목</span>
+          <span class="font-mono text-[#81C995] sm:hidden">
+            {{ formatPercent(currentProgress.success, currentProgress.total) }}
+          </span>
+        </span>
       </div>
 
-      <div class="flex items-center gap-2">
-        <UButton icon="i-tabler-bell" color="neutral" variant="ghost" size="xl"
-          :ui="{ leadingIcon: 'size-5', base: 'p-2.5' }" />
-        <UButton icon="i-tabler-user" color="neutral" variant="soft" size="xl"
-          :ui="{ leadingIcon: 'size-5', base: 'p-2.5' }" />
+      <div class="ml-2 flex shrink-0 items-center gap-1">
+        <UButton icon="i-tabler-bell" color="neutral" variant="ghost" size="lg"
+          :ui="{ leadingIcon: 'size-5', base: 'p-2 lg:p-2.5' }" class="hidden sm:inline-flex" />
+        <AppUserMenu context="editor" />
+        <UButton :icon="isMobileSidebarOpen ? 'i-tabler-layout-sidebar-right-filled' : 'i-tabler-layout-sidebar-right'"
+          color="neutral" variant="ghost" size="lg" class="lg:hidden"
+          :class="isMobileSidebarOpen ? 'bg-elevated text-default' : 'text-dimmed hover:text-default'"
+          :aria-label="isMobileSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :aria-pressed="isMobileSidebarOpen"
+          @click="isMobileSidebarOpen = !isMobileSidebarOpen" />
       </div>
     </header>
 
     <div class="flex min-h-0 flex-1 overflow-hidden">
-      <main class="flex min-h-0 flex-1 flex-col border-r border-default">
+      <main class="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-default">
         <!-- 툴바 -->
-        <div class="flex gap-2 bg-muted border-b border-default p-2 shrink-0">
-          <div class="flex flex-1 gap-1 shrink-0">
+        <div
+          class="flex shrink-0 flex-wrap gap-1.5 border-b border-default bg-muted p-1.5 sm:gap-2 sm:p-2 md:flex-nowrap">
+          <div class="flex w-full min-w-0 flex-1 gap-1 md:w-auto">
             <UInput v-model="searchInput" size="lg" color="neutral" variant="ghost" placeholder="검색"
-              :ui="{ base: 'px-2', trailing: 'pe-1.5' }" @keydown.enter.prevent="applySearch">
+              class="min-w-0 max-md:flex-1" :ui="{ base: 'px-2', trailing: 'pe-1.5' }"
+              @keydown.enter.prevent="applySearch">
               <template #trailing>
                 <UButton icon="i-tabler-search" color="neutral" variant="link" size="md" aria-label="검색"
                   :disabled="searchInput.trim() === search" @click="applySearch" />
@@ -1810,7 +1856,7 @@ watch(items, (nextItems) => {
             </UPopover>
           </div>
 
-          <div class="flex gap-2 shrink-0">
+          <div class="flex w-full shrink-0 justify-end gap-1 sm:gap-2 md:w-auto">
             <UTooltip :text="currentPageDraftCount ? `현재 페이지 저장 (${currentPageDraftCount}건)` : '저장'"
               :delay-duration="0">
               <UButton icon="i-tabler-device-floppy-filled" color="info" variant="soft" size="lg" :loading="isSaving"
@@ -1823,8 +1869,7 @@ watch(items, (nextItems) => {
             <UTooltip text="AI 번역" :delay-duration="0">
               <UButton icon="i-tabler-sparkles-2" color="neutral" variant="ghost" size="lg" />
             </UTooltip>
-            <UPopover v-model:open="optionsPopoverOpen"
-              :content="{ align: 'end', side: 'bottom', sideOffset: 8 }">
+            <UPopover v-model:open="optionsPopoverOpen" :content="{ align: 'end', side: 'bottom', sideOffset: 8 }">
               <UTooltip text="옵션" :delay-duration="0">
                 <UButton icon="i-tabler-dots-vertical" color="neutral" variant="ghost" size="lg"
                   :class="optionsPopoverOpen ? 'bg-elevated text-default' : ''" aria-label="옵션" />
@@ -1859,7 +1904,7 @@ watch(items, (nextItems) => {
             </div>
           </div>
 
-          <div ref="listContainer" class="flex min-h-0 flex-1 flex-col overflow-y-auto pb-20">
+          <div ref="listContainer" class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-24 lg:pb-20">
             <div class="flex flex-col bg-muted/60">
               <div v-if="activeFilterTags.length" class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1">
                 <div v-for="tag in activeFilterTags" :key="tag.key"
@@ -1870,7 +1915,7 @@ watch(items, (nextItems) => {
                     @click="removeFilterTag(tag.key)" />
                 </div>
               </div>
-              <div class="flex text-xs font-medium text-muted">
+              <div class="hidden text-xs font-medium text-muted lg:flex">
                 <span class="flex flex-1 shrink-0 px-5 py-2">원문</span>
                 <span class="flex flex-1 shrink-0 px-5 py-2">한국어 번역</span>
               </div>
@@ -1882,15 +1927,17 @@ watch(items, (nextItems) => {
               {{ viewFilter === 'changed' ? '변경된 항목이 없습니다.' : '검색 결과가 없습니다.' }}
             </div>
             <template v-else-if="items.length">
-              <article v-for="item in items" :key="item.id" class="flex shrink-0 transition-colors duration-150"
+              <article v-for="item in items" :key="item.id"
+                class="flex shrink-0 flex-col border-b border-default transition-colors duration-150 lg:flex-row lg:border-b-0"
                 :class="selectedItemId === item.id ? 'bg-elevated/70' : 'odd:bg-muted/40'" @click="selectItem(item)">
                 <!-- 원문 -->
-                <div class="flex min-w-0 flex-1 shrink-0">
+                <div class="flex min-w-0 w-full shrink-0 lg:flex-1">
                   <div class="flex shrink-0">
                     <!-- 항목 상태 -->
                     <div class="w-0.5" :class="getItemStatusColor(item)" :title="getItemStatusLabel(item)" />
                   </div>
-                  <div class="flex min-w-0 flex-1 flex-col gap-2 py-2.5 pl-4.5 pr-2">
+                  <div class="flex min-w-0 flex-1 flex-col gap-2 py-3 pl-4.5 pr-3 lg:py-2.5 lg:pr-2">
+                    <span class="text-xs font-medium text-muted lg:hidden">원문</span>
                     <!-- 원문 내용 -->
                     <div v-for="source in visibleSourceLanguageItems" :key="source.key"
                       class="flex flex-col min-w-0 gap-0.5 text-sm">
@@ -1910,24 +1957,27 @@ watch(items, (nextItems) => {
                 </div>
 
                 <!-- 번역 -->
-                <div class="flex min-w-0 flex-1 shrink-0">
+                <div class="relative flex min-w-0 w-full shrink-0 border-t border-default lg:flex-1 lg:border-t-0">
                   <!-- 번역 내용 -->
-                  <UTextarea :model-value="item.ko" color="neutral" variant="none" autoresize placeholder="미번역"
-                    :ui="{ base: 'p-3 pl-5  h-full' }" class="w-full min-w-0" @focus="selectItem(item)"
-                    @update:model-value="handleItemTranslationInput(item, $event)" />
+                  <div class="flex min-w-0 flex-1 flex-col">
+                    <span class="px-4 pt-2.5 text-xs font-medium text-muted lg:hidden">한국어 번역</span>
+                    <UTextarea :model-value="item.ko" color="neutral" variant="none" autoresize placeholder="미번역"
+                      :ui="{ base: 'min-h-24 p-3 pt-1.5 pl-4 pr-10 h-full lg:min-h-0 lg:pt-3 lg:pl-5' }"
+                      class="w-full min-w-0" @focus="selectItem(item)"
+                      @update:model-value="handleItemTranslationInput(item, $event)" />
+                  </div>
 
                   <!-- 변경 상태 -->
-                  <div class="flex shrink-0 p-2 pl-0 text-info">
-                    <UIcon v-if="hasItemDraft(item)" name="i-tabler-switch-2" class="size-4" title="변경됨" />
-                    <div v-else class="size-4" />
-                  </div>
+                  <UIcon v-if="hasItemDraft(item)" name="i-tabler-switch-2"
+                    class="absolute right-2.5 top-2.5 size-4 text-info" title="변경됨" />
                 </div>
               </article>
             </template>
           </div>
 
           <!-- 컨트롤러 -->
-          <div class="flex self-end p-1 bg-elevated/50 backdrop-blur-lg rounded-lg absolute bottom-4 right-4">
+          <div
+            class="absolute bottom-4 left-1/2 flex -translate-x-1/2 self-end rounded-lg bg-elevated/70 p-1 shadow-sm backdrop-blur-lg lg:left-auto lg:right-4 lg:translate-x-0">
             <UPopover v-model:open="pagePopoverOpen" :content="{ align: 'center', side: 'top', sideOffset: 8 }">
               <UButton color="neutral" variant="ghost" size="lg" class="text-muted hover:text-default font-medium">
                 <span>{{ page }}</span>
@@ -1967,11 +2017,12 @@ watch(items, (nextItems) => {
       </main>
 
       <!-- 사이드바 -->
-      <aside class="relative shrink-0 overflow-hidden bg-muted transition-[width] duration-300 ease-in-out"
-        :style="{ width: isSidebarOpen ? 'max(25%, 28rem)' : '4rem' }">
+      <aside class="editor-sidebar shrink-0 overflow-hidden bg-muted"
+        :class="{ 'editor-sidebar--desktop-open': isSidebarOpen, 'editor-sidebar--mobile-open': isMobileSidebarOpen }">
         <!-- 사이드바 내용 -->
-        <section class="absolute inset-y-0 left-0 flex shrink-0 flex-col border-r border-default transition-opacity"
-          :style="{ width: 'calc(max(25vw, 28rem) - 4rem)' }" :class="isSidebarOpen
+        <section
+          class="editor-sidebar-content absolute inset-x-0 bottom-0 top-14 flex shrink-0 flex-col border-t border-default transition-opacity lg:inset-y-0 lg:left-0 lg:right-auto lg:border-r lg:border-t-0"
+          :class="isSidebarOpen || isMobileSidebarOpen
             ? 'opacity-100 duration-500 ease-out'
             : 'pointer-events-none opacity-0 duration-150 ease-in'">
           <!-- 사이드바 헤더 -->
@@ -1981,15 +2032,15 @@ watch(items, (nextItems) => {
           </div>
 
           <template v-if="activeSidebarMenu === 'list'">
-            <div class="flex shrink-0 gap-3 border-b border-default p-3">
+            <div class="flex shrink-0 flex-col gap-3 border-b border-default p-3 sm:flex-row">
               <!-- 목록 옵션 -->
               <UTabs v-model="sidebarListMode" :content="false"
                 :items="[{ label: '파일', value: 'category' }, { label: '버전', value: 'version' }]" color="neutral"
                 size="xs" :ui="{ trigger: 'px-3', list: 'bg-elevated/50' }" class="w-fit" />
 
               <!-- 파일/버전 검색 -->
-              <UInput v-model="sidebarListSearch" icon="i-tabler-search" color="neutral" variant="soft" class="w-full"
-                :placeholder="sidebarListMode === 'category' ? '파일 검색' : '버전 검색'"
+              <UInput v-model="sidebarListSearch" icon="i-tabler-search" color="neutral" variant="soft"
+                class="w-full min-w-0" :placeholder="sidebarListMode === 'category' ? '파일 검색' : '버전 검색'"
                 :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }">
                 <template v-if="sidebarListSearch.length" #trailing>
                   <UButton color="neutral" variant="link" size="sm" icon="i-tabler-x" aria-label="검색어 지우기"
@@ -2013,7 +2064,7 @@ watch(items, (nextItems) => {
                 <NuxtLink to="/translate/editor"
                   class="flex min-w-0 items-center gap-2 border-b border-default px-4 py-2.5 text-sm transition-colors"
                   :class="isAllMode ? 'bg-elevated text-default' : 'text-muted hover:bg-elevated hover:text-default'"
-                  title="전체 번역">
+                  title="전체 번역" @click="isMobileSidebarOpen = false">
                   <UIcon name="i-tabler-language" class="size-4 shrink-0" />
                   <span class="min-w-0 flex-1 truncate">전체 번역</span>
                   <span class="shrink-0 font-mono text-xs text-[#81C995]">
@@ -2029,7 +2080,7 @@ watch(items, (nextItems) => {
                 <NuxtLink v-for="row in sidebarListRows" :key="row.key" :to="row.path"
                   class="flex min-w-0 items-center gap-2 border-b border-default px-4 py-2.5 text-sm transition-colors"
                   :class="isActiveSidebarRow(row) ? 'bg-elevated text-default' : 'text-muted hover:bg-elevated hover:text-default'"
-                  :title="row.label">
+                  :title="row.label" @click="isMobileSidebarOpen = false">
                   <UIcon :name="row.mode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
                     class="size-4 shrink-0" />
                   <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
@@ -2145,10 +2196,19 @@ watch(items, (nextItems) => {
                         aria-label="용어집 목록으로 돌아가기" @click="selectedDictionaryId = null" />
                       <div class="min-w-0 flex-1">
                         <p class="truncate text-sm font-medium">{{ selectedDictionary.name }}</p>
-                        <p class="truncate text-xs text-dimmed">
-                          {{ selectedDictionary.visibility === 'public' ? '공개 용어집' : '비공개 용어집' }} ·
-                          {{ selectedDictionary.ownerNickname }}
-                        </p>
+                        <div class="flex min-w-0 items-center gap-1 text-xs text-dimmed">
+                          <span class="shrink-0">
+                            {{ selectedDictionary.visibility === 'public' ? '공개 용어집' : '비공개 용어집' }} ·
+                          </span>
+                          <NuxtLink v-if="getDictionaryOwnerHandle(selectedDictionary)"
+                            :to="getUserPath(getDictionaryOwnerHandle(selectedDictionary))"
+                            class="truncate hover:underline underline-offset-2"
+                            :class="hasUserRoleIcon(selectedDictionary.ownerRole) ? '-mt-0.5' : ''" @click.stop>
+                            {{ formatHandle(getDictionaryOwnerHandle(selectedDictionary)) }}
+                          </NuxtLink>
+                          <span v-else class="truncate">알 수 없는 사용자</span>
+                          <AppUserRoleIcon :role="selectedDictionary.ownerRole" icon-class="size-3" />
+                        </div>
                       </div>
                       <UButton v-if="selectedDictionary.canEdit" icon="i-tabler-plus" color="neutral" variant="soft"
                         size="sm" aria-label="용어 추가" @click="openCreateDictionaryEntry" />
@@ -2201,7 +2261,16 @@ watch(items, (nextItems) => {
                           </div>
                           <p v-if="entry.note" class="whitespace-pre-wrap wrap-break-word text-xs text-muted">{{
                             entry.note }}</p>
-                          <p class="text-[10px] text-dimmed">{{ entry.creatorNickname }}</p>
+                          <div class="flex items-center gap-1 text-[10px] text-dimmed">
+                            <NuxtLink v-if="getDictionaryCreatorHandle(entry)"
+                              :to="getUserPath(getDictionaryCreatorHandle(entry))"
+                              class="hover:underline underline-offset-2"
+                              :class="hasUserRoleIcon(entry.creatorRole) ? '-mt-0.5' : ''" @click.stop>
+                              {{ formatHandle(getDictionaryCreatorHandle(entry)) }}
+                            </NuxtLink>
+                            <span v-else>알 수 없는 사용자</span>
+                            <AppUserRoleIcon :role="entry.creatorRole" icon-class="size-3" />
+                          </div>
                         </article>
                       </div>
                     </div>
@@ -2230,9 +2299,11 @@ watch(items, (nextItems) => {
                         <p class="mt-2">등록된 용어집이 없습니다.</p>
                       </div>
                       <nav v-else class="flex flex-col">
-                        <button v-for="dictionary in dictionaries" :key="dictionary.id" type="button"
+                        <div v-for="dictionary in dictionaries" :key="dictionary.id" role="button" tabindex="0"
                           class="flex min-w-0 items-start gap-3 border-b border-default px-4 py-3 text-left transition-colors hover:bg-elevated/70"
-                          @click="selectDictionary(dictionary.id)">
+                          @click="selectDictionary(dictionary.id)"
+                          @keydown.enter.prevent="selectDictionary(dictionary.id)"
+                          @keydown.space.prevent="selectDictionary(dictionary.id)">
                           <UIcon :name="dictionary.visibility === 'public' ? 'i-tabler-book-2' : 'i-tabler-lock'"
                             class="mt-0.5 size-4 shrink-0 text-dimmed" />
                           <span class="min-w-0 flex-1">
@@ -2240,11 +2311,19 @@ watch(items, (nextItems) => {
                             <span v-if="dictionary.description" class="mt-0.5 block truncate text-xs text-muted">
                               {{ dictionary.description }}
                             </span>
-                            <span class="mt-1 block text-[10px] text-dimmed">
-                              {{ dictionary.ownerNickname }} · {{ formatCount(dictionary.entryCount) }}개 용어
+                            <span class="mt-1 flex items-center gap-1 text-[10px] text-dimmed">
+                              <NuxtLink v-if="getDictionaryOwnerHandle(dictionary)"
+                                :to="getUserPath(getDictionaryOwnerHandle(dictionary))"
+                                class="hover:underline underline-offset-2"
+                                :class="hasUserRoleIcon(dictionary.ownerRole) ? '-mt-0.5' : ''" @click.stop>
+                                {{ formatHandle(getDictionaryOwnerHandle(dictionary)) }}
+                              </NuxtLink>
+                              <span v-else>알 수 없는 사용자</span>
+                              <AppUserRoleIcon :role="dictionary.ownerRole" icon-class="size-3" />
+                              <span>· {{ formatCount(dictionary.entryCount) }}개 용어</span>
                             </span>
                           </span>
-                        </button>
+                        </div>
                       </nav>
                     </div>
                   </template>
@@ -2441,26 +2520,71 @@ watch(items, (nextItems) => {
         </section>
 
         <!-- 사이드바 네비게이션 -->
-        <nav class="absolute inset-y-0 right-0 z-20 flex w-16 shrink-0 flex-col gap-2 bg-muted p-3">
-          <div class="flex flex-1 flex-col gap-2">
+        <nav
+          class="absolute inset-x-0 top-0 z-20 flex h-14 shrink-0 gap-2 bg-muted p-2.5 lg:inset-y-0 lg:left-auto lg:right-0 lg:h-auto lg:w-16 lg:flex-col lg:p-3">
+          <div class="flex min-w-0 flex-1 gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
             <UTooltip v-for="menu in sidebarMenuItems" :key="menu.key" :text="menu.label" :delay-duration="0"
               :content="{ side: 'left' }">
-              <UButton :icon="menu.icon" color="neutral" variant="ghost" size="xl"
+              <UButton :icon="menu.icon" color="neutral" variant="ghost" size="lg"
+                :ui="{ leadingIcon: 'size-5 lg:size-6' }"
                 :class="activeSidebarMenu === menu.key ? 'bg-elevated text-default' : 'text-dimmed hover:text-default'"
                 :aria-label="menu.label" :aria-current="activeSidebarMenu === menu.key ? 'page' : undefined"
                 @click="selectSidebarMenu(menu.key)" />
             </UTooltip>
           </div>
 
-          <UTooltip :text="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :delay-duration="0" :content="{ side: 'left' }">
-            <UButton :icon="isSidebarOpen ? 'i-tabler-layout-sidebar-right-filled' : 'i-tabler-layout-sidebar-right'"
-              color="neutral" variant="ghost" size="xl"
-              :class="isSidebarOpen ? 'text-default' : 'text-dimmed hover:text-default'"
-              :aria-label="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :aria-pressed="isSidebarOpen"
-              @click="isSidebarOpen = !isSidebarOpen" />
-          </UTooltip>
+          <UButton icon="i-tabler-x" color="neutral" variant="ghost" size="lg" class="text-dimmed lg:hidden"
+            aria-label="사이드바 닫기" @click="isMobileSidebarOpen = false" />
+
+          <div class="hidden lg:block">
+            <UTooltip :text="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :delay-duration="0" :content="{ side: 'left' }">
+              <UButton :icon="isSidebarOpen ? 'i-tabler-layout-sidebar-right-filled' : 'i-tabler-layout-sidebar-right'"
+                color="neutral" variant="ghost" size="xl"
+                :class="isSidebarOpen ? 'text-default' : 'text-dimmed hover:text-default'"
+                :aria-label="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :aria-pressed="isSidebarOpen"
+                @click="isSidebarOpen = !isSidebarOpen" />
+            </UTooltip>
+          </div>
         </nav>
       </aside>
     </div>
   </div>
 </template>
+
+<style scoped>
+.editor-sidebar {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  width: 100%;
+  transform: translateX(100%);
+  transition: transform 300ms ease-in-out;
+}
+
+.editor-sidebar--mobile-open {
+  transform: translateX(0);
+}
+
+.editor-sidebar-content {
+  width: 100%;
+}
+
+@media (min-width: 64rem) {
+  .editor-sidebar {
+    position: relative;
+    inset: auto;
+    z-index: auto;
+    width: 4rem;
+    transform: none;
+    transition: width 300ms ease-in-out;
+  }
+
+  .editor-sidebar--desktop-open {
+    width: max(25%, 28rem);
+  }
+
+  .editor-sidebar-content {
+    width: calc(max(25vw, 28rem) - 4rem);
+  }
+}
+</style>

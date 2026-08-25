@@ -9,13 +9,13 @@ export default defineNuxtRouteMiddleware(async (to) => {
     return
   }
 
-  const hasProfile = Boolean(user.value?.handle && user.value?.nickname)
+  const hasProfile = Boolean(user.value?.handle)
 
-  if (!hasProfile && to.path !== '/profile/setup') {
-    return navigateTo('/profile/setup')
+  if (!hasProfile && to.path !== '/setup') {
+    return navigateTo('/setup')
   }
 
-  if (hasProfile && to.path === '/profile/setup') {
+  if (hasProfile && to.path === '/setup') {
     return navigateTo('/')
   }
 })

@@ -10,25 +10,26 @@ import type {
   EditorDictionaryVisibility,
   EditorDictionariesResponse
 } from '../../shared/types/editor-dictionary'
+import { resolveEditorRole, type EditorRole } from '../../shared/types/editor'
 
 export const EDITOR_DICTIONARY_PAGE_SIZE = 50
 
 export interface EditorDictionaryViewer {
   id: string
-  role: 'admin' | 'user'
+  role: EditorRole
 }
 
 export function getEditorDictionaryViewer(user: { id?: unknown, role?: unknown } | null | undefined): EditorDictionaryViewer {
   return {
     id: typeof user?.id === 'string' ? user.id : '',
-    role: user?.role === 'admin' ? 'admin' : 'user'
+    role: resolveEditorRole(user)
   }
 }
 
 interface DictionaryRow {
   id: string
   ownerId: string
-  ownerNickname: string
+  ownerRole: EditorRole
   ownerHandle: string | null
   name: string
   description: string
@@ -45,7 +46,7 @@ interface DictionaryEntryRow {
   translation: string
   note: string
   createdBy: string
-  creatorNickname: string
+  creatorRole: EditorRole
   creatorHandle: string | null
   createdAt: string
   updatedAt: string
@@ -224,10 +225,6 @@ function toEntry(row: DictionaryEntryRow): EditorDictionaryEntry {
   return row
 }
 
-function canViewDictionary(row: { ownerId: string, visibility: EditorDictionaryVisibility }, viewer: EditorDictionaryViewer): boolean {
-  return viewer.role === 'admin' || row.visibility === 'public' || row.ownerId === viewer.id
-}
-
 async function findDictionary(
   database: DatabaseClient,
   dictionaryId: string,
@@ -237,8 +234,8 @@ async function findDictionary(
     SELECT
       d.id,
       d.owner_id AS "ownerId",
-      COALESCE(NULLIF(owner.nickname, ''), NULLIF(owner.name, ''), owner.email) AS "ownerNickname",
-      owner.handle AS "ownerHandle",
+      owner."role" AS "ownerRole",
+      NULLIF(BTRIM(owner.handle), '') AS "ownerHandle",
       d.name,
       d.description,
       d.visibility,
@@ -254,7 +251,7 @@ async function findDictionary(
         OR d.visibility = 'public'
         OR d.owner_id = ${viewer.id}
       )
-    GROUP BY d.id, owner.nickname, owner.name, owner.email, owner.handle
+    GROUP BY d.id, owner."role", owner.handle
   `
 
   return row ? toDictionary(row, viewer) : null
@@ -293,8 +290,8 @@ export async function getEditorDictionaries(viewer: EditorDictionaryViewer): Pro
     SELECT
       d.id,
       d.owner_id AS "ownerId",
-      COALESCE(NULLIF(owner.nickname, ''), NULLIF(owner.name, ''), owner.email) AS "ownerNickname",
-      owner.handle AS "ownerHandle",
+      owner."role" AS "ownerRole",
+      NULLIF(BTRIM(owner.handle), '') AS "ownerHandle",
       d.name,
       d.description,
       d.visibility,
@@ -307,7 +304,7 @@ export async function getEditorDictionaries(viewer: EditorDictionaryViewer): Pro
     WHERE ${viewer.role === 'admin'}
       OR d.visibility = 'public'
       OR d.owner_id = ${viewer.id}
-    GROUP BY d.id, owner.nickname, owner.name, owner.email, owner.handle
+    GROUP BY d.id, owner."role", owner.handle
     ORDER BY d.updated_at DESC, d.id DESC
   `
 
@@ -412,8 +409,8 @@ export async function getEditorDictionaryEntries(
         e.translation,
         e.note,
         e.created_by AS "createdBy",
-        COALESCE(NULLIF(creator.nickname, ''), NULLIF(creator.name, ''), creator.email) AS "creatorNickname",
-        creator.handle AS "creatorHandle",
+        creator."role" AS "creatorRole",
+        NULLIF(BTRIM(creator.handle), '') AS "creatorHandle",
         e.created_at AS "createdAt",
         e.updated_at AS "updatedAt"
       FROM editor_dictionary_entries e
@@ -445,8 +442,8 @@ async function findEntry(database: DatabaseClient, dictionaryId: string, entryId
       e.translation,
       e.note,
       e.created_by AS "createdBy",
-      COALESCE(NULLIF(creator.nickname, ''), NULLIF(creator.name, ''), creator.email) AS "creatorNickname",
-      creator.handle AS "creatorHandle",
+      creator."role" AS "creatorRole",
+      NULLIF(BTRIM(creator.handle), '') AS "creatorHandle",
       e.created_at AS "createdAt",
       e.updated_at AS "updatedAt"
     FROM editor_dictionary_entries e

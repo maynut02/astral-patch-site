@@ -2,6 +2,7 @@ import { getRouterParam, readBody } from 'h3'
 import {
   parseEditorDictionaryEntryId,
   parseEditorDictionaryId,
+  getEditorDictionaryViewer,
   updateEditorDictionaryEntry
 } from '../../../../../utils/editor-dictionary'
 
@@ -11,8 +12,5 @@ export default defineEventHandler(async (event) => {
   const entryId = parseEditorDictionaryEntryId(getRouterParam(event, 'entryId'))
   const body = await readBody<{ sourceText?: unknown, translation?: unknown, note?: unknown }>(event)
 
-  return updateEditorDictionaryEntry({
-    id: session.user.id,
-    role: session.user.role
-  }, dictionaryId, entryId, body || {})
+  return updateEditorDictionaryEntry(getEditorDictionaryViewer(session.user), dictionaryId, entryId, body || {})
 })

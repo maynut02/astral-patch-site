@@ -1,9 +1,9 @@
 import { getRouterParam, readBody } from 'h3'
-import { requireAdminSession } from '../../../utils/auth-user'
-import { parseEditorChangeId, reviewEditorChange } from '../../../utils/editor-approval'
+import { assertEditorReviewPermission, parseEditorChangeId, reviewEditorChange } from '../../../utils/editor-approval'
 
 export default defineEventHandler(async (event) => {
-  const session = await requireAdminSession(event)
+  const session = await requireUserSession(event)
+  assertEditorReviewPermission(session.user)
   const changeId = parseEditorChangeId(getRouterParam(event, 'id'))
 
   const body = await readBody<{ action?: unknown }>(event)

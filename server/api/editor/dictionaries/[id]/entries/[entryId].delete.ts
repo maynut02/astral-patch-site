@@ -1,6 +1,7 @@
 import { getRouterParam } from 'h3'
 import {
   deleteEditorDictionaryEntry,
+  getEditorDictionaryViewer,
   parseEditorDictionaryEntryId,
   parseEditorDictionaryId
 } from '../../../../../utils/editor-dictionary'
@@ -10,10 +11,7 @@ export default defineEventHandler(async (event) => {
   const dictionaryId = parseEditorDictionaryId(getRouterParam(event, 'id'))
   const entryId = parseEditorDictionaryEntryId(getRouterParam(event, 'entryId'))
 
-  await deleteEditorDictionaryEntry({
-    id: session.user.id,
-    role: session.user.role
-  }, dictionaryId, entryId)
+  await deleteEditorDictionaryEntry(getEditorDictionaryViewer(session.user), dictionaryId, entryId)
 
   return { ok: true }
 })

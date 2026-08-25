@@ -1,29 +1,47 @@
 <script setup lang="ts">
+definePageMeta({
+  middleware: async () => {
+    const { ready, loggedIn, fetch } = useUserSession()
+
+    if (!ready.value) {
+      await fetch()
+    }
+
+    if (!loggedIn.value) {
+      return navigateTo('/')
+    }
+  }
+})
+
+useHead({ title: '초기 설정' })
+
 const { user, fetch: fetchSession } = useUserSession()
 
 const state = reactive({
-  handle: user.value?.handle ?? '',
-  nickname: user.value?.nickname ?? ''
+  handle: ''
 })
 
 const errors = reactive({
-  handle: '',
-  nickname: ''
+  handle: ''
 })
 
 const submitting = ref(false)
 const serverError = ref('')
 
+watch(user, (value) => {
+  if (value) {
+    state.handle = value.handle ?? ''
+  }
+}, { immediate: true })
+
 function textLength(value: string): number {
   return Array.from(value).length
 }
 
-function validate() {
+function validate(): boolean {
   errors.handle = ''
-  errors.nickname = ''
 
   const handle = state.handle.trim()
-  const nickname = state.nickname.trim()
 
   if (!handle) {
     errors.handle = '핸들을 입력해 주세요.'
@@ -33,13 +51,7 @@ function validate() {
     errors.handle = '핸들은 20자 이내로 입력해 주세요.'
   }
 
-  if (!nickname) {
-    errors.nickname = '닉네임을 입력해 주세요.'
-  } else if (textLength(nickname) > 20) {
-    errors.nickname = '닉네임은 20자 이내로 입력해 주세요.'
-  }
-
-  return !errors.handle && !errors.nickname
+  return !errors.handle
 }
 
 function getErrorStatus(error: unknown): number | undefined {
@@ -58,7 +70,7 @@ function getErrorStatus(error: unknown): number | undefined {
   return undefined
 }
 
-async function submit() {
+async function submit(): Promise<void> {
   serverError.value = ''
 
   if (!validate()) {
@@ -71,13 +83,12 @@ async function submit() {
     await $fetch('/api/profile', {
       method: 'PATCH',
       body: {
-        handle: state.handle.trim(),
-        nickname: state.nickname.trim()
+        handle: state.handle.trim()
       }
     })
 
     await fetchSession()
-    await navigateTo('/')
+    await navigateTo('/auth/continue', { external: true })
   } catch (error: unknown) {
     if (getErrorStatus(error) === 409) {
       errors.handle = '이미 사용 중인 핸들이에요.'
@@ -91,30 +102,22 @@ async function submit() {
 </script>
 
 <template>
-  <div class="flex flex-1 items-center justify-center px-4 py-12">
-    <UPageCard class="w-full max-w-md" title="프로필 설정" :ui="{ root: 'rounded-xl' }">
+  <div class="flex flex-1 items-center justify-center p-3 md:p-5">
+    <UPageCard variant="naked" class="w-full max-w-md" title="프로필 설정">
       <UForm :state="state" class="space-y-5" @submit="submit">
         <UFormField name="handle" label="핸들" description="영문과 숫자만 사용할 수 있습니다." required
           :error="errors.handle || undefined">
           <UInput v-model="state.handle" maxlength="20" placeholder="이곳에 핸들을 입력" autocomplete="username" color="neutral"
-            class="w-full" :ui="{ base: 'rounded-xl px-3 pl-7' }">
+            class="w-full" :ui="{ base: 'px-3 pl-7' }">
             <template #leading>
-              <p class="mb-0.5">
-                @
-              </p>
+              <span class="text-muted">@</span>
             </template>
           </UInput>
         </UFormField>
 
-        <UFormField name="nickname" label="닉네임" description="최대 20자까지 입력할 수 있습니다." required
-          :error="errors.nickname || undefined">
-          <UInput v-model="state.nickname" maxlength="20" placeholder="이곳에 닉네임을 입력" autocomplete="nickname"
-            color="neutral" class="w-full" :ui="{ base: 'rounded-xl px-3' }" />
-        </UFormField>
-
         <UAlert v-if="serverError" color="error" variant="soft" :description="serverError" />
 
-        <UButton type="submit" block :loading="submitting" color="neutral" variant="soft" class="rounded-xl">
+        <UButton type="submit" block :loading="submitting" color="neutral" variant="soft" class="py-2">
           저장하고 시작하기
         </UButton>
       </UForm>

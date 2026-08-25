@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
-import { BOT_GOOGLE_SUB, BOT_NICKNAME, ensureBotWorkMigration } from './auth-user'
+import { BOT_GOOGLE_SUB, BOT_HANDLE, ensureBotWorkMigration } from './auth-user'
 import { getDatabase } from './database'
 import type { EditorChangeStatus, EditorHistoryResponse, EditorSaveResponse } from '../../shared/types/editor'
 
@@ -172,9 +172,11 @@ export async function getEditorHistory(unitId: string): Promise<EditorHistoryRes
         concat('source:', sc.revision_id::text, ':', sc.unit_id::text) AS id,
         'source_changed'::text AS action,
         'automation'::text AS "actorType",
-        COALESCE(NULLIF(BTRIM(bot.nickname), ''), ${BOT_NICKNAME}) AS nickname,
+        'bot'::text AS "actorRole",
+        COALESCE(NULLIF(BTRIM(bot.handle), ''), ${BOT_HANDLE}) AS handle,
         NULL::text AS status,
-        NULL::text AS "reviewerNickname",
+        NULL::text AS "reviewerRole",
+        NULL::text AS "reviewerHandle",
         NULL AS "reviewedAt",
         sc.change_type::text AS "changeType",
         src.game_version AS version,
@@ -203,12 +205,20 @@ export async function getEditorHistory(unitId: string): Promise<EditorHistoryRes
         concat(tc.id::text, ':translation') AS id,
         'translation_changed'::text AS action,
         CASE
-          WHEN creator.user_type = 'bot' THEN 'automation'::text
+          WHEN creator."role" = 'bot' THEN 'automation'::text
           ELSE 'user'::text
         END AS "actorType",
-        COALESCE(NULLIF(BTRIM(creator.nickname), ''), '알 수 없는 사용자') AS nickname,
+        CASE
+          WHEN creator."role" IN ('admin', 'verified', 'user', 'bot') THEN creator."role"
+          ELSE 'user'::text
+        END AS "actorRole",
+        NULLIF(BTRIM(creator.handle), '') AS handle,
         tc.status::text AS status,
-        NULLIF(BTRIM(reviewer.nickname), '') AS "reviewerNickname",
+        CASE
+          WHEN reviewer."role" IN ('admin', 'verified', 'user', 'bot') THEN reviewer."role"
+          ELSE NULL::text
+        END AS "reviewerRole",
+        NULLIF(BTRIM(reviewer.handle), '') AS "reviewerHandle",
         tc.reviewed_at AS "reviewedAt",
         NULL::text AS "changeType",
         NULL::text AS version,

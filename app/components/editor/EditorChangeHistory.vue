@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type {
-  EditorChangeStatus,
   EditorDiffMode,
   EditorHistoryAction,
   EditorHistoryEntry,
@@ -49,14 +48,7 @@ const status = ref<'idle' | 'pending' | 'success' | 'error'>('idle')
 const reviewingId = ref<string | null>(null)
 const reviewError = ref('')
 const { user } = useUserSession()
-const canReview = computed(() => user.value?.role === 'admin')
-
-const statusLabels: Record<EditorChangeStatus, string> = {
-  pending: '승인 대기',
-  approved: '승인됨',
-  rejected: '반려됨',
-  superseded: '대체됨'
-}
+const canReview = computed(() => ['admin', 'verified'].includes(String(user.value?.role ?? '')))
 
 const actionMeta: Record<EditorHistoryAction, HistoryActionMeta> = {
   source_changed: {
@@ -98,38 +90,34 @@ const sourceFields: Record<EditorLanguage, {
 
 const allSourceLanguages: EditorLanguage[] = ['cnS', 'en', 'jp', 'cnT']
 
+function normalizeHandle(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/^@+/, '') : ''
+}
+
+function getUserPath(handle: string): string {
+  return `/@${encodeURIComponent(handle)}`
+}
+
+function formatHandle(handle: string): string {
+  return `@${handle}`
+}
+
+function getActorHandle(entry: EditorHistoryEntry): string {
+  const handle = normalizeHandle(entry.handle)
+
+  return handle || (entry.actorType === 'automation' ? 'Bot' : '')
+}
+
+function getReviewerHandle(entry: EditorHistoryEntry): string {
+  return normalizeHandle(entry.reviewerHandle)
+}
+
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul',
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(new Date(value))
-}
-
-function getStatusLabel(entry: EditorHistoryEntry): string {
-  if (entry.action !== 'translation_changed') {
-    return ''
-  }
-
-  return entry.status === 'pending' || entry.status === 'approved' || entry.status === 'rejected'
-    ? statusLabels[entry.status]
-    : ''
-}
-
-function getStatusColor(entry: EditorHistoryEntry): HistoryColor {
-  if (entry.action === 'source_changed') {
-    return 'warning'
-  }
-
-  if (entry.status === 'approved') {
-    return 'success'
-  }
-
-  if (entry.status === 'rejected') {
-    return 'error'
-  }
-
-  return actionMeta[entry.action].color
 }
 
 function getActionLabel(entry: EditorHistoryEntry): string {
@@ -354,8 +342,13 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
             </span>
 
             <div class="flex items-center gap-1 text-xs text-muted">
-              <UIcon :name="entry.actorType === 'automation' ? 'i-tabler-robot' : 'i-tabler-user'" class="size-3" />
-              <span class="">{{ entry.nickname }}</span>
+              <NuxtLink v-if="getActorHandle(entry)" :to="getUserPath(getActorHandle(entry))"
+                class="hover:underline underline-offset-2"
+                :class="hasUserRoleIcon(entry.actorRole) ? '-mt-0.5' : ''" @click.stop>
+                {{ formatHandle(getActorHandle(entry)) }}
+              </NuxtLink>
+              <span v-else>알 수 없는 사용자</span>
+              <AppUserRoleIcon :role="entry.actorRole" icon-class="size-3.5" />
             </div>
           </div>
 
@@ -442,8 +435,13 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                   </span>
 
                   <div class="flex items-center gap-1 text-muted">
-                    <UIcon name="i-tabler-user" class="size-3" />
-                    <span class="">{{ entry.reviewerNickname || '알 수 없는 사용자' }}</span>
+                    <NuxtLink v-if="getReviewerHandle(entry)" :to="getUserPath(getReviewerHandle(entry))"
+                      class="hover:underline underline-offset-2"
+                      :class="hasUserRoleIcon(entry.reviewerRole) ? '-mt-0.5' : ''" @click.stop>
+                      {{ formatHandle(getReviewerHandle(entry)) }}
+                    </NuxtLink>
+                    <span v-else>알 수 없는 사용자</span>
+                    <AppUserRoleIcon :role="entry.reviewerRole" icon-class="size-3.5" />
                   </div>
                 </div>
                 <time class="text-muted" :datetime="entry.reviewedAt">{{ formatDate(entry.reviewedAt) }}</time>
