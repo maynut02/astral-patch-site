@@ -51,16 +51,15 @@ export default defineAppConfig({
       warning: 'i-tabler-alert-triangle'
     },
 
-    select: {
-      slots: {
-        group: 'px-0',
-        item: 'px-3! before:rounded-none'
-      }
-    },
-
     button: {
       slots: {
         base: 'disabled:cursor-not-allowed! aria-disabled:cursor-not-allowed! disabled:opacity-50 aria-disabled:opacity-50'
+      }
+    },
+
+    modal: {
+      slots: {
+        overlay: 'backdrop-blur'
       }
     }
   }

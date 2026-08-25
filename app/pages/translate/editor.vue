@@ -1,5 +1,21 @@
 <script setup lang="ts">
-import type { EditorDiffMode, EditorItem, EditorItemsResponse, EditorLanguage } from '#shared/types/editor'
+import type {
+  EditorDiffMode,
+  EditorItem,
+  EditorItemStatusFilter,
+  EditorItemsResponse,
+  EditorLanguage,
+  EditorSaveResponse,
+  EditorSearchMatch,
+  EditorSearchType
+} from '#shared/types/editor'
+import type {
+  EditorDictionariesResponse,
+  EditorDictionary,
+  EditorDictionaryEntriesResponse,
+  EditorDictionaryEntry,
+  EditorDictionaryVisibility
+} from '#shared/types/editor-dictionary'
 import {
   EDITOR_PROGRESS_STATUSES,
   type EditorOverviewResponse,
@@ -10,12 +26,33 @@ import {
 
 type EditorItemStatus = EditorProgressStatus
 type EditorListMode = 'category' | 'version'
+type EditorViewFilter = 'all' | EditorItemStatusFilter | 'changed'
+type EditorDictionaryPanelView = 'search' | 'collections'
+type EditorDictionaryRequestStatus = 'idle' | 'pending' | 'success' | 'error'
 type SidebarMenu = 'list' | 'changes' | 'history' | 'comments' | 'dictionary' | 'settings'
+type AstralLinkType = 'Buff' | 'Card'
+
+interface AstralReference {
+  type: AstralLinkType
+  id: string
+  originalText: string
+}
 
 interface SidebarMenuItem {
   key: SidebarMenu
   label: string
   icon: string
+}
+
+interface EditorViewFilterOption {
+  key: EditorViewFilter
+  label: string
+  disabled?: boolean
+}
+
+interface EditorDictionarySearchField {
+  label: string
+  text: string
 }
 
 interface SidebarListRow {
@@ -34,6 +71,14 @@ interface PersistedItemState {
   approvedForCurrentSource: EditorItem['approvedForCurrentSource']
 }
 
+interface EditorDraft {
+  category: string
+  unitKey: string
+  text: string
+  updatedAt: number
+  itemId?: string
+}
+
 definePageMeta({
   layout: false
 })
@@ -43,21 +88,98 @@ const activeSidebarMenu = ref<SidebarMenu>('list')
 const page = ref(1)
 const pageInput = ref('1')
 const pagePopoverOpen = ref(false)
+const optionsPopoverOpen = ref(false)
 const searchInput = ref('')
 const search = ref('')
+const searchFilterOpen = ref(false)
+const searchType = ref<EditorSearchType>('all')
+const searchMatch = ref<EditorSearchMatch>('contains')
+const viewFilterOpen = ref(false)
+const viewFilter = ref<EditorViewFilter>('all')
 const sidebarListMode = ref<EditorListMode>('category')
 const sidebarListSearch = ref('')
 const selectedItemId = ref<string | null>(null)
+const dictionarySelection = ref<AstralReference | null>(null)
+const dictionaryItem = ref<EditorItem | null>(null)
+const dictionaryStatus = ref<'idle' | 'pending' | 'success' | 'error'>('idle')
+const dictionaryError = ref('')
+const dictionaryRequestId = ref(0)
+const dictionaryPanelView = ref<EditorDictionaryPanelView>('search')
+const dictionarySearchInput = ref('')
+const dictionarySearch = ref('')
+const dictionarySearchData = ref<EditorItemsResponse>({
+  items: [],
+  total: 0,
+  page: 1,
+  pageSize: 50,
+  totalPages: 1
+})
+const expandedDictionarySearchItemId = ref<string | null>(null)
+const dictionarySearchStatus = ref<EditorDictionaryRequestStatus>('idle')
+const dictionarySearchError = ref('')
+const dictionarySearchRequestId = ref(0)
+const dictionaries = ref<EditorDictionary[]>([])
+const dictionariesStatus = ref<EditorDictionaryRequestStatus>('idle')
+const dictionariesError = ref('')
+const dictionariesRequestId = ref(0)
+const selectedDictionaryId = ref<string | null>(null)
+const dictionaryEntries = ref<EditorDictionaryEntriesResponse>({
+  entries: [],
+  total: 0,
+  page: 1,
+  pageSize: 50,
+  totalPages: 1
+})
+const dictionaryEntriesStatus = ref<EditorDictionaryRequestStatus>('idle')
+const dictionaryEntriesError = ref('')
+const dictionaryEntriesSearchInput = ref('')
+const dictionaryEntriesSearch = ref('')
+const dictionaryEntriesRequestId = ref(0)
+const dictionaryModalOpen = ref(false)
+const dictionaryEntryModalOpen = ref(false)
+const dictionaryModalSaving = ref(false)
+const dictionaryEntryModalSaving = ref(false)
+const dictionaryModalError = ref('')
+const dictionaryEntryModalError = ref('')
+const dictionaryForm = reactive<{
+  name: string
+  description: string
+  visibility: EditorDictionaryVisibility
+}>({
+  name: '',
+  description: '',
+  visibility: 'private'
+})
+const dictionaryEntryForm = reactive({
+  sourceText: '',
+  translation: '',
+  note: ''
+})
 const historyReloadKey = ref(0)
 const selectFirstItemOnNextLoad = ref(false)
 const listContainer = ref<HTMLElement | null>(null)
 const scrollAfterLoad = ref(false)
+const drafts = ref<Record<string, EditorDraft>>({})
+const draftsReady = ref(false)
+const isSaving = ref(false)
 
 const route = useRoute()
 const router = useRouter()
+const { loggedIn } = useUserSession()
+const toast = useToast()
+
+const draftStorageKey = 'astral-editor-translation-drafts-v1'
 
 const defaultItems: EditorItemsResponse = {
   items: [],
+  total: 0,
+  page: 1,
+  pageSize: 50,
+  totalPages: 1
+}
+
+const defaultDictionaryEntries: EditorDictionaryEntriesResponse = {
+  entries: [],
   total: 0,
   page: 1,
   pageSize: 50,
@@ -93,6 +215,53 @@ const displayLanguageOptions: { key: EditorLanguage, label: string }[] = [
   { key: 'jp', label: '일본어' },
   { key: 'cnT', label: '중국어 번체' }
 ]
+
+const searchTypeOptions: { key: EditorSearchType, label: string }[] = [
+  { key: 'all', label: '전체' },
+  { key: 'content', label: '원문+번역 내용' },
+  { key: 'source', label: '원문 내용' },
+  { key: 'translation', label: '번역 내용' },
+  { key: 'key', label: 'Key' }
+]
+
+const searchMatchOptions: { key: EditorSearchMatch, label: string }[] = [
+  { key: 'contains', label: '포함' },
+  { key: 'exact', label: '정확히 일치' }
+]
+
+const viewFilterOptions: EditorViewFilterOption[] = [
+  { key: 'all', label: '전체' },
+  { key: 'changed', label: '변경된 항목만' },
+  { key: 'untranslated', label: '미번역 항목만' },
+  { key: 'pending', label: '승인 대기 항목만' },
+  { key: 'warning', label: '확인 필요 항목만' }
+]
+
+const dictionaryPanelTabs = [
+  { label: '검색', value: 'search' as EditorDictionaryPanelView },
+  { label: '용어집', value: 'collections' as EditorDictionaryPanelView }
+]
+
+const searchTypeLabels: Record<EditorSearchType, string> = {
+  all: '전체',
+  content: '원문+번역 내용',
+  source: '원문 내용',
+  translation: '번역 내용',
+  key: 'Key'
+}
+
+const searchMatchLabels: Record<EditorSearchMatch, string> = {
+  contains: '포함',
+  exact: '정확히 일치'
+}
+
+const viewFilterLabels: Record<EditorViewFilter, string> = {
+  all: '전체',
+  changed: '변경된 항목만',
+  untranslated: '미번역 항목만',
+  pending: '승인 대기 항목만',
+  warning: '확인 필요 항목만'
+}
 
 const displayLanguages = ref<EditorLanguage[]>(displayLanguageOptions.map(language => language.key))
 const languageStorageKey = 'astral-editor-languages'
@@ -160,6 +329,124 @@ function getQueryString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+function isEditorSearchType(value: unknown): value is EditorSearchType {
+  return value === 'all' || value === 'content' || value === 'key' || value === 'source' || value === 'translation'
+}
+
+function isEditorSearchMatch(value: unknown): value is EditorSearchMatch {
+  return value === 'contains' || value === 'exact'
+}
+
+function getDraftKey(category: string, unitKey: string): string {
+  return `${category}::${unitKey}`
+}
+
+function getItemDraftKey(item: Pick<EditorItem, 'category' | 'unitKey'>): string {
+  return getDraftKey(item.category, item.unitKey)
+}
+
+function hasItemDraft(item: Pick<EditorItem, 'category' | 'unitKey'>): boolean {
+  return Boolean(drafts.value[getItemDraftKey(item)])
+}
+
+function isEditorDraft(value: unknown): value is EditorDraft {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const draft = value as Record<string, unknown>
+
+  return typeof draft.category === 'string'
+    && typeof draft.unitKey === 'string'
+    && typeof draft.text === 'string'
+    && typeof draft.updatedAt === 'number'
+    && (draft.itemId === undefined || typeof draft.itemId === 'string')
+}
+
+function loadDrafts(): void {
+  if (!import.meta.client) {
+    draftsReady.value = true
+    return
+  }
+
+  const storedDrafts = window.localStorage.getItem(draftStorageKey)
+
+  if (storedDrafts) {
+    try {
+      const parsed: unknown = JSON.parse(storedDrafts)
+
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const nextDrafts: Record<string, EditorDraft> = {}
+
+        for (const [key, value] of Object.entries(parsed)) {
+          if (isEditorDraft(value)) {
+            nextDrafts[key] = {
+              category: value.category,
+              unitKey: value.unitKey,
+              text: value.text,
+              updatedAt: value.updatedAt,
+              ...(value.itemId ? { itemId: value.itemId } : {})
+            }
+          }
+        }
+
+        drafts.value = nextDrafts
+      }
+    } catch {
+      // 저장된 임시저장 데이터가 손상된 경우 비어 있는 상태로 시작한다.
+      drafts.value = {}
+    }
+  }
+
+  draftsReady.value = true
+}
+
+function persistDrafts(): void {
+  if (!import.meta.client || !draftsReady.value) {
+    return
+  }
+
+  if (Object.keys(drafts.value).length === 0) {
+    window.localStorage.removeItem(draftStorageKey)
+    return
+  }
+
+  window.localStorage.setItem(draftStorageKey, JSON.stringify(drafts.value))
+}
+
+function applyDraftsToItems(itemsToApply: EditorItem[]): void {
+  if (!draftsReady.value) {
+    return
+  }
+
+  let nextDrafts = drafts.value
+  let draftsChanged = false
+
+  for (const item of itemsToApply) {
+    const key = getItemDraftKey(item)
+    const draft = nextDrafts[key]
+
+    if (draft) {
+      if (!draft.itemId) {
+        nextDrafts = {
+          ...nextDrafts,
+          [key]: {
+            ...draft,
+            itemId: item.id
+          }
+        }
+        draftsChanged = true
+      }
+
+      item.ko = draft.text
+    }
+  }
+
+  if (draftsChanged) {
+    drafts.value = nextDrafts
+  }
+}
+
 onMounted(() => {
   const storedLanguages = window.localStorage.getItem(languageStorageKey)
   const storedDiffMode = window.localStorage.getItem(diffModeStorageKey)
@@ -182,6 +469,8 @@ onMounted(() => {
 
   languagePreferencesReady.value = true
   diffModePreferencesReady.value = true
+  loadDrafts()
+  applyDraftsToItems(items.value)
 })
 
 watch(displayLanguages, (languages) => {
@@ -200,9 +489,17 @@ watch(diffMode, (mode) => {
   window.localStorage.setItem(diffModeStorageKey, mode)
 })
 
+watch(drafts, () => {
+  persistDrafts()
+}, { deep: true })
+
 const initialSearch = getQueryString(route.query.search).trim()
 searchInput.value = initialSearch
 search.value = initialSearch
+const initialSearchType = getQueryString(route.query.searchType).trim().toLowerCase()
+searchType.value = isEditorSearchType(initialSearchType) ? initialSearchType : 'all'
+const initialSearchMatch = getQueryString(route.query.match).trim().toLowerCase()
+searchMatch.value = isEditorSearchMatch(initialSearchMatch) ? initialSearchMatch : 'contains'
 
 function normalizeVersion(value: string): string {
   return value.trim().replace(/^v/i, '')
@@ -218,6 +515,23 @@ const revision = computed(() => normalizeRevision(getQueryString(route.query.rev
 const isFileMode = computed(() => Boolean(category.value))
 const isTagMode = computed(() => Boolean(version.value && revision.value))
 const isAllMode = computed(() => !isFileMode.value && !isTagMode.value)
+const changedItemIds = computed(() => {
+  const ids = new Set<string>()
+
+  for (const draft of Object.values(drafts.value)) {
+    if (!draft.itemId) {
+      continue
+    }
+
+    if (isFileMode.value && draft.category !== category.value) {
+      continue
+    }
+
+    ids.add(draft.itemId)
+  }
+
+  return [...ids]
+})
 
 watch([isFileMode, isTagMode], ([fileMode, tagMode]) => {
   if (fileMode) {
@@ -239,9 +553,30 @@ const headerTitle = computed(() => {
   return '전체 번역'
 })
 
-const activeFilterTags = computed(() => search.value
-  ? [{ key: 'search', label: '검색', value: search.value }]
-  : [])
+const activeFilterTags = computed(() => {
+  const tags: { key: string, label: string, value: string }[] = []
+
+  if (search.value) {
+    tags.push({ key: 'search', label: '검색', value: search.value })
+  }
+
+  if (searchType.value !== 'all') {
+    tags.push({ key: 'searchType', label: '검색 범위', value: searchTypeLabels[searchType.value] })
+  }
+
+  if (searchMatch.value === 'exact') {
+    tags.push({ key: 'searchMatch', label: '검색 옵션', value: searchMatchLabels[searchMatch.value] })
+  }
+
+  if (viewFilter.value !== 'all') {
+    tags.push({ key: 'viewFilter', label: '보기 설정', value: viewFilterLabels[viewFilter.value] })
+  }
+
+  return tags
+})
+
+const isSearchFilterActive = computed(() => searchType.value !== 'all' || searchMatch.value !== 'contains')
+const isViewFilterActive = computed(() => viewFilter.value !== 'all')
 
 const backPath = computed(() => {
   const query = new URLSearchParams()
@@ -271,9 +606,380 @@ function getVersionPath(versionValue: string, revisionValue: string): string {
   return `/translate/editor?version=${encodeURIComponent(normalizeVersion(versionValue))}&revision=${encodeURIComponent(normalizeRevision(revisionValue))}`
 }
 
+const dictionaryNamespace = computed(() => dictionarySelection.value?.type === 'Buff' ? 'STRBuff' : 'STRCard')
+const dictionaryKey = computed(() => dictionarySelection.value
+  ? `${dictionaryNamespace.value}_${dictionarySelection.value.id}`
+  : '')
+
+const dictionarySearchItems = computed(() => dictionarySearchData.value.items)
+const selectedDictionary = computed(() => dictionaries.value.find(dictionary =>
+  dictionary.id === selectedDictionaryId.value
+) ?? null)
+const dictionaryEntryItems = computed(() => dictionaryEntries.value.entries)
+
+function getDictionarySearchFields(item: EditorItem): EditorDictionarySearchField[] {
+  const query = dictionarySearch.value.trim().toLocaleLowerCase()
+  const fields: EditorDictionarySearchField[] = [
+    { label: 'Key', text: `${item.category}_${item.unitKey}` },
+    ...sourceLanguageItems.map(language => ({
+      label: language.label,
+      text: item[language.key]
+    })),
+    { label: '한국어', text: item.ko }
+  ]
+
+  return fields.filter(field => field.text && field.text.toLocaleLowerCase().includes(query))
+}
+
+function getDictionaryExpandedFields(item: EditorItem): EditorDictionarySearchField[] {
+  return [
+    ...sourceLanguageItems.map(language => ({
+      label: language.label,
+      text: item[language.key]
+    })),
+    { label: '한국어', text: item.ko }
+  ]
+}
+
+function toggleDictionarySearchItem(itemId: string): void {
+  expandedDictionarySearchItemId.value = expandedDictionarySearchItemId.value === itemId
+    ? null
+    : itemId
+}
+
+async function runDictionarySearch(): Promise<void> {
+  const nextSearch = dictionarySearchInput.value.trim()
+  dictionarySearch.value = nextSearch
+  expandedDictionarySearchItemId.value = null
+  const requestId = ++dictionarySearchRequestId.value
+
+  if (!nextSearch) {
+    dictionarySearchData.value = { ...defaultItems }
+    dictionarySearchStatus.value = 'idle'
+    dictionarySearchError.value = ''
+    return
+  }
+
+  dictionarySearchStatus.value = 'pending'
+  dictionarySearchError.value = ''
+
+  try {
+    const response = await $fetch<EditorItemsResponse>('/api/editor/items', {
+      query: {
+        page: 1,
+        search: nextSearch,
+        searchType: 'all',
+        match: 'contains'
+      }
+    })
+
+    if (requestId !== dictionarySearchRequestId.value) {
+      return
+    }
+
+    dictionarySearchData.value = response
+    dictionarySearchStatus.value = 'success'
+  } catch {
+    if (requestId !== dictionarySearchRequestId.value) {
+      return
+    }
+
+    dictionarySearchData.value = { ...defaultItems }
+    dictionarySearchStatus.value = 'error'
+    dictionarySearchError.value = '파일 검색 결과를 불러오지 못했습니다.'
+  }
+}
+
+async function openDictionarySearchItem(item: EditorItem): Promise<void> {
+  const key = `${item.category}_${item.unitKey}`
+  dictionarySelection.value = null
+  selectFirstItemOnNextLoad.value = true
+  scrollAfterLoad.value = true
+
+  await router.push({
+    query: {
+      file: item.category,
+      search: key,
+      searchType: 'key',
+      match: 'exact',
+      page: '1'
+    }
+  })
+}
+
+async function loadDictionaries(): Promise<void> {
+  const requestId = ++dictionariesRequestId.value
+  dictionariesStatus.value = 'pending'
+  dictionariesError.value = ''
+
+  try {
+    const response = await $fetch<EditorDictionariesResponse>('/api/editor/dictionaries')
+
+    if (requestId !== dictionariesRequestId.value) {
+      return
+    }
+
+    dictionaries.value = response.dictionaries
+    dictionariesStatus.value = 'success'
+
+    if (selectedDictionaryId.value && !response.dictionaries.some(dictionary => dictionary.id === selectedDictionaryId.value)) {
+      selectedDictionaryId.value = null
+      dictionaryEntries.value = { ...defaultDictionaryEntries }
+    }
+  } catch {
+    if (requestId !== dictionariesRequestId.value) {
+      return
+    }
+
+    dictionariesStatus.value = 'error'
+    dictionariesError.value = '용어집 목록을 불러오지 못했습니다.'
+  }
+}
+
+async function loadDictionaryEntries(): Promise<void> {
+  const dictionaryId = selectedDictionaryId.value
+  const requestId = ++dictionaryEntriesRequestId.value
+
+  if (!dictionaryId) {
+    dictionaryEntries.value = { ...defaultDictionaryEntries }
+    dictionaryEntriesStatus.value = 'idle'
+    dictionaryEntriesError.value = ''
+    return
+  }
+
+  dictionaryEntriesStatus.value = 'pending'
+  dictionaryEntriesError.value = ''
+
+  try {
+    const response = await $fetch<EditorDictionaryEntriesResponse>(
+      `/api/editor/dictionaries/${encodeURIComponent(dictionaryId)}/entries`,
+      {
+        query: {
+          page: 1,
+          search: dictionaryEntriesSearch.value || undefined
+        }
+      }
+    )
+
+    if (requestId !== dictionaryEntriesRequestId.value) {
+      return
+    }
+
+    dictionaryEntries.value = response
+    dictionaryEntriesStatus.value = 'success'
+  } catch {
+    if (requestId !== dictionaryEntriesRequestId.value) {
+      return
+    }
+
+    dictionaryEntriesStatus.value = 'error'
+    dictionaryEntriesError.value = '용어집 항목을 불러오지 못했습니다.'
+  }
+}
+
+function selectDictionary(dictionaryId: string): void {
+  selectedDictionaryId.value = dictionaryId
+  dictionaryEntriesSearchInput.value = ''
+  dictionaryEntriesSearch.value = ''
+  void loadDictionaryEntries()
+}
+
+function runDictionaryEntrySearch(): void {
+  dictionaryEntriesSearch.value = dictionaryEntriesSearchInput.value.trim()
+  void loadDictionaryEntries()
+}
+
+function openCreateDictionary(): void {
+  if (!loggedIn.value) {
+    toast.add({
+      id: 'loginplz',
+      title: '로그인이 필요한 기능입니다.',
+      color: 'warning',
+      icon: 'i-tabler-user-key',
+      progress: false
+    })
+    return
+  }
+
+  dictionaryForm.name = ''
+  dictionaryForm.description = ''
+  dictionaryForm.visibility = 'private'
+  dictionaryModalError.value = ''
+  dictionaryModalOpen.value = true
+}
+
+async function createDictionary(): Promise<void> {
+  const name = dictionaryForm.name.trim()
+
+  if (!name) {
+    dictionaryModalError.value = '용어집 이름을 입력하세요.'
+    return
+  }
+
+  dictionaryModalSaving.value = true
+  dictionaryModalError.value = ''
+
+  try {
+    const dictionary = await $fetch<EditorDictionary>('/api/editor/dictionaries', {
+      method: 'POST',
+      body: {
+        name,
+        description: dictionaryForm.description,
+        visibility: dictionaryForm.visibility
+      }
+    })
+
+    dictionaries.value = [dictionary, ...dictionaries.value]
+    dictionariesStatus.value = 'success'
+    selectedDictionaryId.value = dictionary.id
+    dictionaryEntries.value = { ...defaultDictionaryEntries }
+    dictionaryEntriesStatus.value = 'idle'
+    dictionaryModalOpen.value = false
+  } catch {
+    dictionaryModalError.value = '용어집을 만들지 못했습니다.'
+  } finally {
+    dictionaryModalSaving.value = false
+  }
+}
+
+function openCreateDictionaryEntry(): void {
+  dictionaryEntryForm.sourceText = ''
+  dictionaryEntryForm.translation = ''
+  dictionaryEntryForm.note = ''
+  dictionaryEntryModalError.value = ''
+  dictionaryEntryModalOpen.value = true
+}
+
+async function createDictionaryEntry(): Promise<void> {
+  const dictionaryId = selectedDictionaryId.value
+
+  if (!dictionaryId) {
+    return
+  }
+
+  if (!dictionaryEntryForm.sourceText.trim() || !dictionaryEntryForm.translation.trim()) {
+    dictionaryEntryModalError.value = '원문과 번역을 모두 입력하세요.'
+    return
+  }
+
+  dictionaryEntryModalSaving.value = true
+  dictionaryEntryModalError.value = ''
+
+  try {
+    await $fetch<EditorDictionaryEntry>(
+      `/api/editor/dictionaries/${encodeURIComponent(dictionaryId)}/entries`,
+      {
+        method: 'POST',
+        body: {
+          sourceText: dictionaryEntryForm.sourceText,
+          translation: dictionaryEntryForm.translation,
+          note: dictionaryEntryForm.note
+        }
+      }
+    )
+
+    dictionaryEntryModalOpen.value = false
+    await loadDictionaryEntries()
+    await loadDictionaries()
+  } catch {
+    dictionaryEntryModalError.value = '용어집 항목을 추가하지 못했습니다.'
+  } finally {
+    dictionaryEntryModalSaving.value = false
+  }
+}
+
+async function loadDictionaryItem(selection: AstralReference | null): Promise<void> {
+  const requestId = ++dictionaryRequestId.value
+
+  if (!selection) {
+    dictionaryItem.value = null
+    dictionaryStatus.value = 'idle'
+    dictionaryError.value = ''
+    return
+  }
+
+  dictionaryItem.value = null
+  dictionaryStatus.value = 'pending'
+  dictionaryError.value = ''
+
+  try {
+    const response = await $fetch<EditorItemsResponse>('/api/editor/items', {
+      query: {
+        page: 1,
+        category: dictionaryNamespace.value,
+        search: dictionaryKey.value,
+        searchType: 'key',
+        match: 'exact'
+      }
+    })
+
+    if (requestId !== dictionaryRequestId.value) {
+      return
+    }
+
+    dictionaryItem.value = response.items.find(item =>
+      item.category === dictionaryNamespace.value
+      && item.unitKey === selection.id
+    ) ?? null
+    dictionaryStatus.value = 'success'
+  } catch {
+    if (requestId !== dictionaryRequestId.value) {
+      return
+    }
+
+    dictionaryStatus.value = 'error'
+    dictionaryError.value = '사전 항목을 불러오지 못했습니다.'
+  }
+}
+
+function selectDictionaryReference(reference: AstralReference): void {
+  dictionarySelection.value = reference
+  activeSidebarMenu.value = 'dictionary'
+  isSidebarOpen.value = true
+}
+
+async function editDictionaryItem(): Promise<void> {
+  const item = dictionaryItem.value
+
+  if (!item) {
+    return
+  }
+
+  const key = `${item.category}_${item.unitKey}`
+  dictionarySelection.value = null
+  selectFirstItemOnNextLoad.value = true
+  scrollAfterLoad.value = true
+
+  await router.push({
+    query: {
+      file: item.category,
+      search: key,
+      searchType: 'key',
+      match: 'exact',
+      page: '1'
+    }
+  })
+}
+
+watch(dictionarySelection, (selection) => {
+  void loadDictionaryItem(selection)
+})
+
+watch(dictionaryPanelView, (view) => {
+  if (view === 'collections' && dictionariesStatus.value !== 'pending') {
+    void loadDictionaries()
+  }
+})
+
 const requestQuery = computed(() => ({
   page: page.value,
   search: search.value || undefined,
+  searchType: searchType.value,
+  match: searchMatch.value === 'exact' ? 'exact' : undefined,
+  status: viewFilter.value !== 'all' && viewFilter.value !== 'changed' ? viewFilter.value : undefined,
+  itemIds: viewFilter.value === 'changed'
+    ? changedItemIds.value.join(',') || '__none__'
+    : undefined,
   category: isFileMode.value ? category.value : undefined,
   version: isTagMode.value ? version.value : undefined,
   revision: isTagMode.value ? revision.value : undefined
@@ -314,6 +1020,16 @@ const overview = computed(() => overviewData.value ?? defaultOverview)
 const isSidebarListLoading = computed(() => overviewStatus.value === 'idle' || overviewStatus.value === 'pending')
 const sidebarListHasError = computed(() => Boolean(overviewError.value))
 const persistedItemStates = ref<Record<string, PersistedItemState>>({})
+const currentPageDrafts = computed(() => items.value.flatMap((item) => {
+  const draft = drafts.value[getItemDraftKey(item)]
+
+  return draft ? [{ item, draft }] : []
+}))
+const currentPageDraftCount = computed(() => currentPageDrafts.value.length)
+const selectedItemHasDraft = computed(() => {
+  const item = items.value.find(item => item.id === selectedItemId.value)
+  return item ? hasItemDraft(item) : false
+})
 const selectedItemStatus = computed(() => {
   const item = items.value.find(item => item.id === selectedItemId.value)
   return item ? getItemStatus(item) : null
@@ -378,6 +1094,7 @@ watch(itemsData, (data) => {
   }
 
   persistedItemStates.value = nextStates
+  applyDraftsToItems(data.items)
 }, { immediate: true })
 
 const currentProgress = computed<EditorProgressSummary>(() => {
@@ -480,18 +1197,89 @@ async function applySearch(): Promise<void> {
   await router.push({
     query: {
       ...route.query,
-      search: nextSearch || undefined
+      search: nextSearch || undefined,
+      searchType: nextSearch && searchType.value !== 'all' ? searchType.value : undefined,
+      match: searchMatch.value === 'exact' ? 'exact' : undefined
     }
   })
 }
 
+async function selectSearchType(nextSearchType: EditorSearchType): Promise<void> {
+  searchType.value = nextSearchType
+  searchFilterOpen.value = false
+  page.value = 1
+  scrollAfterLoad.value = true
+
+  await router.push({
+    query: {
+      ...route.query,
+      searchType: nextSearchType === 'all' ? undefined : nextSearchType,
+      page: '1'
+    }
+  })
+}
+
+async function selectSearchMatch(nextSearchMatch: EditorSearchMatch): Promise<void> {
+  searchMatch.value = nextSearchMatch
+  searchFilterOpen.value = false
+  page.value = 1
+  scrollAfterLoad.value = true
+
+  await router.push({
+    query: {
+      ...route.query,
+      match: nextSearchMatch === 'exact' ? 'exact' : undefined,
+      page: '1'
+    }
+  })
+}
+
+function selectViewFilter(nextViewFilter: EditorViewFilter): void {
+  viewFilter.value = nextViewFilter
+  viewFilterOpen.value = false
+  page.value = 1
+  selectFirstItemOnNextLoad.value = true
+  scrollAfterLoad.value = true
+}
+
 function removeFilterTag(key: string): void {
-  if (key !== 'search') {
+  if (key === 'search') {
+    searchInput.value = ''
+    void applySearch()
     return
   }
 
-  searchInput.value = ''
-  void applySearch()
+  if (key === 'searchType') {
+    searchType.value = 'all'
+    page.value = 1
+    scrollAfterLoad.value = true
+    void router.push({
+      query: {
+        ...route.query,
+        searchType: undefined,
+        page: '1'
+      }
+    })
+    return
+  }
+
+  if (key === 'searchMatch') {
+    searchMatch.value = 'contains'
+    page.value = 1
+    scrollAfterLoad.value = true
+    void router.push({
+      query: {
+        ...route.query,
+        match: undefined,
+        page: '1'
+      }
+    })
+    return
+  }
+
+  if (key === 'viewFilter') {
+    selectViewFilter('all')
+  }
 }
 
 function getItemStatus(item: EditorItem): EditorItemStatus {
@@ -546,13 +1334,261 @@ function selectItem(item: EditorItem): void {
   selectedItemId.value = item.id
 }
 
+function removeDraftByKey(key: string): void {
+  removeDraftsByKeys([key])
+}
+
+function removeDraftsByKeys(keys: string[]): void {
+  const keysToRemove = new Set(keys)
+  const nextDrafts = { ...drafts.value }
+  let removed = false
+
+  for (const key of keysToRemove) {
+    if (nextDrafts[key]) {
+      delete nextDrafts[key]
+      removed = true
+    }
+  }
+
+  if (removed) {
+    drafts.value = nextDrafts
+  }
+}
+
+function updateItemDraft(item: EditorItem): void {
+  if (!draftsReady.value) {
+    return
+  }
+
+  const key = getItemDraftKey(item)
+  const persistedState = persistedItemStates.value[item.id]
+
+  if (persistedState && item.ko === persistedState.ko) {
+    removeDraftByKey(key)
+    return
+  }
+
+  drafts.value = {
+    ...drafts.value,
+    [key]: {
+      category: item.category,
+      unitKey: item.unitKey,
+      text: item.ko,
+      updatedAt: Date.now(),
+      itemId: item.id
+    }
+  }
+}
+
+function handleItemTranslationInput(item: EditorItem, value: string): void {
+  item.ko = value
+  selectItem(item)
+  updateItemDraft(item)
+}
+
+async function saveCurrentPage(): Promise<void> {
+  const entries = currentPageDrafts.value
+
+  if (isSaving.value || !entries.length) {
+    return
+  }
+
+  if (!loggedIn.value) {
+    toast.add({
+      title: '로그인이 필요합니다.',
+      description: '번역을 저장하려면 로그인해 주세요.',
+      color: 'warning',
+      progress: false
+    })
+    return
+  }
+
+  if (entries.some(({ draft }) => !draft.text.trim())) {
+    toast.add({
+      title: '번역을 저장할 수 없습니다.',
+      description: '번역 내용이 비어 있는 항목을 먼저 입력해 주세요.',
+      color: 'warning',
+      progress: false
+    })
+    return
+  }
+
+  isSaving.value = true
+
+  try {
+    const results = await Promise.allSettled(entries.map(async ({ item, draft }) => {
+      const response = await $fetch<EditorSaveResponse>(`/api/editor/items/${encodeURIComponent(item.id)}`, {
+        method: 'PATCH',
+        body: {
+          text: draft.text
+        }
+      })
+
+      return { item, draft, response }
+    }))
+
+    let savedCount = 0
+    let failedCount = 0
+    const savedDraftKeys: string[] = []
+    const changedItemIds = new Set<string>()
+
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        failedCount += 1
+        continue
+      }
+
+      const { item, draft, response } = result.value
+      const key = getItemDraftKey(item)
+      const currentDraft = drafts.value[key]
+
+      if (currentDraft?.text === draft.text) {
+        savedDraftKeys.push(key)
+      }
+
+      item.ko = response.ko
+      item.pendingStatus = response.status
+
+      if (response.changed) {
+        changedItemIds.add(item.id)
+      }
+
+      const previousState = persistedItemStates.value[item.id]
+      persistedItemStates.value = {
+        ...persistedItemStates.value,
+        [item.id]: {
+          ko: response.ko,
+          pendingStatus: response.status ?? previousState?.pendingStatus ?? null,
+          approvedForCurrentSource: previousState?.approvedForCurrentSource ?? item.approvedForCurrentSource
+        }
+      }
+      savedCount += 1
+    }
+
+    removeDraftsByKeys(savedDraftKeys)
+
+    await Promise.allSettled([refreshItems(), refreshOverview()])
+
+    if (activeSidebarMenu.value === 'history'
+      && selectedItemId.value
+      && changedItemIds.has(selectedItemId.value)) {
+      historyReloadKey.value += 1
+    }
+
+    if (failedCount) {
+      toast.add({
+        title: `${savedCount}개 항목을 저장했습니다.`,
+        description: `${failedCount}개 항목은 저장하지 못했습니다. 임시저장 상태로 남아 있습니다.`,
+        color: 'warning',
+        progress: false
+      })
+    } else {
+      toast.add({
+        title: `${savedCount}개 항목을 저장했습니다.`,
+        color: 'success',
+        progress: false
+      })
+    }
+  } finally {
+    isSaving.value = false
+  }
+}
+
+function revertSelectedItem(): void {
+  const item = items.value.find(item => item.id === selectedItemId.value)
+
+  if (!item) {
+    return
+  }
+
+  const key = getItemDraftKey(item)
+  const draft = drafts.value[key]
+
+  if (!draft) {
+    return
+  }
+
+  const persistedState = persistedItemStates.value[item.id]
+  removeDraftByKey(key)
+  item.ko = persistedState?.ko ?? ''
+}
+
+async function copySelectedItemLink(): Promise<void> {
+  const item = items.value.find(item => item.id === selectedItemId.value)
+
+  if (!item || !import.meta.client) {
+    return
+  }
+
+  const itemKey = `${item.category}_${item.unitKey}`
+  const query: Record<string, string> = {
+    search: itemKey,
+    searchType: 'key',
+    match: 'exact',
+    page: '1'
+  }
+
+  if (isFileMode.value) {
+    query.file = item.category
+  } else if (isTagMode.value) {
+    query.version = version.value
+    query.revision = revision.value
+  }
+
+  const resolved = router.resolve({ path: '/translate/editor', query })
+  const url = new URL(resolved.href, window.location.origin).toString()
+
+  try {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error('Clipboard API is unavailable')
+    }
+
+    await navigator.clipboard.writeText(url)
+    toast.add({
+      title: '항목 링크를 복사했습니다.',
+      color: 'success',
+      progress: false
+    })
+  } catch {
+    toast.add({
+      title: '항목 링크를 복사하지 못했습니다.',
+      description: '브라우저의 클립보드 권한을 확인해 주세요.',
+      color: 'error',
+      progress: false
+    })
+  } finally {
+    optionsPopoverOpen.value = false
+  }
+}
+
+function revertCurrentPageDrafts(): void {
+  const entries = currentPageDrafts.value
+
+  if (!entries.length) {
+    return
+  }
+
+  removeDraftsByKeys(entries.map(({ item }) => getItemDraftKey(item)))
+
+  for (const { item } of entries) {
+    item.ko = persistedItemStates.value[item.id]?.ko ?? ''
+  }
+
+  optionsPopoverOpen.value = false
+  toast.add({
+    title: `${entries.length}개 항목의 임시저장을 되돌렸습니다.`,
+    color: 'neutral',
+    progress: false
+  })
+}
+
 function handleHistoryChanged(): void {
   historyReloadKey.value += 1
   void refreshItems()
   void refreshOverview()
 }
 
-watch([search, category, version, revision], () => {
+watch([search, searchType, searchMatch, viewFilter, category, version, revision], () => {
   selectFirstItemOnNextLoad.value = true
   scrollAfterLoad.value = true
   page.value = 1
@@ -588,6 +1624,24 @@ watch(() => route.query.search, (value) => {
 
   if (search.value !== nextSearch) {
     search.value = nextSearch
+  }
+})
+
+watch(() => route.query.searchType, (value) => {
+  const nextSearchType = getQueryString(value).trim().toLowerCase()
+  const normalizedSearchType = isEditorSearchType(nextSearchType) ? nextSearchType : 'all'
+
+  if (searchType.value !== normalizedSearchType) {
+    searchType.value = normalizedSearchType
+  }
+})
+
+watch(() => route.query.match, (value) => {
+  const nextSearchMatch = getQueryString(value).trim().toLowerCase()
+  const normalizedSearchMatch = isEditorSearchMatch(nextSearchMatch) ? nextSearchMatch : 'contains'
+
+  if (searchMatch.value !== normalizedSearchMatch) {
+    searchMatch.value = normalizedSearchMatch
   }
 })
 
@@ -695,29 +1749,103 @@ watch(items, (nextItems) => {
               </template>
             </UInput>
             <div class="my-1 border-x border-default mx-1" />
-            <UTooltip text="필터" :delay-duration="0">
-              <UButton icon="i-tabler-filter" color="neutral" variant="ghost" size="lg"
-                class="text-dimmed hover:text-default" />
-            </UTooltip>
-            <UTooltip text="변경된 항목" :delay-duration="0">
-              <UButton icon="i-tabler-switch-2" color="neutral" variant="ghost" size="lg"
-                class="text-dimmed hover:text-default" />
-            </UTooltip>
+            <UPopover v-model:open="searchFilterOpen" :content="{ align: 'start', side: 'bottom', sideOffset: 8 }">
+              <UTooltip text="검색 설정" :delay-duration="0">
+                <div class="relative">
+                  <UButton icon="i-tabler-adjustments-horizontal" color="neutral" variant="ghost" size="lg" :class="searchFilterOpen
+                    ? 'bg-elevated text-default'
+                    : isSearchFilterActive ? 'text-default' : 'text-dimmed hover:text-default'" aria-label="검색 설정" />
+                  <span v-if="isSearchFilterActive"
+                    class="pointer-events-none absolute right-1.5 top-1.5 size-1.5 rounded-full bg-info ring-1 ring-muted" />
+                </div>
+              </UTooltip>
+              <template #content>
+                <div class="flex min-w-40 flex-col p-1.5">
+                  <span class="px-2 py-1 text-xs font-medium text-dimmed">검색 범위</span>
+                  <button v-for="option in searchTypeOptions" :key="option.key" type="button"
+                    class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                    @click="void selectSearchType(option.key)">
+                    <UIcon v-if="searchType === option.key" name="i-tabler-check" class="size-4" />
+                    <span v-else class="size-4" />
+                    <span>{{ option.label }}</span>
+                  </button>
+
+                  <div class="mt-2 border-t border-default pt-2">
+                    <span class="px-2 py-1 text-xs font-medium text-dimmed">검색 옵션</span>
+                    <button v-for="option in searchMatchOptions" :key="option.key" type="button"
+                      class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                      @click="void selectSearchMatch(option.key)">
+                      <UIcon v-if="searchMatch === option.key" name="i-tabler-check" class="size-4" />
+                      <span v-else class="size-4" />
+                      <span>{{ option.label }}</span>
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </UPopover>
+
+            <UPopover v-model:open="viewFilterOpen" :content="{ align: 'start', side: 'bottom', sideOffset: 8 }">
+              <UTooltip text="보기 설정" :delay-duration="0">
+                <div class="relative">
+                  <UButton icon="i-tabler-eye-search" color="neutral" variant="ghost" size="lg" :class="viewFilterOpen
+                    ? 'bg-elevated text-default'
+                    : isViewFilterActive ? 'text-default' : 'text-dimmed hover:text-default'" aria-label="보기 설정" />
+                  <span v-if="isViewFilterActive"
+                    class="pointer-events-none absolute right-1.5 top-1.5 size-1.5 rounded-full bg-info ring-1 ring-muted" />
+                </div>
+              </UTooltip>
+              <template #content>
+                <div class="flex min-w-40 flex-col p-1.5">
+                  <span class="px-2 py-1 text-xs font-medium text-dimmed">보기 설정</span>
+                  <button v-for="option in viewFilterOptions" :key="option.key" type="button"
+                    :disabled="option.disabled"
+                    class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
+                    @click="selectViewFilter(option.key)">
+                    <UIcon v-if="viewFilter === option.key" name="i-tabler-check" class="size-4" />
+                    <span v-else class="size-4" />
+                    <span>{{ option.label }}</span>
+                  </button>
+                </div>
+              </template>
+            </UPopover>
           </div>
 
           <div class="flex gap-2 shrink-0">
-            <UTooltip text="저장" :delay-duration="0">
-              <UButton icon="i-tabler-device-floppy-filled" color="info" variant="soft" size="lg" />
+            <UTooltip :text="currentPageDraftCount ? `현재 페이지 저장 (${currentPageDraftCount}건)` : '저장'"
+              :delay-duration="0">
+              <UButton icon="i-tabler-device-floppy-filled" color="info" variant="soft" size="lg" :loading="isSaving"
+                :disabled="!currentPageDraftCount || isSaving" @click="saveCurrentPage" />
             </UTooltip>
             <UTooltip text="변경사항 되돌리기" :delay-duration="0">
-              <UButton icon="i-tabler-arrow-back-up" color="neutral" variant="ghost" size="lg" />
+              <UButton icon="i-tabler-arrow-back-up" color="neutral" variant="ghost" size="lg"
+                :disabled="!selectedItemHasDraft" @click="revertSelectedItem" />
             </UTooltip>
             <UTooltip text="AI 번역" :delay-duration="0">
               <UButton icon="i-tabler-sparkles-2" color="neutral" variant="ghost" size="lg" />
             </UTooltip>
-            <UTooltip text="옵션" :delay-duration="0">
-              <UButton icon="i-tabler-dots-vertical" color="neutral" variant="ghost" size="lg" />
-            </UTooltip>
+            <UPopover v-model:open="optionsPopoverOpen"
+              :content="{ align: 'end', side: 'bottom', sideOffset: 8 }">
+              <UTooltip text="옵션" :delay-duration="0">
+                <UButton icon="i-tabler-dots-vertical" color="neutral" variant="ghost" size="lg"
+                  :class="optionsPopoverOpen ? 'bg-elevated text-default' : ''" aria-label="옵션" />
+              </UTooltip>
+              <template #content>
+                <div class="flex min-w-56 flex-col p-1.5">
+                  <button type="button"
+                    class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
+                    :disabled="!selectedItemId" @click="void copySelectedItemLink()">
+                    <UIcon name="i-tabler-link" class="size-4 shrink-0" />
+                    <span>선택 항목 링크 복사</span>
+                  </button>
+                  <button type="button"
+                    class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
+                    :disabled="!currentPageDraftCount" @click="revertCurrentPageDrafts">
+                    <UIcon name="i-tabler-arrow-back-up" class="size-4 shrink-0" />
+                    <span>현재 페이지 변경사항 되돌리기</span>
+                  </button>
+                </div>
+              </template>
+            </UPopover>
           </div>
         </div>
 
@@ -744,18 +1872,18 @@ watch(items, (nextItems) => {
               </div>
               <div class="flex text-xs font-medium text-muted">
                 <span class="flex flex-1 shrink-0 px-5 py-2">원문</span>
-                <span class="flex flex-1 shrink-0 px-5 py-2">번역</span>
+                <span class="flex flex-1 shrink-0 px-5 py-2">한국어 번역</span>
               </div>
             </div>
             <div v-if="itemsError && !items.length" class="p-5 text-sm text-error">
               항목을 불러오지 못했습니다.
             </div>
             <div v-else-if="!isLoading && !items.length" class="p-5 text-sm text-muted">
-              검색 결과가 없습니다.
+              {{ viewFilter === 'changed' ? '변경된 항목이 없습니다.' : '검색 결과가 없습니다.' }}
             </div>
             <template v-else-if="items.length">
               <article v-for="item in items" :key="item.id" class="flex shrink-0 transition-colors duration-150"
-                :class="selectedItemId === item.id ? 'bg-elevated/70' : 'odd:bg-muted/60'" @click="selectItem(item)">
+                :class="selectedItemId === item.id ? 'bg-elevated/70' : 'odd:bg-muted/40'" @click="selectItem(item)">
                 <!-- 원문 -->
                 <div class="flex min-w-0 flex-1 shrink-0">
                   <div class="flex shrink-0">
@@ -767,7 +1895,11 @@ watch(items, (nextItems) => {
                     <div v-for="source in visibleSourceLanguageItems" :key="source.key"
                       class="flex flex-col min-w-0 gap-0.5 text-sm">
                       <span class="shrink-0 text-[10px] text-dimmed">{{ source.label }}</span>
-                      <p class="min-w-0 whitespace-pre-wrap">{{ item[source.key] || '—' }}</p>
+                      <p class="min-w-0 whitespace-pre-wrap">
+                        <EditorSourceText :text="item[source.key] || null" @select="selectDictionaryReference">
+                          <template #empty>—</template>
+                        </EditorSourceText>
+                      </p>
                     </div>
 
                     <!-- 키 -->
@@ -780,12 +1912,13 @@ watch(items, (nextItems) => {
                 <!-- 번역 -->
                 <div class="flex min-w-0 flex-1 shrink-0">
                   <!-- 번역 내용 -->
-                  <UTextarea v-model="item.ko" color="neutral" variant="none" autoresize placeholder="미번역"
-                    :ui="{ base: 'p-2.5 pl-5  h-full' }" class="w-full min-w-0" @focus="selectItem(item)" />
+                  <UTextarea :model-value="item.ko" color="neutral" variant="none" autoresize placeholder="미번역"
+                    :ui="{ base: 'p-3 pl-5  h-full' }" class="w-full min-w-0" @focus="selectItem(item)"
+                    @update:model-value="handleItemTranslationInput(item, $event)" />
 
                   <!-- 변경 상태 -->
                   <div class="flex shrink-0 p-2 pl-0 text-info">
-                    <UIcon v-if="item.pendingStatus" name="i-tabler-switch-2" class="size-4" title="수정됨" />
+                    <UIcon v-if="hasItemDraft(item)" name="i-tabler-switch-2" class="size-4" title="변경됨" />
                     <div v-else class="size-4" />
                   </div>
                 </div>
@@ -913,6 +2046,351 @@ watch(items, (nextItems) => {
               :item-status-label="selectedItemStatusMeta?.label ?? ''"
               :item-status-color="selectedItemStatusMeta?.textColor ?? 'text-muted'" :diff-mode="diffMode"
               @changed="handleHistoryChanged" />
+          </template>
+
+          <template v-else-if="activeSidebarMenu === 'dictionary'">
+            <div class="flex min-h-0 flex-1 flex-col">
+              <div v-if="!dictionarySelection" class="flex min-h-0 flex-1 flex-col">
+                <div class="shrink-0 p-3 pb-0">
+                  <UTabs v-model="dictionaryPanelView" :content="false" :items="dictionaryPanelTabs" color="neutral"
+                    size="xs" :ui="{ trigger: 'px-3', list: 'bg-elevated/50' }" class="w-fit" />
+                </div>
+
+                <template v-if="dictionaryPanelView === 'search'">
+                  <div class="flex shrink-0 gap-2 border-b border-default p-3">
+                    <UInput v-model="dictionarySearchInput" color="neutral" variant="soft" class="w-full"
+                      placeholder="전체 검색" :ui="{ trailing: 'pe-1' }" @keydown.enter.prevent="runDictionarySearch">
+                      <template #trailing>
+                        <UButton v-if="dictionarySearchInput.length" color="neutral" variant="link" size="sm"
+                          icon="i-tabler-x" aria-label="검색어 지우기" @click="dictionarySearchInput = ''" />
+                        <UButton icon="i-tabler-search" color="neutral" variant="link" size="sm" aria-label="파일 검색"
+                          :disabled="dictionarySearchInput.trim() === dictionarySearch" @click="runDictionarySearch" />
+                      </template>
+                    </UInput>
+                  </div>
+
+                  <div class="min-h-0 flex-1 overflow-y-auto">
+                    <div v-if="dictionarySearchStatus === 'pending'"
+                      class="flex items-center justify-center p-6 text-muted">
+                      <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
+                    </div>
+                    <UAlert v-else-if="dictionarySearchStatus === 'error'" color="error" variant="soft"
+                      :title="dictionarySearchError" class="m-3" />
+                    <div v-else-if="!dictionarySearch"
+                      class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted">
+                      <UIcon name="i-tabler-search" class="size-6 text-dimmed" />
+                      <p class="mt-2">검색어를 입력해 주세요.</p>
+                    </div>
+                    <div v-else-if="!dictionarySearchItems.length"
+                      class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted">
+                      <UIcon name="i-tabler-file-search" class="size-6 text-dimmed" />
+                      <p class="mt-2">검색 결과가 없습니다.</p>
+                    </div>
+                    <div v-else class="flex flex-col">
+                      <div class="border-b border-default px-4 py-2 text-xs text-dimmed">
+                        {{ formatCount(dictionarySearchData.total) }}개 결과
+                      </div>
+                      <article v-for="item in dictionarySearchItems" :key="item.id"
+                        class="border-b border-default hover:bg-elevated/70 transition-colors">
+                        <div class="flex min-w-0 items-start">
+                          <button type="button"
+                            class="flex min-w-0 flex-1 flex-col gap-2 px-4 py-3 text-left transition-colors"
+                            :aria-expanded="expandedDictionarySearchItemId === item.id"
+                            @click="toggleDictionarySearchItem(item.id)">
+                            <div class="flex min-w-0 items-center gap-2">
+                              <UIcon name="i-tabler-file-filled" class="size-4 shrink-0 text-dimmed" />
+                              <span class="min-w-0 flex-1 truncate text-xs font-medium">
+                                <EditorHighlightedText :text="`${item.category}_${item.unitKey}`"
+                                  :query="dictionarySearch" />
+                              </span>
+                              <UIcon
+                                :name="expandedDictionarySearchItemId === item.id ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'"
+                                class="size-4 shrink-0 text-dimmed" />
+                            </div>
+                            <div class="flex flex-col gap-1 pl-6 text-xs text-muted">
+                              <div v-for="field in getDictionarySearchFields(item)" :key="`${item.id}-${field.label}`"
+                                class="flex min-w-0 gap-2">
+                                <span class="w-16 shrink-0 text-[10px] text-dimmed">{{ field.label }}</span>
+                                <span class="min-w-0 flex-1 wrap-break-word">
+                                  <EditorHighlightedText :text="field.text" :query="dictionarySearch" />
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+                        </div>
+                        <div v-if="expandedDictionarySearchItemId === item.id"
+                          class="flex flex-col gap-2 border-t border-default bg-elevated/40 px-4 py-3 relative">
+                          <div v-for="field in getDictionaryExpandedFields(item)"
+                            :key="`${item.id}-expanded-${field.label}`" class="flex min-w-0 gap-3 text-xs">
+                            <span class="w-14 shrink-0 text-[10px] text-dimmed text-right">{{ field.label }}</span>
+                            <span v-if="field.text" class="min-w-0 flex-1 wrap-break-word whitespace-pre-wrap">
+                              <EditorHighlightedText :text="field.text" :query="dictionarySearch" />
+                            </span>
+                            <span v-else class="text-dimmed">—</span>
+                          </div>
+
+                          <UButton icon="i-tabler-arrow-up-right" color="info" variant="ghost" size="xs"
+                            class="absolute top-2 right-2 p-1" aria-label="항목으로 이동"
+                            @click.stop="void openDictionarySearchItem(item)" />
+                        </div>
+                      </article>
+                    </div>
+                  </div>
+                </template>
+
+                <template v-else>
+                  <template v-if="selectedDictionary">
+                    <div class="flex shrink-0 items-start gap-2 border-b border-default p-3">
+                      <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm"
+                        aria-label="용어집 목록으로 돌아가기" @click="selectedDictionaryId = null" />
+                      <div class="min-w-0 flex-1">
+                        <p class="truncate text-sm font-medium">{{ selectedDictionary.name }}</p>
+                        <p class="truncate text-xs text-dimmed">
+                          {{ selectedDictionary.visibility === 'public' ? '공개 용어집' : '비공개 용어집' }} ·
+                          {{ selectedDictionary.ownerNickname }}
+                        </p>
+                      </div>
+                      <UButton v-if="selectedDictionary.canEdit" icon="i-tabler-plus" color="neutral" variant="soft"
+                        size="sm" aria-label="용어 추가" @click="openCreateDictionaryEntry" />
+                    </div>
+
+                    <div class="flex shrink-0 gap-2 border-b border-default p-3">
+                      <UInput v-model="dictionaryEntriesSearchInput" icon="i-tabler-search" color="neutral"
+                        variant="soft" class="w-full" placeholder="용어 검색"
+                        :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }"
+                        @keydown.enter.prevent="runDictionaryEntrySearch">
+                        <template #trailing>
+                          <UButton v-if="dictionaryEntriesSearchInput.length" color="neutral" variant="link" size="sm"
+                            icon="i-tabler-x" aria-label="용어 검색어 지우기"
+                            @click="dictionaryEntriesSearchInput = ''; runDictionaryEntrySearch()" />
+                          <UButton icon="i-tabler-search" color="neutral" variant="link" size="sm" aria-label="용어 검색"
+                            :disabled="dictionaryEntriesSearchInput.trim() === dictionaryEntriesSearch"
+                            @click="runDictionaryEntrySearch" />
+                        </template>
+                      </UInput>
+                    </div>
+
+                    <div class="min-h-0 flex-1 overflow-y-auto">
+                      <div v-if="dictionaryEntriesStatus === 'pending'"
+                        class="flex items-center justify-center p-6 text-muted">
+                        <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
+                      </div>
+                      <UAlert v-else-if="dictionaryEntriesStatus === 'error'" color="error" variant="soft"
+                        :title="dictionaryEntriesError" class="m-3" />
+                      <div v-else-if="!dictionaryEntryItems.length"
+                        class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted">
+                        <UIcon name="i-tabler-book-2" class="size-6 text-dimmed" />
+                        <p class="mt-2">아직 등록된 용어가 없습니다.</p>
+                        <UButton v-if="selectedDictionary.canEdit" color="neutral" variant="soft" size="sm" class="mt-3"
+                          @click="openCreateDictionaryEntry">
+                          용어 추가
+                        </UButton>
+                      </div>
+                      <div v-else class="flex flex-col">
+                        <div class="border-b border-default px-4 py-2 text-xs text-dimmed">
+                          {{ formatCount(dictionaryEntries.total) }}개 용어
+                        </div>
+                        <article v-for="entry in dictionaryEntryItems" :key="entry.id"
+                          class="flex flex-col gap-1 border-b border-default px-4 py-3 text-sm">
+                          <div class="flex items-start gap-2">
+                            <span class="min-w-0 flex-1 whitespace-pre-wrap wrap-break-word font-medium">{{
+                              entry.sourceText }}</span>
+                            <UIcon name="i-tabler-arrow-narrow-right" class="mt-0.5 size-4 shrink-0 text-dimmed" />
+                            <span class="min-w-0 flex-1 whitespace-pre-wrap wrap-break-word">{{ entry.translation
+                              }}</span>
+                          </div>
+                          <p v-if="entry.note" class="whitespace-pre-wrap wrap-break-word text-xs text-muted">{{
+                            entry.note }}</p>
+                          <p class="text-[10px] text-dimmed">{{ entry.creatorNickname }}</p>
+                        </article>
+                      </div>
+                    </div>
+                  </template>
+
+                  <template v-else>
+                    <div class="flex shrink-0 items-center justify-between gap-3 border-b border-default p-3">
+                      <p class="text-sm font-medium h-8 flex items-center">용어집</p>
+                      <UButton icon="i-tabler-plus" color="neutral" variant="soft" size="sm"
+                        @click="openCreateDictionary">
+                        새 용어집
+                      </UButton>
+                    </div>
+
+                    <div class="min-h-0 flex-1 overflow-y-auto">
+                      <div v-if="dictionariesStatus === 'pending'"
+                        class="flex items-center justify-center p-6 text-muted">
+                        <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
+                      </div>
+                      <div v-else-if="dictionariesStatus === 'error'" class="flex p-3">
+                        <UAlert color="error" variant="soft" :title="dictionariesError" />
+                      </div>
+                      <div v-else-if="!dictionaries.length"
+                        class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted">
+                        <UIcon name="i-tabler-books" class="size-6 text-dimmed" />
+                        <p class="mt-2">등록된 용어집이 없습니다.</p>
+                      </div>
+                      <nav v-else class="flex flex-col">
+                        <button v-for="dictionary in dictionaries" :key="dictionary.id" type="button"
+                          class="flex min-w-0 items-start gap-3 border-b border-default px-4 py-3 text-left transition-colors hover:bg-elevated/70"
+                          @click="selectDictionary(dictionary.id)">
+                          <UIcon :name="dictionary.visibility === 'public' ? 'i-tabler-book-2' : 'i-tabler-lock'"
+                            class="mt-0.5 size-4 shrink-0 text-dimmed" />
+                          <span class="min-w-0 flex-1">
+                            <span class="block truncate text-sm font-medium">{{ dictionary.name }}</span>
+                            <span v-if="dictionary.description" class="mt-0.5 block truncate text-xs text-muted">
+                              {{ dictionary.description }}
+                            </span>
+                            <span class="mt-1 block text-[10px] text-dimmed">
+                              {{ dictionary.ownerNickname }} · {{ formatCount(dictionary.entryCount) }}개 용어
+                            </span>
+                          </span>
+                        </button>
+                      </nav>
+                    </div>
+                  </template>
+                </template>
+
+                <UModal v-model:open="dictionaryModalOpen" title="새 용어집" :ui="{ footer: 'justify-end' }">
+                  <template #body>
+                    <UForm id="editor-dictionary-form" :state="dictionaryForm" class="flex flex-col gap-4"
+                      @submit="createDictionary">
+                      <UFormField name="name" label="이름" required>
+                        <UInput v-model="dictionaryForm.name" color="neutral" maxlength="100" placeholder="용어집 이름"
+                          class="w-full" />
+                      </UFormField>
+                      <UFormField name="description" label="설명">
+                        <UTextarea v-model="dictionaryForm.description" color="neutral" :rows="3" maxlength="500"
+                          placeholder="용어집에 대한 설명" class="w-full" />
+                      </UFormField>
+                      <UFormField name="visibility" label="공개 범위">
+                        <USelect v-model="dictionaryForm.visibility" color="neutral"
+                          :items="[{ label: '공개', value: 'public' }, { label: '비공개', value: 'private' }]"
+                          class="w-full" />
+                      </UFormField>
+                      <p v-if="dictionaryModalError" class="text-sm text-error">{{ dictionaryModalError }}</p>
+                    </UForm>
+                  </template>
+                  <template #footer>
+                    <UButton color="neutral" variant="ghost" @click="dictionaryModalOpen = false">취소</UButton>
+                    <UButton type="submit" form="editor-dictionary-form" color="info" variant="soft"
+                      :loading="dictionaryModalSaving">
+                      만들기
+                    </UButton>
+                  </template>
+                </UModal>
+
+                <UModal v-model:open="dictionaryEntryModalOpen" title="용어 추가" :ui="{ footer: 'justify-end' }">
+                  <template #body>
+                    <UForm id="editor-dictionary-entry-form" :state="dictionaryEntryForm" class="flex flex-col gap-4"
+                      @submit="createDictionaryEntry">
+                      <UFormField name="sourceText" label="원문" required>
+                        <UTextarea v-model="dictionaryEntryForm.sourceText" color="neutral" :rows="3" maxlength="500"
+                          placeholder="원문 용어" class="w-full" />
+                      </UFormField>
+                      <UFormField name="translation" label="번역" required>
+                        <UTextarea v-model="dictionaryEntryForm.translation" color="neutral" :rows="3" maxlength="500"
+                          placeholder="번역 용어" class="w-full" />
+                      </UFormField>
+                      <UFormField name="note" label="메모">
+                        <UTextarea v-model="dictionaryEntryForm.note" color="neutral" :rows="3" maxlength="1000"
+                          placeholder="선택 사항" class="w-full" />
+                      </UFormField>
+                      <p v-if="dictionaryEntryModalError" class="text-sm text-error">{{ dictionaryEntryModalError }}</p>
+                    </UForm>
+                  </template>
+                  <template #footer>
+                    <UButton color="neutral" variant="ghost" @click="dictionaryEntryModalOpen = false">취소</UButton>
+                    <UButton type="submit" form="editor-dictionary-entry-form" color="info" variant="soft"
+                      :loading="dictionaryEntryModalSaving">
+                      추가
+                    </UButton>
+                  </template>
+                </UModal>
+              </div>
+
+              <div v-else-if="dictionaryStatus === 'pending'" class="flex flex-1 flex-col">
+                <div class="flex shrink-0 items-center gap-2 border-b border-default p-3">
+                  <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm" aria-label="사전 메뉴로 돌아가기"
+                    @click="dictionarySelection = null" />
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-medium">{{ dictionarySelection.originalText }}</p>
+                    <p class="truncate text-xs text-dimmed">{{ dictionaryKey }}</p>
+                  </div>
+                </div>
+                <div class="flex min-h-0 flex-1 items-center justify-center">
+                  <UIcon name="i-tabler-loader-2" class="size-6 animate-spin" />
+                </div>
+              </div>
+
+              <div v-else-if="dictionaryStatus === 'error'" class="flex min-h-0 flex-1 flex-col">
+                <div class="flex shrink-0 items-center gap-2 border-b border-default p-3">
+                  <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm" aria-label="사전 메뉴로 돌아가기"
+                    @click="dictionarySelection = null" />
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-medium">{{ dictionarySelection.originalText }}</p>
+                    <p class="truncate text-xs text-dimmed">{{ dictionaryKey }}</p>
+                  </div>
+                </div>
+                <UAlert color="error" variant="soft" title="사전 항목을 불러오지 못했습니다." :description="dictionaryError"
+                  class="m-4" />
+              </div>
+
+              <div v-else-if="dictionaryStatus === 'success' && !dictionaryItem" class="flex min-h-0 flex-1 flex-col">
+                <div class="flex shrink-0 items-center gap-2 border-b border-default p-3">
+                  <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm" aria-label="사전 메뉴로 돌아가기"
+                    @click="dictionarySelection = null" />
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-medium">{{ dictionarySelection.originalText }}</p>
+                    <p class="truncate text-xs text-dimmed">{{ dictionaryKey }}</p>
+                  </div>
+                </div>
+                <div class="flex flex-1 items-center justify-center p-5 text-center text-sm text-muted">
+                  <div>
+                    <UIcon name="i-tabler-file-off" class="mx-auto size-6 text-dimmed" />
+                    <p class="mt-2">대상 사전 항목을 찾을 수 없습니다.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div v-else-if="dictionaryItem" class="min-h-0 flex flex-1 flex-col">
+                <div class="flex shrink-0 items-center gap-2 border-b border-default p-3">
+                  <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm" aria-label="사전 메뉴로 돌아가기"
+                    @click="dictionarySelection = null" />
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-medium">{{ dictionarySelection.originalText }}</p>
+                    <p class="truncate text-xs text-dimmed">{{ dictionaryKey }}</p>
+                  </div>
+                  <UButton color="neutral" variant="soft" size="xs" @click="editDictionaryItem">
+                    수정
+                  </UButton>
+                </div>
+
+                <div class="min-h-0 flex-1 overflow-y-auto p-4">
+                  <div class="mt-1 flex flex-col gap-3 text-sm">
+                    <div v-for="source in visibleSourceLanguageItems" :key="source.key" class="flex flex-col gap-0.5">
+                      <span class="text-[10px] text-dimmed">{{ source.label }}</span>
+                      <div class="whitespace-pre-wrap wrap-break-word">
+                        <EditorSourceText :text="dictionaryItem[source.key] || null"
+                          @select="selectDictionaryReference">
+                          <template #empty>—</template>
+                        </EditorSourceText>
+                      </div>
+                    </div>
+
+                    <div class="flex flex-col gap-0.5 border-t border-default pt-3">
+                      <span class="text-[10px] text-dimmed">한국어 번역</span>
+                      <p class="whitespace-pre-wrap wrap-break-word">{{ dictionaryItem.ko || '—' }}</p>
+                    </div>
+
+                    <div v-if="dictionaryItem.pendingStatus === 'pending'"
+                      class="flex flex-col gap-1 border-t border-default pt-3 text-info">
+                      <span class="text-xs font-medium">승인 대기 번역</span>
+                      <p class="whitespace-pre-wrap wrap-break-word">{{ dictionaryItem.pendingKo || '—' }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </template>
 
           <template v-else-if="activeSidebarMenu === 'settings'">

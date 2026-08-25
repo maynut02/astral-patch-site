@@ -14,7 +14,6 @@ interface CurrentEditorTranslation {
 
 export interface SaveEditorTranslationInput {
   text?: unknown
-  expectedText?: unknown
 }
 
 export function parseEditorUnitId(value: unknown): string {
@@ -48,28 +47,12 @@ function parseTranslationText(value: unknown): string {
   return text
 }
 
-function parseExpectedText(value: unknown): string | undefined {
-  if (value === undefined) {
-    return undefined
-  }
-
-  if (typeof value !== 'string') {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Invalid expected translation text'
-    })
-  }
-
-  return value
-}
-
 export async function saveEditorTranslation(
   unitId: string,
   userId: string,
   input: SaveEditorTranslationInput
 ): Promise<EditorSaveResponse> {
   const proposedText = parseTranslationText(input.text)
-  const expectedText = parseExpectedText(input.expectedText)
   const database = getDatabase()
   await ensureBotWorkMigration(database)
 
@@ -114,13 +97,6 @@ export async function saveEditorTranslation(
       throw createError({
         statusCode: 409,
         statusMessage: 'Editor item has no current source version'
-      })
-    }
-
-    if (expectedText !== undefined && expectedText !== current.currentText) {
-      throw createError({
-        statusCode: 409,
-        statusMessage: 'Editor item was changed by another user'
       })
     }
 

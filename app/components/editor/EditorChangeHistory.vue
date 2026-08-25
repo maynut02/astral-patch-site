@@ -235,7 +235,7 @@ function getHistoryValues(entry: EditorHistoryEntry): HistoryValue[] {
   if (entry.action !== 'source_changed') {
     return [{
       key: 'ko',
-      label: '번역',
+      label: '한국어 번역',
       before: entry.previousText ?? '',
       after: entry.proposedText ?? ''
     }]
@@ -326,8 +326,8 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
         </div>
       </div>
 
-      <div v-else-if="status === 'pending'" class="flex h-full justify-center items-center">
-        <UIcon name="i-tabler-loader-2" class="size-6 md:size-8 animate-spin" />
+      <div v-else-if="status === 'pending'" class="flex items-center justify-center p-5 text-muted">
+        <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
       </div>
 
       <UAlert v-else-if="status === 'error'" color="error" variant="soft" title="변경 기록을 불러오지 못했습니다."
@@ -341,7 +341,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
           class="mb-4" />
 
         <article v-for="(entry, index) in entries" :key="entry.id"
-          class="flex flex-col px-4 pt-1 hover:bg-elevated/40 transition-colors">
+          class="flex flex-col pl-2 pr-4 pt-1 hover:bg-elevated/40 transition-colors">
           <div class="flex items-center gap-2">
             <div class="flex size-6 items-center justify-center rounded-full shrink-0"
               :class="actionMeta[entry.action].toneClass">
@@ -380,9 +380,9 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
               </div>
 
               <!-- 통합 비교 -->
-              <div v-if="diffMode === 'unified'" class="flex flex-col gap-4 pb-4">
-                <div v-for="value in getHistoryValues(entry)" :key="value.key" class="min-w-0 flex flex-col gap-1">
-                  <span class="block text-[10px] font-medium text-muted px-1.5 py-0.5 bg-elevated rounded-sm">
+              <div v-if="diffMode === 'unified'" class="flex flex-col gap-3">
+                <div v-for="value in getHistoryValues(entry)" :key="value.key" class="min-w-0 flex flex-col gap-0.5">
+                  <span class="block text-[10px] text-dimmed">
                     {{ value.label }}
                   </span>
                   <p class="whitespace-pre-wrap wrap-break-word text-sm leading-6 min-h-5">
@@ -400,8 +400,8 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
 
               <!-- 분할 비교 -->
               <div v-else class="flex flex-col gap-4 py-2">
-                <div v-for="value in getHistoryValues(entry)" :key="value.key" class="min-w-0 flex flex-col gap-1">
-                  <span class="block text-[10px] font-medium text-muted px-1.5 py-0.5 bg-elevated rounded-sm">
+                <div v-for="value in getHistoryValues(entry)" :key="value.key" class="min-w-0 flex flex-col gap-0.5">
+                  <span class="block text-[10px] text-dimmed">
                     {{ value.label }}
                   </span>
                   <div class="flex flex-col gap-2">

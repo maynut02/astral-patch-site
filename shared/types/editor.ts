@@ -1,5 +1,11 @@
 export type EditorLanguage = 'cnS' | 'en' | 'jp' | 'cnT'
 
+export type EditorSearchType = 'all' | 'content' | 'key' | 'source' | 'translation'
+
+export type EditorSearchMatch = 'contains' | 'exact'
+
+export type EditorItemStatusFilter = 'untranslated' | 'pending' | 'warning'
+
 export type EditorDiffMode = 'unified' | 'split'
 
 export const EDITOR_ALL_CATEGORY_VALUE = '__all_category__'

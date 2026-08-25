@@ -5,9 +5,9 @@ const navItem = [
   { link: '/release', icon: 'i-tabler-clipboard-check', label: '패치 릴리즈' },
   { link: '/translate', icon: 'i-tabler-edit', label: '번역 에디터' },
   { link: '/translate/log', icon: 'i-tabler-history-toggle', label: '변경 기록' },
-  { link: '/translate/log', icon: 'i-tabler-package', label: '모드 허브' },
-  { link: '/', icon: 'i-tabler-speakerphone', label: '공지사항' },
-  { link: '/', icon: 'i-tabler-user-heart', label: '기여자' },
+  { link: '/mod', icon: 'i-tabler-package', label: '모드 허브' },
+  { link: '/notice', icon: 'i-tabler-speakerphone', label: '공지사항' },
+  { link: '/contributor', icon: 'i-tabler-user-heart', label: '기여자' },
 ]
 
 const isSidebarCollapsed = ref(false)

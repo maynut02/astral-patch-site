@@ -5,8 +5,11 @@ import { getDatabase } from './database'
 import {
   EDITOR_ALL_CATEGORY_VALUE,
   EDITOR_ALL_REVISION_VALUE,
+  type EditorSearchMatch,
+  type EditorSearchType,
   type EditorFiltersResponse,
   type EditorItem,
+  type EditorItemStatusFilter,
   type EditorItemsResponse,
   type EditorSelectOption
 } from '../../shared/types/editor'
@@ -16,13 +19,19 @@ export const EDITOR_PAGE_SIZE = 50
 export interface EditorQueryFilters {
   page: number
   search: string
+  searchType: EditorSearchType
+  searchMatch: EditorSearchMatch
+  statusFilter: EditorItemStatusFilter | 'all'
   category: string
   revisionId: string
   version: string
   revision: string
   itemId: string
+  itemIds: string[] | null
   untranslatedOnly: boolean
 }
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function getFirstQueryValue(value: unknown): string {
   if (Array.isArray(value)) {
@@ -79,7 +88,7 @@ function parseRevision(value: unknown): string {
 function parseItemId(value: unknown): string {
   const itemId = getFirstQueryValue(value)
 
-  if (itemId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(itemId)) {
+  if (itemId && !UUID_PATTERN.test(itemId)) {
     throw createError({
       statusCode: 400,
       statusMessage: 'Invalid item id'
@@ -89,13 +98,92 @@ function parseItemId(value: unknown): string {
   return itemId
 }
 
+function parseItemIds(value: unknown): string[] | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+
+  const rawItemIds = getFirstQueryValue(value).trim()
+
+  if (!rawItemIds || rawItemIds === '__none__') {
+    return []
+  }
+
+  const itemIds = [...new Set(rawItemIds.split(',').map(itemId => itemId.trim()).filter(Boolean))]
+
+  if (itemIds.length > 500 || itemIds.some(itemId => !UUID_PATTERN.test(itemId))) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid item ids'
+    })
+  }
+
+  return itemIds
+}
+
+function parseSearchType(value: unknown): EditorSearchType {
+  const searchType = getFirstQueryValue(value).trim().toLowerCase()
+
+  if (!searchType) {
+    return 'all'
+  }
+
+  if (searchType !== 'all' && searchType !== 'content' && searchType !== 'key' && searchType !== 'source' && searchType !== 'translation') {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid search type'
+    })
+  }
+
+  return searchType
+}
+
+function parseSearchMatch(value: unknown): EditorSearchMatch {
+  const searchMatch = getFirstQueryValue(value).trim().toLowerCase()
+
+  if (!searchMatch) {
+    return 'contains'
+  }
+
+  if (searchMatch !== 'contains' && searchMatch !== 'exact') {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid search match'
+    })
+  }
+
+  return searchMatch
+}
+
+function parseStatusFilter(value: unknown): EditorItemStatusFilter | 'all' {
+  const status = getFirstQueryValue(value).trim().toLowerCase()
+
+  if (!status || status === 'all') {
+    return 'all'
+  }
+
+  if (status !== 'untranslated' && status !== 'pending' && status !== 'warning') {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid status filter'
+    })
+  }
+
+  return status
+}
+
 export function parseEditorQuery(query: Record<string, unknown>): EditorQueryFilters {
   const search = getFirstQueryValue(query.search).trim()
+  const searchType = parseSearchType(query.searchType)
+  const searchMatch = parseSearchMatch(query.match)
   const category = parseCategory(query.category)
   const revisionId = parseRevisionId(query.revisionId)
   const version = parseVersion(query.version)
   const revision = parseRevision(query.revision)
+  const statusFilter = parseStatusFilter(query.status)
+  const itemIds = parseItemIds(query.itemIds)
   const untranslated = getFirstQueryValue(query.untranslated).toLowerCase()
+  const untranslatedOnly = untranslated === 'true' || untranslated === '1' || untranslated === 'on'
 
   if (search.length > 200 || category.length > 200 || version.length > 100 || revision.length > 100) {
     throw createError({
@@ -114,12 +202,16 @@ export function parseEditorQuery(query: Record<string, unknown>): EditorQueryFil
   return {
     page: parsePage(query.page),
     search,
+    searchType,
+    searchMatch,
+    statusFilter: statusFilter === 'all' && untranslatedOnly ? 'untranslated' : statusFilter,
     category,
     revisionId,
     version,
     revision,
     itemId: parseItemId(query.itemId),
-    untranslatedOnly: untranslated === 'true' || untranslated === '1' || untranslated === 'on'
+    itemIds,
+    untranslatedOnly
   }
 }
 
@@ -129,26 +221,89 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
   const hasRevision = Boolean(filters.revisionId)
   const hasVersion = Boolean(filters.version && filters.revision)
   const hasItem = Boolean(filters.itemId)
+  const hasItems = filters.itemIds !== null
+  const hasStatusFilter = filters.statusFilter !== 'all'
   const searchPattern = `%${filters.search}%`
+  const searchByContains = filters.searchMatch === 'contains'
+  const searchByExact = filters.searchMatch === 'exact'
+  const searchByContent = filters.searchType === 'content'
+  const searchByAll = filters.searchType === 'all'
+  const searchByKey = filters.searchType === 'key'
+  const searchBySource = filters.searchType === 'source'
+  const searchByTranslation = filters.searchType === 'translation'
   const revisionId = filters.revisionId || null
   const itemId = filters.itemId || null
+  const itemIds = filters.itemIds ?? []
+  const itemIdsArray = sql.array(itemIds)
+  const statusIsUntranslated = filters.statusFilter === 'untranslated'
+  const statusIsPending = filters.statusFilter === 'pending'
+  const statusIsWarning = filters.statusFilter === 'warning'
 
   return sql`
     (
       NOT ${hasSearch}
       OR (
-        COALESCE(wb.cn_s, '') ILIKE ${searchPattern}
-        OR COALESCE(wb.en, '') ILIKE ${searchPattern}
-        OR COALESCE(wb.jp, '') ILIKE ${searchPattern}
-        OR COALESCE(wb.cn_t, '') ILIKE ${searchPattern}
-        OR CONCAT(COALESCE(wb.namespace, ''), '_', COALESCE(wb.unit_key, '')) ILIKE ${searchPattern}
+        (
+          ${searchByAll || searchByContent || searchBySource}
+          AND (
+            (
+              ${searchByExact}
+              AND (
+                LOWER(COALESCE(wb.cn_s, '')) = LOWER(${filters.search})
+                OR LOWER(COALESCE(wb.en, '')) = LOWER(${filters.search})
+                OR LOWER(COALESCE(wb.jp, '')) = LOWER(${filters.search})
+                OR LOWER(COALESCE(wb.cn_t, '')) = LOWER(${filters.search})
+              )
+            )
+            OR (
+              ${searchByContains}
+              AND (
+                COALESCE(wb.cn_s, '') ILIKE ${searchPattern}
+                OR COALESCE(wb.en, '') ILIKE ${searchPattern}
+                OR COALESCE(wb.jp, '') ILIKE ${searchPattern}
+                OR COALESCE(wb.cn_t, '') ILIKE ${searchPattern}
+              )
+            )
+          )
+        )
         OR (
-          CASE
-            WHEN wb.latest_change_status = 'pending'
-              THEN COALESCE(wb.latest_proposed_text, wb.approved_text, '')
-            ELSE COALESCE(wb.approved_text, '')
-          END
-        ) ILIKE ${searchPattern}
+          ${searchByAll || searchByContent || searchByTranslation}
+          AND (
+            (
+              ${searchByExact}
+              AND LOWER(
+                CASE
+                  WHEN wb.latest_change_status = 'pending'
+                    THEN COALESCE(wb.latest_proposed_text, wb.approved_text, '')
+                  ELSE COALESCE(wb.approved_text, '')
+                END
+              ) = LOWER(${filters.search})
+            )
+            OR (
+              ${searchByContains}
+              AND (
+                CASE
+                  WHEN wb.latest_change_status = 'pending'
+                    THEN COALESCE(wb.latest_proposed_text, wb.approved_text, '')
+                  ELSE COALESCE(wb.approved_text, '')
+                END
+              ) ILIKE ${searchPattern}
+            )
+          )
+        )
+        OR (
+          ${searchByAll || searchByKey}
+          AND (
+            (
+              ${searchByExact}
+              AND LOWER(CONCAT(COALESCE(wb.namespace, ''), '_', COALESCE(wb.unit_key, ''))) = LOWER(${filters.search})
+            )
+            OR (
+              ${searchByContains}
+              AND CONCAT(COALESCE(wb.namespace, ''), '_', COALESCE(wb.unit_key, '')) ILIKE ${searchPattern}
+            )
+          )
+        )
       )
     )
     AND (
@@ -182,8 +337,38 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
       OR wb.unit_id = ${itemId}
     )
     AND (
+      NOT ${hasItems}
+      OR (
+        ${itemIds.length > 0}
+        AND wb.unit_id = ANY(${itemIdsArray}::uuid[])
+      )
+    )
+    AND (
       NOT ${filters.untranslatedOnly}
-      OR NULLIF(BTRIM(wb.approved_text), '') IS NULL
+      OR (
+        wb.latest_change_status IS DISTINCT FROM 'pending'
+        AND NULLIF(BTRIM(wb.approved_text), '') IS NULL
+      )
+    )
+    AND (
+      NOT ${hasStatusFilter}
+      OR (
+        (
+          ${statusIsUntranslated}
+          AND wb.latest_change_status IS DISTINCT FROM 'pending'
+          AND NULLIF(BTRIM(wb.approved_text), '') IS NULL
+        )
+        OR (
+          ${statusIsPending}
+          AND wb.latest_change_status = 'pending'
+        )
+        OR (
+          ${statusIsWarning}
+          AND wb.latest_change_status IS DISTINCT FROM 'pending'
+          AND NULLIF(BTRIM(wb.approved_text), '') IS NOT NULL
+          AND wb.approved_for_current_source IS NOT TRUE
+        )
+      )
     )
   `
 }
