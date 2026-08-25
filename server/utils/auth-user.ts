@@ -1,6 +1,8 @@
 import { createError } from 'h3'
 import type { H3Event } from 'h3'
 import { getDatabase, type DatabaseClient } from './database'
+import { ensureEditorIndexes } from './editor-indexes'
+import { HANDLE_PATTERN } from './validation'
 
 export type AppRole = 'admin' | 'verified' | 'user' | 'bot'
 
@@ -18,6 +20,13 @@ export interface GoogleProfile {
 
 export interface AppUser {
   googleSub: string
+  email: string
+  handle: string | null
+  role: AppRole
+}
+
+export interface CurrentSessionUser {
+  id: string
   email: string
   handle: string | null
   role: AppRole
@@ -243,6 +252,7 @@ export async function ensureBotWorkMigration(database: DatabaseClient = getDatab
   }
 
   await botWorkMigrationReady
+  await ensureEditorIndexes(database)
 }
 
 function configuredAdminEmails(): Set<string> {
@@ -344,7 +354,7 @@ function parseProfileValue(value: unknown, field: string): string {
 export async function updateUserProfile(googleSub: string, input: { handle?: unknown }): Promise<AppUser> {
   const handle = parseProfileValue(input.handle, 'Handle')
 
-  if (!/^[A-Za-z0-9]+$/.test(handle)) {
+  if (!HANDLE_PATTERN.test(handle)) {
     throw createError({
       statusCode: 400,
       statusMessage: 'Handle may contain only letters and numbers'
@@ -388,15 +398,81 @@ export async function updateUserProfile(googleSub: string, input: { handle?: unk
   }
 }
 
-export async function requireAdminSession(event: H3Event) {
-  const session = await requireUserSession(event)
+/**
+ * Session claims can outlive a role or profile change in the database. Read the
+ * current account before authorizing any sensitive operation and refresh the
+ * session claims when they are stale.
+ */
+export async function getCurrentSessionUser(event: H3Event): Promise<CurrentSessionUser | null> {
+  const session = await getUserSession(event)
+  const sessionUser = session.user
+  const sessionUserId = sessionUser?.id
 
-  if (session.user.role !== 'admin') {
+  if (!sessionUser || typeof sessionUserId !== 'string' || !sessionUserId) {
+    return null
+  }
+
+  const database = getDatabase()
+  await ensureUsersTable(database)
+
+  const [user] = await database<AppUser[]>`
+    SELECT
+      google_sub AS "googleSub",
+      email,
+      handle,
+      "role" AS role
+    FROM app_users
+    WHERE google_sub = ${sessionUserId}
+  `
+
+  if (!user) {
+    return null
+  }
+
+  const currentUser: CurrentSessionUser = {
+    id: user.googleSub,
+    email: user.email,
+    handle: user.handle,
+    role: user.role
+  }
+
+  if (
+    sessionUser.id !== currentUser.id
+    || sessionUser.email !== currentUser.email
+    || sessionUser.handle !== currentUser.handle
+    || sessionUser.role !== currentUser.role
+  ) {
+    await setUserSession(event, {
+      ...session,
+      user: currentUser
+    })
+  }
+
+  return currentUser
+}
+
+export async function requireCurrentSessionUser(event: H3Event): Promise<CurrentSessionUser> {
+  const user = await getCurrentSessionUser(event)
+
+  if (!user) {
+    throw createError({
+      statusCode: 401,
+      statusMessage: 'Authentication is required'
+    })
+  }
+
+  return user
+}
+
+export async function requireAdminSession(event: H3Event) {
+  const user = await requireCurrentSessionUser(event)
+
+  if (user.role !== 'admin') {
     throw createError({
       statusCode: 403,
       statusMessage: 'Admin permission is required'
     })
   }
 
-  return session
+  return user
 }

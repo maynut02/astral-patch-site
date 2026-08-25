@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
 import { ensureBotWorkMigration } from './auth-user'
 import { getDatabase } from './database'
+import { parseUuid } from './validation'
 import { resolveEditorRole, type EditorReviewAction, type EditorReviewResponse } from '../../shared/types/editor'
 
 interface PendingEditorChange {
@@ -13,17 +14,8 @@ interface PendingEditorChange {
   status: 'pending' | 'approved' | 'rejected' | 'superseded'
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
 export function parseEditorChangeId(value: unknown): string {
-  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Invalid translation change id'
-    })
-  }
-
-  return value
+  return parseUuid(value, 'Invalid translation change id')
 }
 
 function parseReviewAction(value: unknown): EditorReviewAction {

@@ -90,15 +90,31 @@ function commitPage() {
 
 <template>
   <div class="flex flex-col gap-4">
-    <UInput :model-value="props.search" icon="i-tabler-search" size="lg" color="neutral" variant="soft"
-      placeholder="검색..." :ui="{ base: 'rounded-xl' }" @update:model-value="updateSearch" />
+    <UInput
+      :model-value="props.search"
+      icon="i-tabler-search"
+      size="lg"
+      color="neutral"
+      variant="soft"
+      placeholder="검색..."
+      :ui="{ base: 'rounded-xl' }"
+      @update:model-value="updateSearch"
+    />
 
     <div class="flex flex-col gap-2">
       <p class="text-xs text-muted font-medium">
         카테고리
       </p>
-      <USelect :model-value="props.category" :items="props.categoryItems" placeholder="전체 카테고리" color="neutral"
-        variant="soft" class="w-full" :ui="{ base: 'rounded-xl' }" @update:model-value="updateCategory" />
+      <USelect
+        :model-value="props.category"
+        :items="props.categoryItems"
+        placeholder="전체 카테고리"
+        color="neutral"
+        variant="soft"
+        class="w-full"
+        :ui="{ base: 'rounded-xl' }"
+        @update:model-value="updateCategory"
+      />
     </div>
 
     <USeparator />
@@ -107,8 +123,16 @@ function commitPage() {
       <p class="text-xs text-muted font-medium">
         버전
       </p>
-      <USelect :model-value="props.revisionId" :items="props.revisionItems" placeholder="전체 버전" color="neutral"
-        variant="soft" class="w-full" :ui="{ base: 'rounded-xl' }" @update:model-value="updateRevision" />
+      <USelect
+        :model-value="props.revisionId"
+        :items="props.revisionItems"
+        placeholder="전체 버전"
+        color="neutral"
+        variant="soft"
+        class="w-full"
+        :ui="{ base: 'rounded-xl' }"
+        @update:model-value="updateRevision"
+      />
     </div>
 
     <USeparator />
@@ -119,12 +143,23 @@ function commitPage() {
       </p>
 
       <div class="flex flex-col text-sm">
-        <button v-for="language in languageItems" :key="language.value" type="button"
+        <button
+          v-for="language in languageItems"
+          :key="language.value"
+          type="button"
           class="flex items-center gap-2 py-1 hover:bg-muted transition-colors rounded-xl pl-1"
           :class="props.selectedLanguages.includes(language.value) ? 'text-default' : 'text-dimmed'"
-          @click="toggleLanguage(language.value)">
-          <UIcon v-if="props.selectedLanguages.includes(language.value)" name="i-tabler-check" class="size-4" />
-          <div v-else class="size-4" />
+          @click="toggleLanguage(language.value)"
+        >
+          <UIcon
+            v-if="props.selectedLanguages.includes(language.value)"
+            name="i-tabler-check"
+            class="size-4"
+          />
+          <div
+            v-else
+            class="size-4"
+          />
           <span>{{ language.label }}</span>
         </button>
       </div>
@@ -137,10 +172,14 @@ function commitPage() {
         미번역 항목만 표시
       </p>
 
-      <UTabs :model-value="props.untranslatedOnly ? 'on' : 'off'"
-        :items="[{ label: 'OFF', value: 'off' }, { label: 'ON', value: 'on' }]" color="neutral" size="xs"
+      <UTabs
+        :model-value="props.untranslatedOnly ? 'on' : 'off'"
+        :items="[{ label: 'OFF', value: 'off' }, { label: 'ON', value: 'on' }]"
+        color="neutral"
+        size="xs"
         :ui="{ list: 'rounded-xl bg-muted', indicator: 'rounded-xl', trigger: 'px-3' }"
-        @update:model-value="updateUntranslated" />
+        @update:model-value="updateUntranslated"
+      />
     </div>
 
     <USeparator />
@@ -151,20 +190,42 @@ function commitPage() {
       </p>
 
       <div class="flex flex-wrap gap-2 text-sm">
-        <UButton icon="i-tabler-chevron-left" color="neutral" variant="soft"
-          class="rounded-full bg-muted hover:bg-elevated px-3" :disabled="props.loading || props.page <= 1"
-          @click="goToPage(props.page - 1)" />
-        <UInput v-model="pageInput" color="neutral" variant="soft" :ui="{ base: 'rounded-xl px-4 text-center' }"
-          class="flex-1" :disabled="props.loading" @blur="commitPage" @keydown.enter="commitPage">
+        <UButton
+          icon="i-tabler-chevron-left"
+          color="neutral"
+          variant="soft"
+          class="rounded-full bg-muted hover:bg-elevated px-3"
+          :disabled="props.loading || props.page <= 1"
+          @click="goToPage(props.page - 1)"
+        />
+        <UInput
+          v-model="pageInput"
+          color="neutral"
+          variant="soft"
+          :ui="{ base: 'rounded-xl px-4 text-center' }"
+          class="flex-1"
+          :disabled="props.loading"
+          @blur="commitPage"
+          @keydown.enter="commitPage"
+        >
           <template #trailing>
-            <div class="text-xs text-muted tabular-nums" aria-live="polite" role="status">
+            <div
+              class="text-xs text-muted tabular-nums"
+              aria-live="polite"
+              role="status"
+            >
               / {{ props.totalPages }}
             </div>
           </template>
         </UInput>
-        <UButton icon="i-tabler-chevron-right" color="neutral" variant="soft"
+        <UButton
+          icon="i-tabler-chevron-right"
+          color="neutral"
+          variant="soft"
           class="rounded-full bg-muted hover:bg-elevated px-3"
-          :disabled="props.loading || props.page >= props.totalPages" @click="goToPage(props.page + 1)" />
+          :disabled="props.loading || props.page >= props.totalPages"
+          @click="goToPage(props.page + 1)"
+        />
       </div>
     </div>
   </div>

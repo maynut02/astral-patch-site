@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import {
-  EDITOR_PROGRESS_STATUSES,
-  type EditorOverviewResponse,
-  type EditorProgressCounts,
-  type EditorProgressStatus
+import type {
+  EditorOverviewResponse,
+  EditorProgressCounts
 } from '#shared/types/editor-overview'
-
-interface ProgressSegment {
-  status: EditorProgressStatus
-  percentage: number
-  isLast: boolean
-}
+import {
+  EDITOR_STATUS_META,
+  EDITOR_VISIBLE_STATUSES
+} from '~/utils/editor-progress'
+import { formatEditorCount, formatEditorPercent } from '~/utils/editor-helpers'
 
 interface EditorListRow {
   key: string
@@ -78,29 +75,7 @@ onMounted(() => {
   })
 })
 
-const visibleStatuses: EditorProgressStatus[] = ['success', 'info', 'warning']
-
-const statusMeta: Record<EditorProgressStatus, {
-  label: string
-  color: string
-}> = {
-  success: {
-    label: '번역 완료',
-    color: 'bg-[#81C995]'
-  },
-  info: {
-    label: '승인 대기',
-    color: 'bg-[#8AB4F8]'
-  },
-  warning: {
-    label: '확인 필요',
-    color: 'bg-[#FDD663]'
-  },
-  untranslated: {
-    label: '미번역',
-    color: 'bg-[#F28B82]'
-  }
-}
+const visibleStatuses = EDITOR_VISIBLE_STATUSES
 
 function createDefaultOverview(): EditorOverviewResponse {
   return {
@@ -186,38 +161,6 @@ const hasRowsForMode = computed(() => listMode.value === 'category'
   ? overview.value.categories.length > 0
   : overview.value.versions.length > 0)
 
-function getProgressSegments(counts: EditorProgressCounts, total: number): ProgressSegment[] {
-  const segments = EDITOR_PROGRESS_STATUSES
-    .filter(status => counts[status] > 0)
-    .map(status => ({
-      status,
-      percentage: total > 0 ? (counts[status] / total) * 100 : 0
-    }))
-
-  return segments.map((segment, index) => ({
-    ...segment,
-    isLast: index === segments.length - 1
-  }))
-}
-
-function formatPercent(count: number, total: number): string {
-  if (!total) {
-    return '0.0%'
-  }
-
-  const percentage = (count / total) * 100
-
-  if (count > 0 && percentage < 0.1) {
-    return '<0.1%'
-  }
-
-  return `${percentage.toFixed(1)}%`
-}
-
-function formatCount(value: number): string {
-  return value.toLocaleString('ko-KR')
-}
-
 function getCategoryPath(category: string): string {
   return `/translate/editor?file=${encodeURIComponent(category)}`
 }
@@ -232,212 +175,226 @@ function getVersionPath(version: string, revision: string): string {
 
 <template>
   <ClientOnly>
-    <div v-if="hasError" class="flex flex-col px-5">
-      <UAlert class="mt-5" color="error" variant="soft" title="에디터 진행 상황을 불러오지 못했습니다." description="잠시 후 다시 시도해 주세요.">
+    <div
+      v-if="hasError"
+      class="flex flex-col px-5"
+    >
+      <UAlert
+        class="mt-5"
+        color="error"
+        variant="soft"
+        title="에디터 진행 상황을 불러오지 못했습니다."
+        description="잠시 후 다시 시도해 주세요."
+      >
         <template #actions>
-          <UButton size="sm" color="error" variant="outline" @click="refreshOverview()">다시 시도</UButton>
+          <UButton
+            size="sm"
+            color="error"
+            variant="outline"
+            @click="refreshOverview()"
+          >
+            다시 시도
+          </UButton>
         </template>
       </UAlert>
     </div>
 
-    <div v-else-if="isLoading" class="flex items-center justify-center h-full">
-      <UIcon name="i-tabler-loader-2" class="size-8 md:size-10 animate-spin" />
+    <div
+      v-else-if="isLoading"
+      class="flex items-center justify-center h-full"
+    >
+      <UIcon
+        name="i-tabler-loader-2"
+        class="size-8 md:size-10 animate-spin"
+      />
     </div>
 
-    <div v-else class="flex flex-col h-full">
+    <div
+      v-else
+      class="flex flex-col h-full"
+    >
       <div class="flex items-center justify-between gap-5 pt-5 pb-2 px-5">
-        <h1 class="text-xl md:text-2xl font-semibold">번역 에디터</h1>
+        <h1 class="text-xl md:text-2xl font-semibold">
+          번역 에디터
+        </h1>
 
         <div class="flex items-end md:items-center gap-4 px-3 py-2 bg-elevated rounded-md">
           <!-- 전체 상태별 비율 -->
           <div class="hidden sm:flex gap-3 shrink-0">
-            <UTooltip v-for="status in visibleStatuses" :key="status" :text="statusMeta[status].label">
+            <UTooltip
+              v-for="status in visibleStatuses"
+              :key="status"
+              :text="EDITOR_STATUS_META[status].label"
+            >
               <div class="flex items-center gap-1 text-xs font-mono">
-                <div class="size-1.5 rounded-full" :class="statusMeta[status].color" />
-                <span class="w-10 shrink-0">{{ formatPercent(overview.overall[status], overview.overall.total) }}</span>
+                <div
+                  class="size-1.5 rounded-full"
+                  :class="EDITOR_STATUS_META[status].color"
+                />
+                <span class="w-10 shrink-0">{{ formatEditorPercent(overview.overall[status], overview.overall.total) }}</span>
               </div>
             </UTooltip>
           </div>
 
           <div class="flex items-center gap-4">
             <!-- 전체 진행도 바 -->
-            <UPopover mode="hover" enable-touch :content="{ side: 'top', align: 'center', sideOffset: 8 }">
-              <div class="w-20 sm:w-24 h-2.5 flex bg-elevated rounded-xl relative overflow-hidden shrink-0"
-                aria-label="전체 번역 진행률" role="img">
-                <div class="absolute inset-0 flex">
-                  <div v-for="segment in getProgressSegments(overview.overall, overview.overall.total)"
-                    :key="segment.status" class="h-full shrink-0" :class="[
-                      statusMeta[segment.status].color,
-                      segment.isLast ? '' : 'border-r-2 border-default'
-                    ]" :style="{ width: `${segment.percentage}%` }" />
-                </div>
-              </div>
-
-              <template #content>
-                <div class="w-64 max-w-[calc(100vw-2rem)] p-3 text-xs">
-                  <div class="flex items-center justify-between gap-4">
-                    <h3 class="min-w-0 truncate text-sm font-semibold">전체 진행도</h3>
-                    <span class="font-mono text-muted shrink-0">
-                      {{ formatPercent(overview.overall.success, overview.overall.total) }}
-                    </span>
-                  </div>
-
-                  <div class="mt-3 flex items-center justify-between border-t border-default pt-3">
-                    <span class="text-muted">완료 항목</span>
-                    <span class="font-mono">
-                      {{ formatCount(overview.overall.success) }} / {{ formatCount(overview.overall.total) }}
-                    </span>
-                  </div>
-
-                  <div class="mt-3 flex flex-col gap-2 border-t border-default pt-3">
-                    <div v-for="status in EDITOR_PROGRESS_STATUSES" :key="status"
-                      class="flex items-center justify-between gap-4">
-                      <div class="flex min-w-0 items-center gap-2">
-                        <span class="size-1.5 shrink-0 rounded-full" :class="statusMeta[status].color" />
-                        <span class="truncate text-muted">{{ statusMeta[status].label }}</span>
-                      </div>
-                      <div class="shrink-0 text-right font-mono flex">
-                        <span>{{ formatCount(overview.overall[status]) }}</span>
-                        <span class="mx-1.5">·</span>
-                        <span class="w-10">{{ formatPercent(overview.overall[status], overview.overall.total) }}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </UPopover>
+            <TranslationProgressPopover
+              label="전체 진행도"
+              :counts="overview.overall"
+              :total="overview.overall.total"
+              size="overall"
+              aria-label="전체 번역 진행률"
+            />
 
             <!-- 전체 항목 갯수 -->
-            <span class="text-xs font-mono w-12 shrink-0">{{ formatCount(overview.overall.total) }}</span>
+            <span class="w-12 shrink-0 text-xs font-mono">{{ formatEditorCount(overview.overall.total) }}</span>
           </div>
         </div>
       </div>
 
       <div class="flex flex-col md:flex-row gap-3 py-3 px-5">
         <!-- 목록 옵션 -->
-        <UTabs v-model="listMode" :content="false" :items="items" color="neutral" size="xs"
-          :ui="{ trigger: 'px-3', list: 'bg-muted' }" class="w-fit" />
+        <UTabs
+          v-model="listMode"
+          :content="false"
+          :items="items"
+          color="neutral"
+          size="xs"
+          :ui="{ trigger: 'px-3', list: 'bg-muted' }"
+          class="w-fit"
+        />
 
         <div class="flex flex-1 justify-between gap-3">
           <!-- 파일 검색 -->
-          <UInput v-model="fileSearchValue" icon="i-tabler-search" color="neutral" variant="soft"
+          <UInput
+            v-model="fileSearchValue"
+            type="search"
+            icon="i-tabler-search"
+            color="neutral"
+            variant="soft"
+            :aria-label="listMode === 'category' ? '파일 검색' : '버전 검색'"
             :placeholder="listMode === 'category' ? '파일 검색' : '버전 검색'"
-            :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }">
-            <template v-if="fileSearchValue?.length" #trailing>
-              <UButton color="neutral" variant="link" size="sm" icon="i-tabler-x" aria-label="Clear input"
-                @click="fileSearchValue = ''" />
+            :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }"
+          >
+            <template
+              v-if="fileSearchValue.length"
+              #trailing
+            >
+              <UButton
+                color="neutral"
+                variant="link"
+                size="sm"
+                icon="i-tabler-x"
+                aria-label="검색어 지우기"
+                @click="fileSearchValue = ''"
+              />
             </template>
           </UInput>
 
           <!-- 전체 번역 -->
-          <UButton to="/translate/editor" color="info" variant="soft" class="px-4 shrink-0">전체 번역</UButton>
+          <UButton
+            to="/translate/editor"
+            color="info"
+            variant="soft"
+            class="px-4 shrink-0"
+          >
+            전체 번역
+          </UButton>
         </div>
       </div>
 
-      <div v-if="!visibleRows.length" class="flex flex-1 items-center justify-center">
+      <div
+        v-if="!visibleRows.length"
+        class="flex flex-1 items-center justify-center"
+      >
         <div class="flex flex-col items-center gap-2">
-          <UIcon :name="listMode === 'category' ? 'i-tabler-file-off' : 'i-tabler-tag-off'" class="size-8" />
+          <UIcon
+            :name="listMode === 'category' ? 'i-tabler-file-off' : 'i-tabler-tag-off'"
+            class="size-8"
+          />
           <span class="text-base font-medium">
             {{ hasRowsForMode ? '검색 결과가 없습니다.' : listMode === 'category' ? '등록된 카테고리가 없습니다.' : '등록된 버전이 없습니다.' }}
           </span>
           <span class="text-sm text-muted">
-            {{ hasRowsForMode ? (listMode === 'category' ? '다른 파일명을 검색해 보세요.' : '다른 버전을 검색해 보세요.') : listMode ===
-              'category'
+            {{ hasRowsForMode ? (listMode === 'category' ? '다른 파일명을 검색해 보세요.' : '다른 버전을 검색해 보세요.') : listMode
+              === 'category'
               ? '번역할 파일이 준비되면 이곳에 표시됩니다.' : '변경된 버전이 준비되면 이곳에 표시됩니다.' }}
           </span>
         </div>
       </div>
 
-      <div v-else class="flex flex-col px-3 pb-5">
-        <div v-for="row in visibleRows" :key="row.key"
-          class="flex items-center first:border-t border-b border-default hover:bg-muted transition-colors">
+      <div
+        v-else
+        class="flex flex-col px-3 pb-5"
+      >
+        <div
+          v-for="row in visibleRows"
+          :key="row.key"
+          class="flex items-center first:border-t border-b border-default hover:bg-muted transition-colors"
+        >
           <!-- 파일명 -->
-          <NuxtLink v-if="row.path" :to="row.path"
-            class="flex flex-1 items-center gap-2 py-3 pl-2 md:pl-5 min-w-0 text-sm hover:underline underline-offset-2">
-            <UIcon :name="listMode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
-              class="size-5 shrink-0 text-muted" />
+          <NuxtLink
+            v-if="row.path"
+            :to="row.path"
+            class="flex flex-1 items-center gap-2 py-3 pl-2 md:pl-5 min-w-0 text-sm hover:underline underline-offset-2"
+          >
+            <UIcon
+              :name="listMode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
+              class="size-5 shrink-0 text-muted"
+            />
             <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
           </NuxtLink>
 
-          <div v-else class="flex flex-1 items-center gap-2 py-3 pl-2 md:pl-5 min-w-0 text-sm">
-            <UIcon :name="listMode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
-              class="size-5 shrink-0 text-muted" />
+          <div
+            v-else
+            class="flex flex-1 items-center gap-2 py-3 pl-2 md:pl-5 min-w-0 text-sm"
+          >
+            <UIcon
+              :name="listMode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
+              class="size-5 shrink-0 text-muted"
+            />
             <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
           </div>
 
           <div class="flex items-center gap-4 px-2 md:px-5">
             <!-- 파일 상태별 비율 -->
             <div class="hidden sm:flex gap-3">
-              <UTooltip v-for="status in visibleStatuses" :key="status" :text="statusMeta[status].label">
+              <UTooltip
+                v-for="status in visibleStatuses"
+                :key="status"
+                :text="EDITOR_STATUS_META[status].label"
+              >
                 <div class="flex items-center gap-1 text-xs font-mono">
-                  <div class="size-1.5 rounded-full" :class="statusMeta[status].color" />
-                  <span class="w-10 shrink-0">{{ formatPercent(row.counts[status], row.total) }}</span>
+                  <div
+                    class="size-1.5 rounded-full"
+                    :class="EDITOR_STATUS_META[status].color"
+                  />
+                  <span class="w-10 shrink-0">{{ formatEditorPercent(row.counts[status], row.total) }}</span>
                 </div>
               </UTooltip>
             </div>
 
             <!-- 파일 진행도 바 -->
-            <UPopover mode="hover" enable-touch :content="{ side: 'top', align: 'center', sideOffset: 8 }">
-              <div class="w-20 sm:w-32 lg:w-52 h-2.5 flex bg-elevated rounded-xl relative overflow-hidden"
-                aria-label="파일 번역 진행률" role="img">
-                <div class="absolute inset-0 flex">
-                  <div v-for="segment in getProgressSegments(row.counts, row.total)" :key="segment.status"
-                    class="h-full shrink-0" :class="[
-                      statusMeta[segment.status].color,
-                      segment.isLast ? '' : 'border-r-2 border-default'
-                    ]" :style="{ width: `${segment.percentage}%` }" />
-                </div>
-              </div>
-
-              <template #content>
-                <div class="w-64 max-w-[calc(100vw-2rem)] p-3 text-xs">
-                  <div class="flex items-center justify-between gap-4">
-                    <h3 class="min-w-0 truncate text-sm font-semibold">{{ row.label }}</h3>
-                    <span class="font-mono text-muted shrink-0">
-                      {{ formatPercent(row.counts.success, row.total) }}
-                    </span>
-                  </div>
-
-                  <div class="mt-3 flex items-center justify-between border-t border-default pt-3">
-                    <span class="text-muted">완료 항목</span>
-                    <span class="font-mono">
-                      {{ formatCount(row.counts.success) }} / {{ formatCount(row.total) }}
-                    </span>
-                  </div>
-
-                  <div class="mt-3 flex flex-col gap-2 border-t border-default pt-3">
-                    <div v-for="status in EDITOR_PROGRESS_STATUSES" :key="status"
-                      class="flex items-center justify-between gap-4">
-                      <div class="flex min-w-0 items-center gap-2">
-                        <span class="size-1.5 shrink-0 rounded-full" :class="statusMeta[status].color" />
-                        <span class="truncate text-muted">{{ statusMeta[status].label }}</span>
-                      </div>
-                      <div class="shrink-0 text-right font-mono flex">
-                        <span>
-                          {{ formatCount(row.counts[status]) }}
-                        </span>
-                        <span class="mx-1.5">·</span>
-                        <span class="w-10">
-                          {{ formatPercent(row.counts[status], row.total) }}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </UPopover>
+            <TranslationProgressPopover
+              :label="row.label"
+              :counts="row.counts"
+              :total="row.total"
+              aria-label="파일 번역 진행률"
+            />
 
             <!-- 파일 내 항목 갯수 -->
-            <span class="text-xs font-mono w-12 shrink-0">{{ formatCount(row.total) }}</span>
+            <span class="w-12 shrink-0 text-xs font-mono">{{ formatEditorCount(row.total) }}</span>
           </div>
-
         </div>
       </div>
     </div>
 
     <template #fallback>
       <div class="flex items-center justify-center h-full">
-        <UIcon name="i-tabler-loader-2" class="size-8 md:size-10 animate-spin" />
+        <UIcon
+          name="i-tabler-loader-2"
+          class="size-8 md:size-10 animate-spin"
+        />
       </div>
     </template>
   </ClientOnly>

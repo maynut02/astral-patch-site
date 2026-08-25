@@ -12,7 +12,7 @@ export function getDatabase(): DatabaseClient {
   if (!databaseUrl) {
     throw createError({
       statusCode: 500,
-      statusMessage: 'DATABASE_URL is not configured'
+      statusMessage: 'Database is not configured'
     })
   }
 

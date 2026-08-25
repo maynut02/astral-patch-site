@@ -1,17 +1,14 @@
 <script setup lang="ts">
-definePageMeta({
-  middleware: async () => {
-    const { ready, loggedIn, fetch } = useUserSession()
+import {
+  HANDLE_MAX_LENGTH,
+  formatHandle,
+  getErrorStatus,
+  getHandleInitial,
+  getPublicProfilePath,
+  validateHandle
+} from '~/utils/profile'
 
-    if (!ready.value) {
-      await fetch()
-    }
-
-    if (!loggedIn.value) {
-      return navigateTo('/')
-    }
-  }
-})
+definePageMeta({ middleware: 'authenticated' })
 
 useHead({ title: '설정' })
 
@@ -34,17 +31,9 @@ const deleteConfirmation = ref('')
 const deleting = ref(false)
 const deleteError = ref('')
 
-const displayHandle = computed(() =>
-  state.handle.trim() ? `@${state.handle.trim()}` : '@handle'
-)
-
-const publicProfilePath = computed(() =>
-  state.handle.trim() ? `/@${encodeURIComponent(state.handle.trim())}` : '/'
-)
-
-const initial = computed(() =>
-  Array.from(state.handle.trim() || 'U')[0]?.toLocaleUpperCase() ?? 'U'
-)
+const displayHandle = computed(() => formatHandle(state.handle))
+const publicProfilePath = computed(() => getPublicProfilePath(state.handle))
+const initial = computed(() => getHandleInitial(state.handle))
 
 const isDirty = computed(() => state.handle.trim() !== savedHandle.value)
 const isBot = computed(() => String(user.value?.role || 'user') === 'bot')
@@ -69,40 +58,10 @@ watch(deleteModalOpen, (open) => {
   }
 })
 
-function textLength(value: string): number {
-  return Array.from(value).length
-}
-
 function validate(): boolean {
-  errors.handle = ''
-
-  const handle = state.handle.trim()
-
-  if (!handle) {
-    errors.handle = '핸들을 입력해 주세요.'
-  } else if (!/^[A-Za-z0-9]+$/.test(handle)) {
-    errors.handle = '핸들은 영문과 숫자만 사용할 수 있어요.'
-  } else if (textLength(handle) > 20) {
-    errors.handle = '핸들은 20자 이내로 입력해 주세요.'
-  }
+  errors.handle = validateHandle(state.handle)
 
   return !errors.handle
-}
-
-function getErrorStatus(error: unknown): number | undefined {
-  if (typeof error !== 'object' || error === null) {
-    return undefined
-  }
-
-  if ('status' in error && typeof error.status === 'number') {
-    return error.status
-  }
-
-  if ('statusCode' in error && typeof error.statusCode === 'number') {
-    return error.statusCode
-  }
-
-  return undefined
 }
 
 function resetProfile(): void {
@@ -248,7 +207,7 @@ async function deleteAccount(): Promise<void> {
         >
           <UInput
             v-model="state.handle"
-            maxlength="20"
+            :maxlength="HANDLE_MAX_LENGTH"
             autocomplete="username"
             color="neutral"
             class="w-full"

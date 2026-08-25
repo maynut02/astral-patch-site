@@ -29,7 +29,10 @@ useSeoMeta({
 
 <template>
   <UApp :toaster="toaster">
-    <NuxtLoadingIndicator color="var(--color-neutral-300)" :height="2" />
+    <NuxtLoadingIndicator
+      color="var(--color-neutral-300)"
+      :height="2"
+    />
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>

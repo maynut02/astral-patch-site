@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import type { UserRole } from '~/utils/user-role'
+import {
+  formatHandle,
+  getErrorStatus,
+  getHandleInitial
+} from '~/utils/profile'
 
 definePageMeta({
   validate: (route) => {
@@ -24,22 +29,6 @@ const { data: profile, error } = await useAsyncData(`public-user-${handle}`, () 
   $fetch<{ handle: string, role: UserRole }>(`/api/users/${encodeURIComponent(handle)}`)
 )
 
-function getErrorStatus(error: unknown): number | undefined {
-  if (typeof error !== 'object' || error === null) {
-    return undefined
-  }
-
-  if ('status' in error && typeof error.status === 'number') {
-    return error.status
-  }
-
-  if ('statusCode' in error && typeof error.statusCode === 'number') {
-    return error.statusCode
-  }
-
-  return undefined
-}
-
 if (error.value || !profile.value) {
   throw createError({
     statusCode: getErrorStatus(error.value) || 404,
@@ -48,10 +37,8 @@ if (error.value || !profile.value) {
 }
 
 const publicProfile = profile.value
-const displayHandle = computed(() => `@${publicProfile.handle || handle}`)
-const initial = computed(() =>
-  Array.from(publicProfile.handle || handle)[0]?.toLocaleUpperCase() ?? 'U'
-)
+const displayHandle = computed(() => formatHandle(publicProfile.handle || handle))
+const initial = computed(() => getHandleInitial(publicProfile.handle || handle))
 
 useHead({ title: displayHandle })
 </script>

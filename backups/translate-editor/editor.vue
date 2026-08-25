@@ -513,22 +513,48 @@ watch(canEdit, (value) => {
   <div class="flex flex-1 flex-col lg:flex-row gap-6 px-2 pb-6 md:px-6 max-w-400 mx-auto">
     <section class="hidden lg:flex flex-col shrink-0 w-60">
       <div class="sticky top-19 pb-8 max-h-[calc(100dvh-4.8rem)]">
-        <EditorFilterDesktop :search="search" :category="category" :category-items="categoryItems"
-          :revision-id="revisionId" :revision-items="revisionItems" :selected-languages="selectedLanguages"
-          :untranslated-only="untranslatedOnly" :page="displayedPage" :total-pages="totalPages" :loading="isLoading"
-          @update:search="search = $event" @update:category="category = $event"
-          @update:revision-id="revisionId = $event" @update:selected-languages="selectedLanguages = $event"
-          @update:untranslated-only="untranslatedOnly = $event" @update:page="page = $event" />
+        <EditorFilterDesktop
+          :search="search"
+          :category="category"
+          :category-items="categoryItems"
+          :revision-id="revisionId"
+          :revision-items="revisionItems"
+          :selected-languages="selectedLanguages"
+          :untranslated-only="untranslatedOnly"
+          :page="displayedPage"
+          :total-pages="totalPages"
+          :loading="isLoading"
+          @update:search="search = $event"
+          @update:category="category = $event"
+          @update:revision-id="revisionId = $event"
+          @update:selected-languages="selectedLanguages = $event"
+          @update:untranslated-only="untranslatedOnly = $event"
+          @update:page="page = $event"
+        />
       </div>
     </section>
 
     <section class="flex flex-1 flex-col gap-4">
-      <div v-if="hasError && !items.length" class="rounded-xl border border-error/30 bg-error/10 p-4">
-        <UAlert color="error" variant="soft" title="에디터 데이터를 불러오지 못했습니다." description="잠시 후 다시 시도해 주세요." />
+      <div
+        v-if="hasError && !items.length"
+        class="rounded-xl border border-error/30 bg-error/10 p-4"
+      >
+        <UAlert
+          color="error"
+          variant="soft"
+          title="에디터 데이터를 불러오지 못했습니다."
+          description="잠시 후 다시 시도해 주세요."
+        />
       </div>
 
-      <UAlert v-else-if="!isLoading && !items.length" color="neutral" variant="soft" icon="i-tabler-search-off"
-        title="조건에 맞는 항목이 없습니다." description="검색어나 필터 조건을 바꿔 보세요." />
+      <UAlert
+        v-else-if="!isLoading && !items.length"
+        color="neutral"
+        variant="soft"
+        icon="i-tabler-search-off"
+        title="조건에 맞는 항목이 없습니다."
+        description="검색어나 필터 조건을 바꿔 보세요."
+      />
 
       <template v-else-if="items.length">
         <div class="flex items-center justify-between text-xs">
@@ -536,27 +562,52 @@ watch(canEdit, (value) => {
           <span class="px-4 py-2 bg-muted rounded-xl">{{ displayedPage }} / {{ totalPages }} 페이지</span>
         </div>
 
-        <div v-for="item in items" :id="`editor-item-${item.id}`" :key="item.id"
-          class="flex flex-col bg-muted rounded-xl px-2">
+        <div
+          v-for="item in items"
+          :id="`editor-item-${item.id}`"
+          :key="item.id"
+          class="flex flex-col bg-muted rounded-xl px-2"
+        >
           <div class="flex items-center gap-4 p-4">
             <span class="text-base font-semibold">{{ item.category }}</span>
             <span class="text-sm font-medium text-muted">{{ item.unitKey }}</span>
           </div>
 
           <div class="flex flex-col gap-3 text-sm rounded-lg bg-default/50 p-4">
-            <div v-for="language in visibleLanguageItems" :key="language.key" class="flex gap-4">
+            <div
+              v-for="language in visibleLanguageItems"
+              :key="language.key"
+              class="flex gap-4"
+            >
               <span class="w-20 text-right text-muted font-medium shrink-0">{{ language.label }}</span>
               <span class="whitespace-pre-wrap wrap-break-word">{{ item[language.key] || '—' }}</span>
             </div>
             <div class="flex gap-4">
               <span class="w-20 text-right text-muted font-medium shrink-0">한국어</span>
-              <UTextarea v-if="isEditing(item.id)" v-model="draftKo" color="neutral" variant="outline" autoresize
-                :disabled="saving" placeholder="한국어 번역" :ui="{ base: 'bg-transparent' }" class="w-full" />
-              <div v-else class="min-w-0 flex-1">
+              <UTextarea
+                v-if="isEditing(item.id)"
+                v-model="draftKo"
+                color="neutral"
+                variant="outline"
+                autoresize
+                :disabled="saving"
+                placeholder="한국어 번역"
+                :ui="{ base: 'bg-transparent' }"
+                class="w-full"
+              />
+              <div
+                v-else
+                class="min-w-0 flex-1"
+              >
                 <p class="whitespace-pre-wrap wrap-break-word">
                   {{ item.ko || '미번역' }}
                 </p>
-                <UBadge v-if="item.pendingStatus === 'pending'" color="warning" variant="soft" class="mt-2">
+                <UBadge
+                  v-if="item.pendingStatus === 'pending'"
+                  color="warning"
+                  variant="soft"
+                  class="mt-2"
+                >
                   승인 대기
                 </UBadge>
               </div>
@@ -564,29 +615,59 @@ watch(canEdit, (value) => {
           </div>
 
           <div class="flex flex-col gap-2 p-3">
-            <p v-if="isEditing(item.id) && editError" class="text-right text-xs text-error">
+            <p
+              v-if="isEditing(item.id) && editError"
+              class="text-right text-xs text-error"
+            >
               {{ editError }}
             </p>
 
             <div class="flex justify-end gap-2">
-              <UButton icon="i-tabler-history" color="neutral" variant="soft" size="md" class="px-4 rounded-xl"
-                @click="openHistory(item.id)">
+              <UButton
+                icon="i-tabler-history"
+                color="neutral"
+                variant="soft"
+                size="md"
+                class="px-4 rounded-xl"
+                @click="openHistory(item.id)"
+              >
                 변경 기록
               </UButton>
 
               <template v-if="isEditing(item.id)">
-                <UButton icon="i-tabler-x" color="neutral" variant="ghost" size="md" class="px-4 rounded-xl"
-                  :disabled="saving" @click="cancelEdit">
+                <UButton
+                  icon="i-tabler-x"
+                  color="neutral"
+                  variant="ghost"
+                  size="md"
+                  class="px-4 rounded-xl"
+                  :disabled="saving"
+                  @click="cancelEdit"
+                >
                   취소
                 </UButton>
-                <UButton icon="i-tabler-device-floppy" color="info" variant="soft" size="md" class="px-4 rounded-xl"
-                  :loading="saving" @click="saveEdit(item)">
+                <UButton
+                  icon="i-tabler-device-floppy"
+                  color="info"
+                  variant="soft"
+                  size="md"
+                  class="px-4 rounded-xl"
+                  :loading="saving"
+                  @click="saveEdit(item)"
+                >
                   저장
                 </UButton>
               </template>
 
-              <UButton v-else-if="canEdit" icon="i-tabler-edit" color="info" variant="soft" size="md"
-                class="px-4 rounded-xl" @click="startEdit(item)">
+              <UButton
+                v-else-if="canEdit"
+                icon="i-tabler-edit"
+                color="info"
+                variant="soft"
+                size="md"
+                class="px-4 rounded-xl"
+                @click="startEdit(item)"
+              >
                 번역 수정
               </UButton>
             </div>
@@ -595,25 +676,55 @@ watch(canEdit, (value) => {
       </template>
     </section>
 
-    <USlideover v-model:open="historyOpen" side="right" inset :ui="{ content: 'max-w-2xl' }">
+    <USlideover
+      v-model:open="historyOpen"
+      side="right"
+      inset
+      :ui="{ content: 'max-w-2xl' }"
+    >
       <template #content>
-        <EditorChangeHistory :item-id="historyItemId" :reload-key="historyReloadKey" @changed="refreshItems" />
+        <EditorChangeHistory
+          :item-id="historyItemId"
+          :reload-key="historyReloadKey"
+          @changed="refreshItems"
+        />
       </template>
     </USlideover>
 
-    <div v-if="isLoading" class="fixed size-100 z-100 flex items-center justify-center bg-default/30 backdrop-blur-sm"
-      role="status" aria-live="polite" aria-label="데이터를 불러오는 중">
-      <UIcon name="i-tabler-loader-2" class="size-10 animate-spin text-default" />
+    <div
+      v-if="isLoading"
+      class="fixed size-100 z-100 flex items-center justify-center bg-default/30 backdrop-blur-sm"
+      role="status"
+      aria-live="polite"
+      aria-label="데이터를 불러오는 중"
+    >
+      <UIcon
+        name="i-tabler-loader-2"
+        class="size-10 animate-spin text-default"
+      />
       <span class="sr-only">데이터를 불러오는 중입니다.</span>
     </div>
 
     <section class="w-fit mx-auto lg:hidden sticky bottom-2 bg-elevated/60 backdrop-blur-lg rounded-xl p-1">
-      <EditorFilterMobile :search="search" :category="category" :category-items="categoryItems"
-        :revision-id="revisionId" :revision-items="revisionItems" :selected-languages="selectedLanguages"
-        :untranslated-only="untranslatedOnly" :page="displayedPage" :total-pages="totalPages" :loading="isLoading"
-        @update:search="search = $event" @update:category="category = $event" @update:revision-id="revisionId = $event"
-        @update:selected-languages="selectedLanguages = $event" @update:untranslated-only="untranslatedOnly = $event"
-        @update:page="page = $event" @reset="resetFilters" />
+      <EditorFilterMobile
+        :search="search"
+        :category="category"
+        :category-items="categoryItems"
+        :revision-id="revisionId"
+        :revision-items="revisionItems"
+        :selected-languages="selectedLanguages"
+        :untranslated-only="untranslatedOnly"
+        :page="displayedPage"
+        :total-pages="totalPages"
+        :loading="isLoading"
+        @update:search="search = $event"
+        @update:category="category = $event"
+        @update:revision-id="revisionId = $event"
+        @update:selected-languages="selectedLanguages = $event"
+        @update:untranslated-only="untranslatedOnly = $event"
+        @update:page="page = $event"
+        @reset="resetFilters"
+      />
     </section>
   </div>
 </template>

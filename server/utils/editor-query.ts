@@ -13,6 +13,7 @@ import {
   type EditorItemsResponse,
   type EditorSelectOption
 } from '../../shared/types/editor'
+import { containsLikePattern, getFirstQueryValue, parsePage as parseValidatedPage, UUID_PATTERN } from './validation'
 
 export const EDITOR_PAGE_SIZE = 50
 
@@ -29,29 +30,6 @@ export interface EditorQueryFilters {
   itemId: string
   itemIds: string[] | null
   untranslatedOnly: boolean
-}
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-function getFirstQueryValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    return typeof value[0] === 'string' ? value[0] : ''
-  }
-
-  return typeof value === 'string' ? value : ''
-}
-
-function parsePage(value: unknown): number {
-  const page = Number(getFirstQueryValue(value) || '1')
-
-  if (!Number.isInteger(page) || page < 1 || page > 100000) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Invalid page'
-    })
-  }
-
-  return page
 }
 
 function parseCategory(value: unknown): string {
@@ -200,7 +178,7 @@ export function parseEditorQuery(query: Record<string, unknown>): EditorQueryFil
   }
 
   return {
-    page: parsePage(query.page),
+    page: parseValidatedPage(query.page, 'Invalid page'),
     search,
     searchType,
     searchMatch,
@@ -223,7 +201,7 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
   const hasItem = Boolean(filters.itemId)
   const hasItems = filters.itemIds !== null
   const hasStatusFilter = filters.statusFilter !== 'all'
-  const searchPattern = `%${filters.search}%`
+  const searchPattern = containsLikePattern(filters.search)
   const searchByContains = filters.searchMatch === 'contains'
   const searchByExact = filters.searchMatch === 'exact'
   const searchByContent = filters.searchType === 'content'
@@ -258,10 +236,10 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
             OR (
               ${searchByContains}
               AND (
-                COALESCE(wb.cn_s, '') ILIKE ${searchPattern}
-                OR COALESCE(wb.en, '') ILIKE ${searchPattern}
-                OR COALESCE(wb.jp, '') ILIKE ${searchPattern}
-                OR COALESCE(wb.cn_t, '') ILIKE ${searchPattern}
+                COALESCE(wb.cn_s, '') ILIKE ${searchPattern} ESCAPE '\\'
+                OR COALESCE(wb.en, '') ILIKE ${searchPattern} ESCAPE '\\'
+                OR COALESCE(wb.jp, '') ILIKE ${searchPattern} ESCAPE '\\'
+                OR COALESCE(wb.cn_t, '') ILIKE ${searchPattern} ESCAPE '\\'
               )
             )
           )
@@ -287,7 +265,7 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
                     THEN COALESCE(wb.latest_proposed_text, wb.approved_text, '')
                   ELSE COALESCE(wb.approved_text, '')
                 END
-              ) ILIKE ${searchPattern}
+              ) ILIKE ${searchPattern} ESCAPE '\\'
             )
           )
         )
@@ -300,7 +278,7 @@ function buildWhere(sql: DatabaseClient, filters: EditorQueryFilters) {
             )
             OR (
               ${searchByContains}
-              AND CONCAT(COALESCE(wb.namespace, ''), '_', COALESCE(wb.unit_key, '')) ILIKE ${searchPattern}
+              AND CONCAT(COALESCE(wb.namespace, ''), '_', COALESCE(wb.unit_key, '')) ILIKE ${searchPattern} ESCAPE '\\'
             )
           )
         )

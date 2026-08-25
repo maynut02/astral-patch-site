@@ -45,7 +45,10 @@ const segments = computed<HighlightSegment[]>(() => {
 
 <template>
   <span class="whitespace-pre-wrap">
-    <span v-for="(segment, index) in segments" :key="index"
-      :class="segment.matched ? 'rounded-sm bg-info/20 text-info' : undefined">{{ segment.text }}</span>
+    <span
+      v-for="(segment, index) in segments"
+      :key="index"
+      :class="segment.matched ? 'rounded-sm bg-info/20 text-info' : undefined"
+    >{{ segment.text }}</span>
   </span>
 </template>

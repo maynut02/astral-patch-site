@@ -1,16 +1,20 @@
-import { readBody } from 'h3'
-import { updateUserProfile } from '../utils/auth-user'
+import { requireCurrentSessionUser, updateUserProfile } from '../utils/auth-user'
+import { readJsonBody } from '../utils/request-security'
 
 export default defineEventHandler(async (event) => {
-  const session = await requireUserSession(event)
-  const body = await readBody<{ handle?: unknown }>(event)
+  const currentUser = await requireCurrentSessionUser(event)
+  const body = await readJsonBody<{ handle?: unknown }>(event)
+  const session = await getUserSession(event)
 
-  const user = await updateUserProfile(session.user.id, body || {})
+  const user = await updateUserProfile(currentUser.id, body)
 
   await setUserSession(event, {
+    ...session,
     user: {
-      ...session.user,
-      handle: user.handle
+      id: user.googleSub,
+      email: user.email,
+      handle: user.handle,
+      role: user.role
     }
   })
 

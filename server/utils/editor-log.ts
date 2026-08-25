@@ -8,37 +8,16 @@ import type {
   EditorSourceRevisionsResponse,
   EditorTranslationLogResponse
 } from '../../shared/types/editor'
+import { containsLikePattern, getFirstQueryValue, parsePage as parseValidatedPage, parseUuid } from './validation'
 
 export const EDITOR_LOG_PAGE_SIZE = 50
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const CHANGE_STATUSES: EditorChangeStatus[] = ['pending', 'approved', 'rejected', 'superseded']
 
 export interface EditorTranslationLogFilters {
   page: number
   search: string
   status: EditorChangeStatus | ''
-}
-
-function getFirstQueryValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    return typeof value[0] === 'string' ? value[0] : ''
-  }
-
-  return typeof value === 'string' ? value : ''
-}
-
-function parsePage(value: unknown): number {
-  const page = Number(getFirstQueryValue(value) || '1')
-
-  if (!Number.isInteger(page) || page < 1 || page > 100000) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Invalid log page'
-    })
-  }
-
-  return page
 }
 
 export function parseEditorLogQuery(query: Record<string, unknown>): EditorTranslationLogFilters {
@@ -60,7 +39,7 @@ export function parseEditorLogQuery(query: Record<string, unknown>): EditorTrans
   }
 
   return {
-    page: parsePage(query.page),
+    page: parseValidatedPage(query.page, 'Invalid log page'),
     search,
     status: rawStatus === 'all' ? '' : rawStatus as EditorChangeStatus | ''
   }
@@ -69,30 +48,23 @@ export function parseEditorLogQuery(query: Record<string, unknown>): EditorTrans
 export function parseEditorLogRevisionId(value: unknown): string {
   const revisionId = getFirstQueryValue(value)
 
-  if (!UUID_PATTERN.test(revisionId)) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Invalid source revision id'
-    })
-  }
-
-  return revisionId
+  return parseUuid(revisionId, 'Invalid source revision id')
 }
 
 function buildTranslationLogWhere(sql: DatabaseClient, filters: EditorTranslationLogFilters) {
   const hasSearch = Boolean(filters.search)
   const hasStatus = Boolean(filters.status)
-  const searchPattern = `%${filters.search}%`
+  const searchPattern = containsLikePattern(filters.search)
 
   return sql`
     tc.locale = 'ko'
     AND (
       NOT ${hasSearch}
-      OR tu.namespace ILIKE ${searchPattern}
-      OR tu.unit_key ILIKE ${searchPattern}
-      OR COALESCE(au.handle, '') ILIKE ${searchPattern}
-      OR COALESCE(tc.previous_text, '') ILIKE ${searchPattern}
-      OR tc.proposed_text ILIKE ${searchPattern}
+      OR tu.namespace ILIKE ${searchPattern} ESCAPE '\\'
+      OR tu.unit_key ILIKE ${searchPattern} ESCAPE '\\'
+      OR COALESCE(au.handle, '') ILIKE ${searchPattern} ESCAPE '\\'
+      OR COALESCE(tc.previous_text, '') ILIKE ${searchPattern} ESCAPE '\\'
+      OR tc.proposed_text ILIKE ${searchPattern} ESCAPE '\\'
     )
     AND (
       NOT ${hasStatus}

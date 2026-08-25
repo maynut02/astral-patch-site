@@ -16,13 +16,30 @@ import type {
   EditorDictionaryEntry,
   EditorDictionaryVisibility
 } from '#shared/types/editor-dictionary'
-import {
-  EDITOR_PROGRESS_STATUSES,
-  type EditorOverviewResponse,
-  type EditorProgressCounts,
-  type EditorProgressStatus,
-  type EditorProgressSummary
+import type {
+  EditorOverviewResponse,
+  EditorProgressCounts,
+  EditorProgressStatus,
+  EditorProgressSummary
 } from '#shared/types/editor-overview'
+import {
+  readEditorStorageValue,
+  useEditorDraftStorage,
+  writeEditorStorageValue
+} from '~/composables/editor-drafts'
+import {
+  formatEditorCount as formatCount,
+  formatEditorHandle as formatHandle,
+  formatEditorPercent as formatPercent,
+  formatEditorVersion as getVersionLabel,
+  getEditorQueryString as getQueryString,
+  getEditorUserPath as getUserPath,
+  isEditorSearchMatch,
+  isEditorSearchType,
+  normalizeEditorHandle as normalizeHandle,
+  normalizeEditorRevision as normalizeRevision,
+  normalizeEditorVersion as normalizeVersion
+} from '~/utils/editor-helpers'
 
 type EditorItemStatus = EditorProgressStatus
 type EditorListMode = 'category' | 'version'
@@ -55,18 +72,6 @@ interface EditorDictionarySearchField {
   text: string
 }
 
-function normalizeHandle(value: string | null | undefined): string {
-  return value?.trim().replace(/^@+/, '') ?? ''
-}
-
-function getUserPath(handle: string): string {
-  return `/@${encodeURIComponent(handle)}`
-}
-
-function formatHandle(handle: string): string {
-  return `@${handle}`
-}
-
 function getDictionaryOwnerHandle(dictionary: EditorDictionary): string {
   return normalizeHandle(dictionary.ownerHandle)
 }
@@ -89,14 +94,6 @@ interface PersistedItemState {
   ko: string
   pendingStatus: EditorItem['pendingStatus']
   approvedForCurrentSource: EditorItem['approvedForCurrentSource']
-}
-
-interface EditorDraft {
-  category: string
-  unitKey: string
-  text: string
-  updatedAt: number
-  itemId?: string
 }
 
 definePageMeta({
@@ -180,8 +177,6 @@ const historyReloadKey = ref(0)
 const selectFirstItemOnNextLoad = ref(false)
 const listContainer = ref<HTMLElement | null>(null)
 const scrollAfterLoad = ref(false)
-const drafts = ref<Record<string, EditorDraft>>({})
-const draftsReady = ref(false)
 const isSaving = ref(false)
 
 const route = useRoute()
@@ -190,6 +185,15 @@ const { loggedIn } = useUserSession()
 const toast = useToast()
 
 const draftStorageKey = 'astral-editor-translation-drafts-v1'
+const {
+  drafts,
+  draftsReady,
+  loadDrafts,
+  applyDraftsToItems,
+  hasItemDraft,
+  removeDraftsByKeys,
+  getDraftKey
+} = useEditorDraftStorage(draftStorageKey)
 
 const defaultItems: EditorItemsResponse = {
   items: [],
@@ -342,135 +346,13 @@ const itemStatusMeta: Record<EditorItemStatus, { label: string, color: string, t
   }
 }
 
-function getQueryString(value: unknown): string {
-  if (Array.isArray(value)) {
-    return typeof value[0] === 'string' ? value[0] : ''
-  }
-
-  return typeof value === 'string' ? value : ''
-}
-
-function isEditorSearchType(value: unknown): value is EditorSearchType {
-  return value === 'all' || value === 'content' || value === 'key' || value === 'source' || value === 'translation'
-}
-
-function isEditorSearchMatch(value: unknown): value is EditorSearchMatch {
-  return value === 'contains' || value === 'exact'
-}
-
-function getDraftKey(category: string, unitKey: string): string {
-  return `${category}::${unitKey}`
-}
-
 function getItemDraftKey(item: Pick<EditorItem, 'category' | 'unitKey'>): string {
   return getDraftKey(item.category, item.unitKey)
 }
 
-function hasItemDraft(item: Pick<EditorItem, 'category' | 'unitKey'>): boolean {
-  return Boolean(drafts.value[getItemDraftKey(item)])
-}
-
-function isEditorDraft(value: unknown): value is EditorDraft {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  const draft = value as Record<string, unknown>
-
-  return typeof draft.category === 'string'
-    && typeof draft.unitKey === 'string'
-    && typeof draft.text === 'string'
-    && typeof draft.updatedAt === 'number'
-    && (draft.itemId === undefined || typeof draft.itemId === 'string')
-}
-
-function loadDrafts(): void {
-  if (!import.meta.client) {
-    draftsReady.value = true
-    return
-  }
-
-  const storedDrafts = window.localStorage.getItem(draftStorageKey)
-
-  if (storedDrafts) {
-    try {
-      const parsed: unknown = JSON.parse(storedDrafts)
-
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const nextDrafts: Record<string, EditorDraft> = {}
-
-        for (const [key, value] of Object.entries(parsed)) {
-          if (isEditorDraft(value)) {
-            nextDrafts[key] = {
-              category: value.category,
-              unitKey: value.unitKey,
-              text: value.text,
-              updatedAt: value.updatedAt,
-              ...(value.itemId ? { itemId: value.itemId } : {})
-            }
-          }
-        }
-
-        drafts.value = nextDrafts
-      }
-    } catch {
-      // 저장된 임시저장 데이터가 손상된 경우 비어 있는 상태로 시작한다.
-      drafts.value = {}
-    }
-  }
-
-  draftsReady.value = true
-}
-
-function persistDrafts(): void {
-  if (!import.meta.client || !draftsReady.value) {
-    return
-  }
-
-  if (Object.keys(drafts.value).length === 0) {
-    window.localStorage.removeItem(draftStorageKey)
-    return
-  }
-
-  window.localStorage.setItem(draftStorageKey, JSON.stringify(drafts.value))
-}
-
-function applyDraftsToItems(itemsToApply: EditorItem[]): void {
-  if (!draftsReady.value) {
-    return
-  }
-
-  let nextDrafts = drafts.value
-  let draftsChanged = false
-
-  for (const item of itemsToApply) {
-    const key = getItemDraftKey(item)
-    const draft = nextDrafts[key]
-
-    if (draft) {
-      if (!draft.itemId) {
-        nextDrafts = {
-          ...nextDrafts,
-          [key]: {
-            ...draft,
-            itemId: item.id
-          }
-        }
-        draftsChanged = true
-      }
-
-      item.ko = draft.text
-    }
-  }
-
-  if (draftsChanged) {
-    drafts.value = nextDrafts
-  }
-}
-
 onMounted(() => {
-  const storedLanguages = window.localStorage.getItem(languageStorageKey)
-  const storedDiffMode = window.localStorage.getItem(diffModeStorageKey)
+  const storedLanguages = readEditorStorageValue(languageStorageKey)
+  const storedDiffMode = readEditorStorageValue(diffModeStorageKey)
 
   if (storedLanguages) {
     try {
@@ -499,7 +381,7 @@ watch(displayLanguages, (languages) => {
     return
   }
 
-  window.localStorage.setItem(languageStorageKey, JSON.stringify(languages))
+  writeEditorStorageValue(languageStorageKey, JSON.stringify(languages))
 }, { deep: true })
 
 watch(diffMode, (mode) => {
@@ -507,12 +389,8 @@ watch(diffMode, (mode) => {
     return
   }
 
-  window.localStorage.setItem(diffModeStorageKey, mode)
+  writeEditorStorageValue(diffModeStorageKey, mode)
 })
-
-watch(drafts, () => {
-  persistDrafts()
-}, { deep: true })
 
 const initialSearch = getQueryString(route.query.search).trim()
 searchInput.value = initialSearch
@@ -521,14 +399,6 @@ const initialSearchType = getQueryString(route.query.searchType).trim().toLowerC
 searchType.value = isEditorSearchType(initialSearchType) ? initialSearchType : 'all'
 const initialSearchMatch = getQueryString(route.query.match).trim().toLowerCase()
 searchMatch.value = isEditorSearchMatch(initialSearchMatch) ? initialSearchMatch : 'contains'
-
-function normalizeVersion(value: string): string {
-  return value.trim().replace(/^v/i, '')
-}
-
-function normalizeRevision(value: string): string {
-  return value.trim().replace(/^r/i, '')
-}
 
 const category = computed(() => getQueryString(route.query.file).trim())
 const version = computed(() => normalizeVersion(getQueryString(route.query.version)))
@@ -615,10 +485,6 @@ const backPath = computed(() => {
   return queryString ? `/translate?${queryString}` : '/translate'
 })
 
-function getVersionLabel(versionValue: string, revisionValue: string): string {
-  return `v${normalizeVersion(versionValue)} · r${normalizeRevision(revisionValue)}`
-}
-
 function getCategoryPath(categoryValue: string): string {
   return `/translate/editor?file=${encodeURIComponent(categoryValue)}`
 }
@@ -661,6 +527,12 @@ function getDictionaryExpandedFields(item: EditorItem): EditorDictionarySearchFi
     { label: '한국어', text: item.ko }
   ]
 }
+
+const dictionarySearchRows = computed(() => dictionarySearchItems.value.map(item => ({
+  item,
+  fields: getDictionarySearchFields(item),
+  expandedFields: getDictionaryExpandedFields(item)
+})))
 
 function toggleDictionarySearchItem(itemId: string): void {
   expandedDictionarySearchItemId.value = expandedDictionarySearchItemId.value === itemId
@@ -1020,8 +892,7 @@ const {
 } = await useFetch<EditorItemsResponse>('/api/editor/items', {
   query: requestQuery,
   default: () => defaultItems,
-  server: false,
-  watch: [requestQuery]
+  server: false
 })
 
 const {
@@ -1036,10 +907,8 @@ const {
 })
 
 const items = computed(() => itemsData.value?.items ?? [])
-const selectedItemKey = computed(() => {
-  const item = items.value.find(item => item.id === selectedItemId.value)
-  return item ? `${item.category}_${item.unitKey}` : ''
-})
+const selectedItem = computed(() => items.value.find(item => item.id === selectedItemId.value) ?? null)
+const selectedItemKey = computed(() => selectedItem.value ? `${selectedItem.value.category}_${selectedItem.value.unitKey}` : '')
 const total = computed(() => itemsData.value?.total ?? 0)
 const totalPages = computed(() => Math.max(1, itemsData.value?.totalPages ?? 1))
 const isLoading = computed(() => itemsStatus.value === 'idle' || itemsStatus.value === 'pending')
@@ -1053,14 +922,8 @@ const currentPageDrafts = computed(() => items.value.flatMap((item) => {
   return draft ? [{ item, draft }] : []
 }))
 const currentPageDraftCount = computed(() => currentPageDrafts.value.length)
-const selectedItemHasDraft = computed(() => {
-  const item = items.value.find(item => item.id === selectedItemId.value)
-  return item ? hasItemDraft(item) : false
-})
-const selectedItemStatus = computed(() => {
-  const item = items.value.find(item => item.id === selectedItemId.value)
-  return item ? getItemStatus(item) : null
-})
+const selectedItemHasDraft = computed(() => selectedItem.value ? hasItemDraft(selectedItem.value) : false)
+const selectedItemStatus = computed(() => selectedItem.value ? getItemStatus(selectedItem.value) : null)
 const selectedItemStatusMeta = computed(() => selectedItemStatus.value
   ? itemStatusMeta[selectedItemStatus.value]
   : null)
@@ -1146,38 +1009,6 @@ const currentProgress = computed<EditorProgressSummary>(() => {
 
   return overview.value.overall
 })
-
-function getProgressSegments(progress: EditorProgressSummary) {
-  const segments = EDITOR_PROGRESS_STATUSES
-    .filter(status => progress[status] > 0)
-    .map(status => ({
-      status,
-      percentage: progress.total > 0 ? (progress[status] / progress.total) * 100 : 0
-    }))
-
-  return segments.map((segment, index) => ({
-    ...segment,
-    isLast: index === segments.length - 1
-  }))
-}
-
-function formatPercent(count: number, totalCount: number): string {
-  if (!totalCount) {
-    return '0.0%'
-  }
-
-  const percentage = (count / totalCount) * 100
-
-  if (count > 0 && percentage < 0.1) {
-    return '<0.1%'
-  }
-
-  return `${percentage.toFixed(1)}%`
-}
-
-function formatCount(value: number): string {
-  return value.toLocaleString('ko-KR')
-}
 
 function toggleDisplayLanguage(language: EditorLanguage): void {
   displayLanguages.value = displayLanguages.value.includes(language)
@@ -1363,23 +1194,6 @@ function selectItem(item: EditorItem): void {
 
 function removeDraftByKey(key: string): void {
   removeDraftsByKeys([key])
-}
-
-function removeDraftsByKeys(keys: string[]): void {
-  const keysToRemove = new Set(keys)
-  const nextDrafts = { ...drafts.value }
-  let removed = false
-
-  for (const key of keysToRemove) {
-    if (nextDrafts[key]) {
-      delete nextDrafts[key]
-      removed = true
-    }
-  }
-
-  if (removed) {
-    drafts.value = nextDrafts
-  }
 }
 
 function updateItemDraft(item: EditorItem): void {
@@ -1704,60 +1518,30 @@ watch(items, (nextItems) => {
 <template>
   <div class="flex h-dvh flex-col overflow-hidden">
     <header class="relative z-50 flex h-16 shrink-0 items-center border-b border-default bg-muted px-2 sm:px-3">
-      <UButton :to="backPath" icon="i-tabler-chevron-left" color="neutral" variant="soft" size="lg" class="mr-2 sm:mr-4"
-        :ui="{ leadingIcon: 'size-5 lg:size-6' }" />
+      <UButton
+        :to="backPath"
+        icon="i-tabler-chevron-left"
+        color="neutral"
+        variant="soft"
+        size="lg"
+        class="mr-2 sm:mr-4"
+        :ui="{ leadingIcon: 'size-5 lg:size-6' }"
+      />
 
       <div class="flex min-w-0 flex-1 flex-col">
         <div class="flex min-w-0 items-center gap-2 sm:gap-3">
-          <h1 class="truncate font-medium" :title="headerTitle">{{ headerTitle }}</h1>
+          <h1
+            class="truncate font-medium"
+            :title="headerTitle"
+          >
+            {{ headerTitle }}
+          </h1>
           <!-- 현재 파일/태그 진행도 -->
-          <UPopover mode="hover" enable-touch :content="{ side: 'bottom', align: 'center', sideOffset: 8 }">
-            <div class="hidden items-center sm:flex">
-              <div class="w-20 sm:w-28 h-1.5 flex bg-elevated rounded-xl relative overflow-hidden shrink-0"
-                aria-label="현재 번역 진행률" role="img">
-                <div class="absolute inset-0 flex">
-                  <div v-for="segment in getProgressSegments(currentProgress)" :key="segment.status"
-                    class="h-full shrink-0" :class="[
-                      itemStatusMeta[segment.status].color,
-                      segment.isLast ? '' : 'border-r-2 border-default'
-                    ]" :style="{ width: `${segment.percentage}%` }" />
-                </div>
-              </div>
-            </div>
-
-            <template #content>
-              <div class="w-64 max-w-[calc(100vw-2rem)] p-3 text-xs">
-                <div class="flex items-center justify-between gap-4">
-                  <h3 class="min-w-0 truncate text-sm font-semibold">{{ headerTitle }} 진행도</h3>
-                  <span class="font-mono text-muted shrink-0">
-                    {{ formatPercent(currentProgress.success, currentProgress.total) }}
-                  </span>
-                </div>
-
-                <div class="mt-3 flex items-center justify-between border-t border-default pt-3">
-                  <span class="text-muted">완료 항목</span>
-                  <span class="font-mono">
-                    {{ formatCount(currentProgress.success) }} / {{ formatCount(currentProgress.total) }}
-                  </span>
-                </div>
-
-                <div class="mt-3 flex flex-col gap-2 border-t border-default pt-3">
-                  <div v-for="status in EDITOR_PROGRESS_STATUSES" :key="status"
-                    class="flex items-center justify-between gap-4">
-                    <div class="flex min-w-0 items-center gap-2">
-                      <span class="size-1.5 shrink-0 rounded-full" :class="itemStatusMeta[status].color" />
-                      <span class="truncate text-muted">{{ itemStatusMeta[status].label }}</span>
-                    </div>
-                    <div class="shrink-0 text-right font-mono flex">
-                      <span>{{ formatCount(currentProgress[status]) }}</span>
-                      <span class="mx-1.5">·</span>
-                      <span class="w-10">{{ formatPercent(currentProgress[status], currentProgress.total) }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </UPopover>
+          <EditorProgressPopover
+            :title="headerTitle"
+            :progress="currentProgress"
+            :status-meta="itemStatusMeta"
+          />
         </div>
 
         <span class="flex items-center gap-1.5 text-xs text-muted">
@@ -1769,14 +1553,26 @@ watch(items, (nextItems) => {
       </div>
 
       <div class="ml-2 flex shrink-0 items-center gap-1">
-        <UButton icon="i-tabler-bell" color="neutral" variant="ghost" size="lg"
-          :ui="{ leadingIcon: 'size-5', base: 'p-2 lg:p-2.5' }" class="hidden sm:inline-flex" />
+        <UButton
+          icon="i-tabler-bell"
+          color="neutral"
+          variant="ghost"
+          size="lg"
+          :ui="{ leadingIcon: 'size-5', base: 'p-2 lg:p-2.5' }"
+          class="hidden sm:inline-flex"
+        />
         <AppUserMenu context="editor" />
-        <UButton :icon="isMobileSidebarOpen ? 'i-tabler-layout-sidebar-right-filled' : 'i-tabler-layout-sidebar-right'"
-          color="neutral" variant="ghost" size="lg" class="lg:hidden"
+        <UButton
+          :icon="isMobileSidebarOpen ? 'i-tabler-layout-sidebar-right-filled' : 'i-tabler-layout-sidebar-right'"
+          color="neutral"
+          variant="ghost"
+          size="lg"
+          class="lg:hidden"
           :class="isMobileSidebarOpen ? 'bg-elevated text-default' : 'text-dimmed hover:text-default'"
-          :aria-label="isMobileSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :aria-pressed="isMobileSidebarOpen"
-          @click="isMobileSidebarOpen = !isMobileSidebarOpen" />
+          :aria-label="isMobileSidebarOpen ? '사이드바 닫기' : '사이드바 열기'"
+          :aria-pressed="isMobileSidebarOpen"
+          @click="isMobileSidebarOpen = !isMobileSidebarOpen"
+        />
       </div>
     </header>
 
@@ -1784,45 +1580,97 @@ watch(items, (nextItems) => {
       <main class="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-default">
         <!-- 툴바 -->
         <div
-          class="flex shrink-0 flex-wrap gap-1.5 border-b border-default bg-muted p-1.5 sm:gap-2 sm:p-2 md:flex-nowrap">
+          class="flex shrink-0 flex-wrap gap-1.5 border-b border-default bg-muted p-1.5 sm:gap-2 sm:p-2 md:flex-nowrap"
+        >
           <div class="flex w-full min-w-0 flex-1 gap-1 md:w-auto">
-            <UInput v-model="searchInput" size="lg" color="neutral" variant="ghost" placeholder="검색"
-              class="min-w-0 max-md:flex-1" :ui="{ base: 'px-2', trailing: 'pe-1.5' }"
-              @keydown.enter.prevent="applySearch">
+            <UInput
+              v-model="searchInput"
+              size="lg"
+              color="neutral"
+              variant="ghost"
+              placeholder="검색"
+              class="min-w-0 max-md:flex-1"
+              :ui="{ base: 'px-2', trailing: 'pe-1.5' }"
+              @keydown.enter.prevent="applySearch"
+            >
               <template #trailing>
-                <UButton icon="i-tabler-search" color="neutral" variant="link" size="md" aria-label="검색"
-                  :disabled="searchInput.trim() === search" @click="applySearch" />
+                <UButton
+                  icon="i-tabler-search"
+                  color="neutral"
+                  variant="link"
+                  size="md"
+                  aria-label="검색"
+                  :disabled="searchInput.trim() === search"
+                  @click="applySearch"
+                />
               </template>
             </UInput>
             <div class="my-1 border-x border-default mx-1" />
-            <UPopover v-model:open="searchFilterOpen" :content="{ align: 'start', side: 'bottom', sideOffset: 8 }">
-              <UTooltip text="검색 설정" :delay-duration="0">
+            <UPopover
+              v-model:open="searchFilterOpen"
+              :content="{ align: 'start', side: 'bottom', sideOffset: 8 }"
+            >
+              <UTooltip
+                text="검색 설정"
+                :delay-duration="0"
+              >
                 <div class="relative">
-                  <UButton icon="i-tabler-adjustments-horizontal" color="neutral" variant="ghost" size="lg" :class="searchFilterOpen
-                    ? 'bg-elevated text-default'
-                    : isSearchFilterActive ? 'text-default' : 'text-dimmed hover:text-default'" aria-label="검색 설정" />
-                  <span v-if="isSearchFilterActive"
-                    class="pointer-events-none absolute right-1.5 top-1.5 size-1.5 rounded-full bg-info ring-1 ring-muted" />
+                  <UButton
+                    icon="i-tabler-adjustments-horizontal"
+                    color="neutral"
+                    variant="ghost"
+                    size="lg"
+                    :class="searchFilterOpen
+                      ? 'bg-elevated text-default'
+                      : isSearchFilterActive ? 'text-default' : 'text-dimmed hover:text-default'"
+                    aria-label="검색 설정"
+                  />
+                  <span
+                    v-if="isSearchFilterActive"
+                    class="pointer-events-none absolute right-1.5 top-1.5 size-1.5 rounded-full bg-info ring-1 ring-muted"
+                  />
                 </div>
               </UTooltip>
               <template #content>
                 <div class="flex min-w-40 flex-col p-1.5">
                   <span class="px-2 py-1 text-xs font-medium text-dimmed">검색 범위</span>
-                  <button v-for="option in searchTypeOptions" :key="option.key" type="button"
+                  <button
+                    v-for="option in searchTypeOptions"
+                    :key="option.key"
+                    type="button"
                     class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
-                    @click="void selectSearchType(option.key)">
-                    <UIcon v-if="searchType === option.key" name="i-tabler-check" class="size-4" />
-                    <span v-else class="size-4" />
+                    @click="void selectSearchType(option.key)"
+                  >
+                    <UIcon
+                      v-if="searchType === option.key"
+                      name="i-tabler-check"
+                      class="size-4"
+                    />
+                    <span
+                      v-else
+                      class="size-4"
+                    />
                     <span>{{ option.label }}</span>
                   </button>
 
                   <div class="mt-2 border-t border-default pt-2">
                     <span class="px-2 py-1 text-xs font-medium text-dimmed">검색 옵션</span>
-                    <button v-for="option in searchMatchOptions" :key="option.key" type="button"
+                    <button
+                      v-for="option in searchMatchOptions"
+                      :key="option.key"
+                      type="button"
                       class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
-                      @click="void selectSearchMatch(option.key)">
-                      <UIcon v-if="searchMatch === option.key" name="i-tabler-check" class="size-4" />
-                      <span v-else class="size-4" />
+                      @click="void selectSearchMatch(option.key)"
+                    >
+                      <UIcon
+                        v-if="searchMatch === option.key"
+                        name="i-tabler-check"
+                        class="size-4"
+                      />
+                      <span
+                        v-else
+                        class="size-4"
+                      />
                       <span>{{ option.label }}</span>
                     </button>
                   </div>
@@ -1830,25 +1678,51 @@ watch(items, (nextItems) => {
               </template>
             </UPopover>
 
-            <UPopover v-model:open="viewFilterOpen" :content="{ align: 'start', side: 'bottom', sideOffset: 8 }">
-              <UTooltip text="보기 설정" :delay-duration="0">
+            <UPopover
+              v-model:open="viewFilterOpen"
+              :content="{ align: 'start', side: 'bottom', sideOffset: 8 }"
+            >
+              <UTooltip
+                text="보기 설정"
+                :delay-duration="0"
+              >
                 <div class="relative">
-                  <UButton icon="i-tabler-eye-search" color="neutral" variant="ghost" size="lg" :class="viewFilterOpen
-                    ? 'bg-elevated text-default'
-                    : isViewFilterActive ? 'text-default' : 'text-dimmed hover:text-default'" aria-label="보기 설정" />
-                  <span v-if="isViewFilterActive"
-                    class="pointer-events-none absolute right-1.5 top-1.5 size-1.5 rounded-full bg-info ring-1 ring-muted" />
+                  <UButton
+                    icon="i-tabler-eye-search"
+                    color="neutral"
+                    variant="ghost"
+                    size="lg"
+                    :class="viewFilterOpen
+                      ? 'bg-elevated text-default'
+                      : isViewFilterActive ? 'text-default' : 'text-dimmed hover:text-default'"
+                    aria-label="보기 설정"
+                  />
+                  <span
+                    v-if="isViewFilterActive"
+                    class="pointer-events-none absolute right-1.5 top-1.5 size-1.5 rounded-full bg-info ring-1 ring-muted"
+                  />
                 </div>
               </UTooltip>
               <template #content>
                 <div class="flex min-w-40 flex-col p-1.5">
                   <span class="px-2 py-1 text-xs font-medium text-dimmed">보기 설정</span>
-                  <button v-for="option in viewFilterOptions" :key="option.key" type="button"
+                  <button
+                    v-for="option in viewFilterOptions"
+                    :key="option.key"
+                    type="button"
                     :disabled="option.disabled"
                     class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
-                    @click="selectViewFilter(option.key)">
-                    <UIcon v-if="viewFilter === option.key" name="i-tabler-check" class="size-4" />
-                    <span v-else class="size-4" />
+                    @click="selectViewFilter(option.key)"
+                  >
+                    <UIcon
+                      v-if="viewFilter === option.key"
+                      name="i-tabler-check"
+                      class="size-4"
+                    />
+                    <span
+                      v-else
+                      class="size-4"
+                    />
                     <span>{{ option.label }}</span>
                   </button>
                 </div>
@@ -1857,35 +1731,85 @@ watch(items, (nextItems) => {
           </div>
 
           <div class="flex w-full shrink-0 justify-end gap-1 sm:gap-2 md:w-auto">
-            <UTooltip :text="currentPageDraftCount ? `현재 페이지 저장 (${currentPageDraftCount}건)` : '저장'"
-              :delay-duration="0">
-              <UButton icon="i-tabler-device-floppy-filled" color="info" variant="soft" size="lg" :loading="isSaving"
-                :disabled="!currentPageDraftCount || isSaving" @click="saveCurrentPage" />
+            <UTooltip
+              :text="currentPageDraftCount ? `현재 페이지 저장 (${currentPageDraftCount}건)` : '저장'"
+              :delay-duration="0"
+            >
+              <UButton
+                icon="i-tabler-device-floppy-filled"
+                color="info"
+                variant="soft"
+                size="lg"
+                :loading="isSaving"
+                :disabled="!currentPageDraftCount || isSaving"
+                @click="saveCurrentPage"
+              />
             </UTooltip>
-            <UTooltip text="변경사항 되돌리기" :delay-duration="0">
-              <UButton icon="i-tabler-arrow-back-up" color="neutral" variant="ghost" size="lg"
-                :disabled="!selectedItemHasDraft" @click="revertSelectedItem" />
+            <UTooltip
+              text="변경사항 되돌리기"
+              :delay-duration="0"
+            >
+              <UButton
+                icon="i-tabler-arrow-back-up"
+                color="neutral"
+                variant="ghost"
+                size="lg"
+                :disabled="!selectedItemHasDraft"
+                @click="revertSelectedItem"
+              />
             </UTooltip>
-            <UTooltip text="AI 번역" :delay-duration="0">
-              <UButton icon="i-tabler-sparkles-2" color="neutral" variant="ghost" size="lg" />
+            <UTooltip
+              text="AI 번역"
+              :delay-duration="0"
+            >
+              <UButton
+                icon="i-tabler-sparkles-2"
+                color="neutral"
+                variant="ghost"
+                size="lg"
+              />
             </UTooltip>
-            <UPopover v-model:open="optionsPopoverOpen" :content="{ align: 'end', side: 'bottom', sideOffset: 8 }">
-              <UTooltip text="옵션" :delay-duration="0">
-                <UButton icon="i-tabler-dots-vertical" color="neutral" variant="ghost" size="lg"
-                  :class="optionsPopoverOpen ? 'bg-elevated text-default' : ''" aria-label="옵션" />
+            <UPopover
+              v-model:open="optionsPopoverOpen"
+              :content="{ align: 'end', side: 'bottom', sideOffset: 8 }"
+            >
+              <UTooltip
+                text="옵션"
+                :delay-duration="0"
+              >
+                <UButton
+                  icon="i-tabler-dots-vertical"
+                  color="neutral"
+                  variant="ghost"
+                  size="lg"
+                  :class="optionsPopoverOpen ? 'bg-elevated text-default' : ''"
+                  aria-label="옵션"
+                />
               </UTooltip>
               <template #content>
                 <div class="flex min-w-56 flex-col p-1.5">
-                  <button type="button"
+                  <button
+                    type="button"
                     class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
-                    :disabled="!selectedItemId" @click="void copySelectedItemLink()">
-                    <UIcon name="i-tabler-link" class="size-4 shrink-0" />
+                    :disabled="!selectedItemId"
+                    @click="void copySelectedItemLink()"
+                  >
+                    <UIcon
+                      name="i-tabler-link"
+                      class="size-4 shrink-0"
+                    />
                     <span>선택 항목 링크 복사</span>
                   </button>
-                  <button type="button"
+                  <button
+                    type="button"
                     class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
-                    :disabled="!currentPageDraftCount" @click="revertCurrentPageDrafts">
-                    <UIcon name="i-tabler-arrow-back-up" class="size-4 shrink-0" />
+                    :disabled="!currentPageDraftCount"
+                    @click="revertCurrentPageDrafts"
+                  >
+                    <UIcon
+                      name="i-tabler-arrow-back-up"
+                      class="size-4 shrink-0"
+                    />
                     <span>현재 페이지 변경사항 되돌리기</span>
                   </button>
                 </div>
@@ -1896,23 +1820,45 @@ watch(items, (nextItems) => {
 
         <!-- 목록 -->
         <div class="relative flex min-h-0 flex-1">
-          <div v-if="isLoading" class="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center">
+          <div
+            v-if="isLoading"
+            class="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center"
+          >
             <div
-              class="flex items-center gap-3 rounded-md bg-elevated/50 backdrop-blur-lg px-3 py-2 text-sm text-muted">
-              <UIcon name="i-tabler-loader-2" class="size-4 animate-spin" />
+              class="flex items-center gap-3 rounded-md bg-elevated/50 backdrop-blur-lg px-3 py-2 text-sm text-muted"
+            >
+              <UIcon
+                name="i-tabler-loader-2"
+                class="size-4 animate-spin"
+              />
               <span>불러오는 중...</span>
             </div>
           </div>
 
-          <div ref="listContainer" class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-24 lg:pb-20">
+          <div
+            ref="listContainer"
+            class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-24 lg:pb-20"
+          >
             <div class="flex flex-col bg-muted/60">
-              <div v-if="activeFilterTags.length" class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1">
-                <div v-for="tag in activeFilterTags" :key="tag.key"
-                  class="flex min-w-0 max-w-full items-center gap-1 rounded-md bg-elevated px-2 py-1">
+              <div
+                v-if="activeFilterTags.length"
+                class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1"
+              >
+                <div
+                  v-for="tag in activeFilterTags"
+                  :key="tag.key"
+                  class="flex min-w-0 max-w-full items-center gap-1 rounded-md bg-elevated px-2 py-1"
+                >
                   <span class="truncate text-xs">{{ tag.label }}: {{ tag.value }}</span>
-                  <UButton icon="i-tabler-x" color="neutral" variant="link" size="xs"
-                    class="size-5 justify-center shrink-0 p-0" :aria-label="`${tag.label} 제거`"
-                    @click="removeFilterTag(tag.key)" />
+                  <UButton
+                    icon="i-tabler-x"
+                    color="neutral"
+                    variant="link"
+                    size="xs"
+                    class="size-5 justify-center shrink-0 p-0"
+                    :aria-label="`${tag.label} 제거`"
+                    @click="removeFilterTag(tag.key)"
+                  />
                 </div>
               </div>
               <div class="hidden text-xs font-medium text-muted lg:flex">
@@ -1920,31 +1866,53 @@ watch(items, (nextItems) => {
                 <span class="flex flex-1 shrink-0 px-5 py-2">한국어 번역</span>
               </div>
             </div>
-            <div v-if="itemsError && !items.length" class="p-5 text-sm text-error">
+            <div
+              v-if="itemsError && !items.length"
+              class="p-5 text-sm text-error"
+            >
               항목을 불러오지 못했습니다.
             </div>
-            <div v-else-if="!isLoading && !items.length" class="p-5 text-sm text-muted">
+            <div
+              v-else-if="!isLoading && !items.length"
+              class="p-5 text-sm text-muted"
+            >
               {{ viewFilter === 'changed' ? '변경된 항목이 없습니다.' : '검색 결과가 없습니다.' }}
             </div>
             <template v-else-if="items.length">
-              <article v-for="item in items" :key="item.id"
+              <article
+                v-for="item in items"
+                :key="item.id"
                 class="flex shrink-0 flex-col border-b border-default transition-colors duration-150 lg:flex-row lg:border-b-0"
-                :class="selectedItemId === item.id ? 'bg-elevated/70' : 'odd:bg-muted/40'" @click="selectItem(item)">
+                :class="selectedItemId === item.id ? 'bg-elevated/70' : 'odd:bg-muted/40'"
+                @click="selectItem(item)"
+              >
                 <!-- 원문 -->
                 <div class="flex min-w-0 w-full shrink-0 lg:flex-1">
                   <div class="flex shrink-0">
                     <!-- 항목 상태 -->
-                    <div class="w-0.5" :class="getItemStatusColor(item)" :title="getItemStatusLabel(item)" />
+                    <div
+                      class="w-0.5"
+                      :class="getItemStatusColor(item)"
+                      :title="getItemStatusLabel(item)"
+                    />
                   </div>
                   <div class="flex min-w-0 flex-1 flex-col gap-2 py-3 pl-4.5 pr-3 lg:py-2.5 lg:pr-2">
                     <span class="text-xs font-medium text-muted lg:hidden">원문</span>
                     <!-- 원문 내용 -->
-                    <div v-for="source in visibleSourceLanguageItems" :key="source.key"
-                      class="flex flex-col min-w-0 gap-0.5 text-sm">
+                    <div
+                      v-for="source in visibleSourceLanguageItems"
+                      :key="source.key"
+                      class="flex flex-col min-w-0 gap-0.5 text-sm"
+                    >
                       <span class="shrink-0 text-[10px] text-dimmed">{{ source.label }}</span>
                       <p class="min-w-0 whitespace-pre-wrap">
-                        <EditorSourceText :text="item[source.key] || null" @select="selectDictionaryReference">
-                          <template #empty>—</template>
+                        <EditorSourceText
+                          :text="item[source.key] || null"
+                          @select="selectDictionaryReference"
+                        >
+                          <template #empty>
+                            —
+                          </template>
                         </EditorSourceText>
                       </p>
                     </div>
@@ -1961,15 +1929,26 @@ watch(items, (nextItems) => {
                   <!-- 번역 내용 -->
                   <div class="flex min-w-0 flex-1 flex-col">
                     <span class="px-4 pt-2.5 text-xs font-medium text-muted lg:hidden">한국어 번역</span>
-                    <UTextarea :model-value="item.ko" color="neutral" variant="none" autoresize placeholder="미번역"
+                    <UTextarea
+                      :model-value="item.ko"
+                      color="neutral"
+                      variant="none"
+                      autoresize
+                      placeholder="미번역"
                       :ui="{ base: 'min-h-24 p-3 pt-1.5 pl-4 pr-10 h-full lg:min-h-0 lg:pt-3 lg:pl-5' }"
-                      class="w-full min-w-0" @focus="selectItem(item)"
-                      @update:model-value="handleItemTranslationInput(item, $event)" />
+                      class="w-full min-w-0"
+                      @focus="selectItem(item)"
+                      @update:model-value="handleItemTranslationInput(item, $event)"
+                    />
                   </div>
 
                   <!-- 변경 상태 -->
-                  <UIcon v-if="hasItemDraft(item)" name="i-tabler-switch-2"
-                    class="absolute right-2.5 top-2.5 size-4 text-info" title="변경됨" />
+                  <UIcon
+                    v-if="hasItemDraft(item)"
+                    name="i-tabler-switch-2"
+                    class="absolute right-2.5 top-2.5 size-4 text-info"
+                    title="변경됨"
+                  />
                 </div>
               </article>
             </template>
@@ -1977,9 +1956,18 @@ watch(items, (nextItems) => {
 
           <!-- 컨트롤러 -->
           <div
-            class="absolute bottom-4 left-1/2 flex -translate-x-1/2 self-end rounded-lg bg-elevated/70 p-1 shadow-sm backdrop-blur-lg lg:left-auto lg:right-4 lg:translate-x-0">
-            <UPopover v-model:open="pagePopoverOpen" :content="{ align: 'center', side: 'top', sideOffset: 8 }">
-              <UButton color="neutral" variant="ghost" size="lg" class="text-muted hover:text-default font-medium">
+            class="absolute bottom-4 left-1/2 flex -translate-x-1/2 self-end rounded-lg bg-elevated/70 p-1 shadow-sm backdrop-blur-lg lg:left-auto lg:right-4 lg:translate-x-0"
+          >
+            <UPopover
+              v-model:open="pagePopoverOpen"
+              :content="{ align: 'center', side: 'top', sideOffset: 8 }"
+            >
+              <UButton
+                color="neutral"
+                variant="ghost"
+                size="lg"
+                class="text-muted hover:text-default font-medium"
+              >
                 <span>{{ page }}</span>
                 <span class="text-dimmed">/</span>
                 <span>{{ totalPages }}</span>
@@ -1987,102 +1975,199 @@ watch(items, (nextItems) => {
 
               <template #content>
                 <div class="flex flex-col gap-2 p-2">
-                  <UInput v-model="pageInput" type="number" color="neutral" class="w-18" :min="1" :max="totalPages"
+                  <UInput
+                    v-model="pageInput"
+                    type="number"
+                    color="neutral"
+                    class="w-18"
+                    :min="1"
+                    :max="totalPages"
                     aria-label="이동할 페이지"
                     :ui="{ base: '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none' }"
-                    @keydown.enter.prevent="goToInputPage" />
+                    @keydown.enter.prevent="goToInputPage"
+                  />
                   <div class="flex">
-                    <UTooltip text="첫 페이지" :delay-duration="0">
-                      <UButton icon="i-tabler-chevrons-left" color="neutral" variant="ghost" size="lg"
-                        :disabled="page <= 1" @click="setPage(1)" />
+                    <UTooltip
+                      text="첫 페이지"
+                      :delay-duration="0"
+                    >
+                      <UButton
+                        icon="i-tabler-chevrons-left"
+                        color="neutral"
+                        variant="ghost"
+                        size="lg"
+                        :disabled="page <= 1"
+                        @click="setPage(1)"
+                      />
                     </UTooltip>
-                    <UTooltip text="마지막 페이지" :delay-duration="0">
-                      <UButton icon="i-tabler-chevrons-right" color="neutral" variant="ghost" size="lg"
-                        :disabled="page >= totalPages" @click="setPage(totalPages)" />
+                    <UTooltip
+                      text="마지막 페이지"
+                      :delay-duration="0"
+                    >
+                      <UButton
+                        icon="i-tabler-chevrons-right"
+                        color="neutral"
+                        variant="ghost"
+                        size="lg"
+                        :disabled="page >= totalPages"
+                        @click="setPage(totalPages)"
+                      />
                     </UTooltip>
                   </div>
                 </div>
               </template>
             </UPopover>
-            <UTooltip text="이전 페이지" :delay-duration="0">
-              <UButton icon="i-tabler-chevron-left" color="neutral" variant="ghost" size="lg" :disabled="page <= 1"
-                @click="setPage(page - 1)" />
+            <UTooltip
+              text="이전 페이지"
+              :delay-duration="0"
+            >
+              <UButton
+                icon="i-tabler-chevron-left"
+                color="neutral"
+                variant="ghost"
+                size="lg"
+                :disabled="page <= 1"
+                @click="setPage(page - 1)"
+              />
             </UTooltip>
-            <UTooltip text="다음 페이지" :delay-duration="0">
-              <UButton icon="i-tabler-chevron-right" color="neutral" variant="ghost" size="lg"
-                :disabled="page >= totalPages" @click="setPage(page + 1)" />
+            <UTooltip
+              text="다음 페이지"
+              :delay-duration="0"
+            >
+              <UButton
+                icon="i-tabler-chevron-right"
+                color="neutral"
+                variant="ghost"
+                size="lg"
+                :disabled="page >= totalPages"
+                @click="setPage(page + 1)"
+              />
             </UTooltip>
           </div>
         </div>
       </main>
 
       <!-- 사이드바 -->
-      <aside class="editor-sidebar shrink-0 overflow-hidden bg-muted"
-        :class="{ 'editor-sidebar--desktop-open': isSidebarOpen, 'editor-sidebar--mobile-open': isMobileSidebarOpen }">
+      <aside
+        class="editor-sidebar shrink-0 overflow-hidden bg-muted"
+        :class="{ 'editor-sidebar--desktop-open': isSidebarOpen, 'editor-sidebar--mobile-open': isMobileSidebarOpen }"
+      >
         <!-- 사이드바 내용 -->
         <section
           class="editor-sidebar-content absolute inset-x-0 bottom-0 top-14 flex shrink-0 flex-col border-t border-default transition-opacity lg:inset-y-0 lg:left-0 lg:right-auto lg:border-r lg:border-t-0"
           :class="isSidebarOpen || isMobileSidebarOpen
             ? 'opacity-100 duration-500 ease-out'
-            : 'pointer-events-none opacity-0 duration-150 ease-in'">
+            : 'pointer-events-none opacity-0 duration-150 ease-in'"
+        >
           <!-- 사이드바 헤더 -->
           <div class="flex items-center gap-2 px-4 pt-4 text-sm font-medium text-muted">
-            <UIcon :name="activeSidebarMenuItem.icon" class="size-4" />
+            <UIcon
+              :name="activeSidebarMenuItem.icon"
+              class="size-4"
+            />
             <span>{{ activeSidebarMenuItem.label }}</span>
           </div>
 
           <template v-if="activeSidebarMenu === 'list'">
             <div class="flex shrink-0 flex-col gap-3 border-b border-default p-3 sm:flex-row">
               <!-- 목록 옵션 -->
-              <UTabs v-model="sidebarListMode" :content="false"
-                :items="[{ label: '파일', value: 'category' }, { label: '버전', value: 'version' }]" color="neutral"
-                size="xs" :ui="{ trigger: 'px-3', list: 'bg-elevated/50' }" class="w-fit" />
+              <UTabs
+                v-model="sidebarListMode"
+                :content="false"
+                :items="[{ label: '파일', value: 'category' }, { label: '버전', value: 'version' }]"
+                color="neutral"
+                size="xs"
+                :ui="{ trigger: 'px-3', list: 'bg-elevated/50' }"
+                class="w-fit"
+              />
 
               <!-- 파일/버전 검색 -->
-              <UInput v-model="sidebarListSearch" icon="i-tabler-search" color="neutral" variant="soft"
-                class="w-full min-w-0" :placeholder="sidebarListMode === 'category' ? '파일 검색' : '버전 검색'"
-                :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }">
-                <template v-if="sidebarListSearch.length" #trailing>
-                  <UButton color="neutral" variant="link" size="sm" icon="i-tabler-x" aria-label="검색어 지우기"
-                    @click="sidebarListSearch = ''" />
+              <UInput
+                v-model="sidebarListSearch"
+                icon="i-tabler-search"
+                color="neutral"
+                variant="soft"
+                class="w-full min-w-0"
+                :placeholder="sidebarListMode === 'category' ? '파일 검색' : '버전 검색'"
+                :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }"
+              >
+                <template
+                  v-if="sidebarListSearch.length"
+                  #trailing
+                >
+                  <UButton
+                    color="neutral"
+                    variant="link"
+                    size="sm"
+                    icon="i-tabler-x"
+                    aria-label="검색어 지우기"
+                    @click="sidebarListSearch = ''"
+                  />
                 </template>
               </UInput>
             </div>
 
             <div class="relative min-h-0 flex-1 overflow-y-auto">
-              <div v-if="isSidebarListLoading && !sidebarListRows.length"
-                class="flex items-center justify-center p-5 text-muted">
-                <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
+              <div
+                v-if="isSidebarListLoading && !sidebarListRows.length"
+                class="flex items-center justify-center p-5 text-muted"
+              >
+                <UIcon
+                  name="i-tabler-loader-2"
+                  class="size-5 animate-spin"
+                />
               </div>
 
-              <div v-else-if="sidebarListHasError && !sidebarListRows.length" class="p-4 text-sm text-error">
+              <div
+                v-else-if="sidebarListHasError && !sidebarListRows.length"
+                class="p-4 text-sm text-error"
+              >
                 목록을 불러오지 못했습니다.
               </div>
 
-              <nav v-else class="flex flex-col">
+              <nav
+                v-else
+                class="flex flex-col"
+              >
                 <!-- 전체 번역 -->
-                <NuxtLink to="/translate/editor"
+                <NuxtLink
+                  to="/translate/editor"
                   class="flex min-w-0 items-center gap-2 border-b border-default px-4 py-2.5 text-sm transition-colors"
                   :class="isAllMode ? 'bg-elevated text-default' : 'text-muted hover:bg-elevated hover:text-default'"
-                  title="전체 번역" @click="isMobileSidebarOpen = false">
-                  <UIcon name="i-tabler-language" class="size-4 shrink-0" />
+                  title="전체 번역"
+                  @click="isMobileSidebarOpen = false"
+                >
+                  <UIcon
+                    name="i-tabler-language"
+                    class="size-4 shrink-0"
+                  />
                   <span class="min-w-0 flex-1 truncate">전체 번역</span>
                   <span class="shrink-0 font-mono text-xs text-[#81C995]">
                     {{ formatPercent(overview.overall.success, overview.overall.total) }}
                   </span>
                 </NuxtLink>
 
-                <div v-if="!sidebarListRows.length" class="p-4 text-sm text-muted">
-                  {{ sidebarListHasRows ? '검색 결과가 없습니다.' : sidebarListMode === 'category' ?
-                    '등록된 파일이 없습니다.' : '등록된 버전이 없습니다.' }}
+                <div
+                  v-if="!sidebarListRows.length"
+                  class="p-4 text-sm text-muted"
+                >
+                  {{ sidebarListHasRows ? '검색 결과가 없습니다.' : sidebarListMode === 'category'
+                    ? '등록된 파일이 없습니다.' : '등록된 버전이 없습니다.' }}
                 </div>
 
-                <NuxtLink v-for="row in sidebarListRows" :key="row.key" :to="row.path"
+                <NuxtLink
+                  v-for="row in sidebarListRows"
+                  :key="row.key"
+                  :to="row.path"
                   class="flex min-w-0 items-center gap-2 border-b border-default px-4 py-2.5 text-sm transition-colors"
                   :class="isActiveSidebarRow(row) ? 'bg-elevated text-default' : 'text-muted hover:bg-elevated hover:text-default'"
-                  :title="row.label" @click="isMobileSidebarOpen = false">
-                  <UIcon :name="row.mode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
-                    class="size-4 shrink-0" />
+                  :title="row.label"
+                  @click="isMobileSidebarOpen = false"
+                >
+                  <UIcon
+                    :name="row.mode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
+                    class="size-4 shrink-0"
+                  />
                   <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
                   <span class="shrink-0 font-mono text-xs text-[#81C995]">
                     {{ formatPercent(row.counts.success, row.total) }}
@@ -2093,96 +2178,196 @@ watch(items, (nextItems) => {
           </template>
 
           <template v-else-if="activeSidebarMenu === 'history'">
-            <EditorChangeHistory :item-id="selectedItemId" :item-key="selectedItemKey" :reload-key="historyReloadKey"
+            <EditorChangeHistory
+              :item-id="selectedItemId"
+              :item-key="selectedItemKey"
+              :reload-key="historyReloadKey"
               :item-status-label="selectedItemStatusMeta?.label ?? ''"
-              :item-status-color="selectedItemStatusMeta?.textColor ?? 'text-muted'" :diff-mode="diffMode"
-              @changed="handleHistoryChanged" />
+              :item-status-color="selectedItemStatusMeta?.textColor ?? 'text-muted'"
+              :diff-mode="diffMode"
+              @changed="handleHistoryChanged"
+            />
           </template>
 
           <template v-else-if="activeSidebarMenu === 'dictionary'">
             <div class="flex min-h-0 flex-1 flex-col">
-              <div v-if="!dictionarySelection" class="flex min-h-0 flex-1 flex-col">
+              <div
+                v-if="!dictionarySelection"
+                class="flex min-h-0 flex-1 flex-col"
+              >
                 <div class="shrink-0 p-3 pb-0">
-                  <UTabs v-model="dictionaryPanelView" :content="false" :items="dictionaryPanelTabs" color="neutral"
-                    size="xs" :ui="{ trigger: 'px-3', list: 'bg-elevated/50' }" class="w-fit" />
+                  <UTabs
+                    v-model="dictionaryPanelView"
+                    :content="false"
+                    :items="dictionaryPanelTabs"
+                    color="neutral"
+                    size="xs"
+                    :ui="{ trigger: 'px-3', list: 'bg-elevated/50' }"
+                    class="w-fit"
+                  />
                 </div>
 
                 <template v-if="dictionaryPanelView === 'search'">
                   <div class="flex shrink-0 gap-2 border-b border-default p-3">
-                    <UInput v-model="dictionarySearchInput" color="neutral" variant="soft" class="w-full"
-                      placeholder="전체 검색" :ui="{ trailing: 'pe-1' }" @keydown.enter.prevent="runDictionarySearch">
+                    <UInput
+                      v-model="dictionarySearchInput"
+                      color="neutral"
+                      variant="soft"
+                      class="w-full"
+                      placeholder="전체 검색"
+                      :ui="{ trailing: 'pe-1' }"
+                      @keydown.enter.prevent="runDictionarySearch"
+                    >
                       <template #trailing>
-                        <UButton v-if="dictionarySearchInput.length" color="neutral" variant="link" size="sm"
-                          icon="i-tabler-x" aria-label="검색어 지우기" @click="dictionarySearchInput = ''" />
-                        <UButton icon="i-tabler-search" color="neutral" variant="link" size="sm" aria-label="파일 검색"
-                          :disabled="dictionarySearchInput.trim() === dictionarySearch" @click="runDictionarySearch" />
+                        <UButton
+                          v-if="dictionarySearchInput.length"
+                          color="neutral"
+                          variant="link"
+                          size="sm"
+                          icon="i-tabler-x"
+                          aria-label="검색어 지우기"
+                          @click="dictionarySearchInput = ''"
+                        />
+                        <UButton
+                          icon="i-tabler-search"
+                          color="neutral"
+                          variant="link"
+                          size="sm"
+                          aria-label="파일 검색"
+                          :disabled="dictionarySearchInput.trim() === dictionarySearch"
+                          @click="runDictionarySearch"
+                        />
                       </template>
                     </UInput>
                   </div>
 
                   <div class="min-h-0 flex-1 overflow-y-auto">
-                    <div v-if="dictionarySearchStatus === 'pending'"
-                      class="flex items-center justify-center p-6 text-muted">
-                      <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
+                    <div
+                      v-if="dictionarySearchStatus === 'pending'"
+                      class="flex items-center justify-center p-6 text-muted"
+                    >
+                      <UIcon
+                        name="i-tabler-loader-2"
+                        class="size-5 animate-spin"
+                      />
                     </div>
-                    <UAlert v-else-if="dictionarySearchStatus === 'error'" color="error" variant="soft"
-                      :title="dictionarySearchError" class="m-3" />
-                    <div v-else-if="!dictionarySearch"
-                      class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted">
-                      <UIcon name="i-tabler-search" class="size-6 text-dimmed" />
-                      <p class="mt-2">검색어를 입력해 주세요.</p>
+                    <UAlert
+                      v-else-if="dictionarySearchStatus === 'error'"
+                      color="error"
+                      variant="soft"
+                      :title="dictionarySearchError"
+                      class="m-3"
+                    />
+                    <div
+                      v-else-if="!dictionarySearch"
+                      class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted"
+                    >
+                      <UIcon
+                        name="i-tabler-search"
+                        class="size-6 text-dimmed"
+                      />
+                      <p class="mt-2">
+                        검색어를 입력해 주세요.
+                      </p>
                     </div>
-                    <div v-else-if="!dictionarySearchItems.length"
-                      class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted">
-                      <UIcon name="i-tabler-file-search" class="size-6 text-dimmed" />
-                      <p class="mt-2">검색 결과가 없습니다.</p>
+                    <div
+                      v-else-if="!dictionarySearchItems.length"
+                      class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted"
+                    >
+                      <UIcon
+                        name="i-tabler-file-search"
+                        class="size-6 text-dimmed"
+                      />
+                      <p class="mt-2">
+                        검색 결과가 없습니다.
+                      </p>
                     </div>
-                    <div v-else class="flex flex-col">
+                    <div
+                      v-else
+                      class="flex flex-col"
+                    >
                       <div class="border-b border-default px-4 py-2 text-xs text-dimmed">
                         {{ formatCount(dictionarySearchData.total) }}개 결과
                       </div>
-                      <article v-for="item in dictionarySearchItems" :key="item.id"
-                        class="border-b border-default hover:bg-elevated/70 transition-colors">
+                      <article
+                        v-for="row in dictionarySearchRows"
+                        :key="row.item.id"
+                        class="border-b border-default hover:bg-elevated/70 transition-colors"
+                      >
                         <div class="flex min-w-0 items-start">
-                          <button type="button"
+                          <button
+                            type="button"
                             class="flex min-w-0 flex-1 flex-col gap-2 px-4 py-3 text-left transition-colors"
-                            :aria-expanded="expandedDictionarySearchItemId === item.id"
-                            @click="toggleDictionarySearchItem(item.id)">
+                            :aria-expanded="expandedDictionarySearchItemId === row.item.id"
+                            @click="toggleDictionarySearchItem(row.item.id)"
+                          >
                             <div class="flex min-w-0 items-center gap-2">
-                              <UIcon name="i-tabler-file-filled" class="size-4 shrink-0 text-dimmed" />
+                              <UIcon
+                                name="i-tabler-file-filled"
+                                class="size-4 shrink-0 text-dimmed"
+                              />
                               <span class="min-w-0 flex-1 truncate text-xs font-medium">
-                                <EditorHighlightedText :text="`${item.category}_${item.unitKey}`"
-                                  :query="dictionarySearch" />
+                                <EditorHighlightedText
+                                  :text="`${row.item.category}_${row.item.unitKey}`"
+                                  :query="dictionarySearch"
+                                />
                               </span>
                               <UIcon
-                                :name="expandedDictionarySearchItemId === item.id ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'"
-                                class="size-4 shrink-0 text-dimmed" />
+                                :name="expandedDictionarySearchItemId === row.item.id ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'"
+                                class="size-4 shrink-0 text-dimmed"
+                              />
                             </div>
                             <div class="flex flex-col gap-1 pl-6 text-xs text-muted">
-                              <div v-for="field in getDictionarySearchFields(item)" :key="`${item.id}-${field.label}`"
-                                class="flex min-w-0 gap-2">
+                              <div
+                                v-for="field in row.fields"
+                                :key="`${row.item.id}-${field.label}`"
+                                class="flex min-w-0 gap-2"
+                              >
                                 <span class="w-16 shrink-0 text-[10px] text-dimmed">{{ field.label }}</span>
                                 <span class="min-w-0 flex-1 wrap-break-word">
-                                  <EditorHighlightedText :text="field.text" :query="dictionarySearch" />
+                                  <EditorHighlightedText
+                                    :text="field.text"
+                                    :query="dictionarySearch"
+                                  />
                                 </span>
                               </div>
                             </div>
                           </button>
                         </div>
-                        <div v-if="expandedDictionarySearchItemId === item.id"
-                          class="flex flex-col gap-2 border-t border-default bg-elevated/40 px-4 py-3 relative">
-                          <div v-for="field in getDictionaryExpandedFields(item)"
-                            :key="`${item.id}-expanded-${field.label}`" class="flex min-w-0 gap-3 text-xs">
+                        <div
+                          v-if="expandedDictionarySearchItemId === row.item.id"
+                          class="flex flex-col gap-2 border-t border-default bg-elevated/40 px-4 py-3 relative"
+                        >
+                          <div
+                            v-for="field in row.expandedFields"
+                            :key="`${row.item.id}-expanded-${field.label}`"
+                            class="flex min-w-0 gap-3 text-xs"
+                          >
                             <span class="w-14 shrink-0 text-[10px] text-dimmed text-right">{{ field.label }}</span>
-                            <span v-if="field.text" class="min-w-0 flex-1 wrap-break-word whitespace-pre-wrap">
-                              <EditorHighlightedText :text="field.text" :query="dictionarySearch" />
+                            <span
+                              v-if="field.text"
+                              class="min-w-0 flex-1 wrap-break-word whitespace-pre-wrap"
+                            >
+                              <EditorHighlightedText
+                                :text="field.text"
+                                :query="dictionarySearch"
+                              />
                             </span>
-                            <span v-else class="text-dimmed">—</span>
+                            <span
+                              v-else
+                              class="text-dimmed"
+                            >—</span>
                           </div>
 
-                          <UButton icon="i-tabler-arrow-up-right" color="info" variant="ghost" size="xs"
-                            class="absolute top-2 right-2 p-1" aria-label="항목으로 이동"
-                            @click.stop="void openDictionarySearchItem(item)" />
+                          <UButton
+                            icon="i-tabler-arrow-up-right"
+                            color="info"
+                            variant="ghost"
+                            size="xs"
+                            class="absolute top-2 right-2 p-1"
+                            aria-label="항목으로 이동"
+                            @click.stop="void openDictionarySearchItem(row.item)"
+                          />
                         </div>
                       </article>
                     </div>
@@ -2192,84 +2377,169 @@ watch(items, (nextItems) => {
                 <template v-else>
                   <template v-if="selectedDictionary">
                     <div class="flex shrink-0 items-start gap-2 border-b border-default p-3">
-                      <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm"
-                        aria-label="용어집 목록으로 돌아가기" @click="selectedDictionaryId = null" />
+                      <UButton
+                        icon="i-tabler-arrow-left"
+                        color="neutral"
+                        variant="ghost"
+                        size="sm"
+                        aria-label="용어집 목록으로 돌아가기"
+                        @click="selectedDictionaryId = null"
+                      />
                       <div class="min-w-0 flex-1">
-                        <p class="truncate text-sm font-medium">{{ selectedDictionary.name }}</p>
+                        <p class="truncate text-sm font-medium">
+                          {{ selectedDictionary.name }}
+                        </p>
                         <div class="flex min-w-0 items-center gap-1 text-xs text-dimmed">
                           <span class="shrink-0">
                             {{ selectedDictionary.visibility === 'public' ? '공개 용어집' : '비공개 용어집' }} ·
                           </span>
-                          <NuxtLink v-if="getDictionaryOwnerHandle(selectedDictionary)"
+                          <NuxtLink
+                            v-if="getDictionaryOwnerHandle(selectedDictionary)"
                             :to="getUserPath(getDictionaryOwnerHandle(selectedDictionary))"
                             class="truncate hover:underline underline-offset-2"
-                            :class="hasUserRoleIcon(selectedDictionary.ownerRole) ? '-mt-0.5' : ''" @click.stop>
+                            :class="hasUserRoleIcon(selectedDictionary.ownerRole) ? '-mt-0.5' : ''"
+                            @click.stop
+                          >
                             {{ formatHandle(getDictionaryOwnerHandle(selectedDictionary)) }}
                           </NuxtLink>
-                          <span v-else class="truncate">알 수 없는 사용자</span>
-                          <AppUserRoleIcon :role="selectedDictionary.ownerRole" icon-class="size-3" />
+                          <span
+                            v-else
+                            class="truncate"
+                          >알 수 없는 사용자</span>
+                          <AppUserRoleIcon
+                            :role="selectedDictionary.ownerRole"
+                            icon-class="size-3"
+                          />
                         </div>
                       </div>
-                      <UButton v-if="selectedDictionary.canEdit" icon="i-tabler-plus" color="neutral" variant="soft"
-                        size="sm" aria-label="용어 추가" @click="openCreateDictionaryEntry" />
+                      <UButton
+                        v-if="selectedDictionary.canEdit"
+                        icon="i-tabler-plus"
+                        color="neutral"
+                        variant="soft"
+                        size="sm"
+                        aria-label="용어 추가"
+                        @click="openCreateDictionaryEntry"
+                      />
                     </div>
 
                     <div class="flex shrink-0 gap-2 border-b border-default p-3">
-                      <UInput v-model="dictionaryEntriesSearchInput" icon="i-tabler-search" color="neutral"
-                        variant="soft" class="w-full" placeholder="용어 검색"
+                      <UInput
+                        v-model="dictionaryEntriesSearchInput"
+                        icon="i-tabler-search"
+                        color="neutral"
+                        variant="soft"
+                        class="w-full"
+                        placeholder="용어 검색"
                         :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }"
-                        @keydown.enter.prevent="runDictionaryEntrySearch">
+                        @keydown.enter.prevent="runDictionaryEntrySearch"
+                      >
                         <template #trailing>
-                          <UButton v-if="dictionaryEntriesSearchInput.length" color="neutral" variant="link" size="sm"
-                            icon="i-tabler-x" aria-label="용어 검색어 지우기"
-                            @click="dictionaryEntriesSearchInput = ''; runDictionaryEntrySearch()" />
-                          <UButton icon="i-tabler-search" color="neutral" variant="link" size="sm" aria-label="용어 검색"
+                          <UButton
+                            v-if="dictionaryEntriesSearchInput.length"
+                            color="neutral"
+                            variant="link"
+                            size="sm"
+                            icon="i-tabler-x"
+                            aria-label="용어 검색어 지우기"
+                            @click="dictionaryEntriesSearchInput = ''; runDictionaryEntrySearch()"
+                          />
+                          <UButton
+                            icon="i-tabler-search"
+                            color="neutral"
+                            variant="link"
+                            size="sm"
+                            aria-label="용어 검색"
                             :disabled="dictionaryEntriesSearchInput.trim() === dictionaryEntriesSearch"
-                            @click="runDictionaryEntrySearch" />
+                            @click="runDictionaryEntrySearch"
+                          />
                         </template>
                       </UInput>
                     </div>
 
                     <div class="min-h-0 flex-1 overflow-y-auto">
-                      <div v-if="dictionaryEntriesStatus === 'pending'"
-                        class="flex items-center justify-center p-6 text-muted">
-                        <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
+                      <div
+                        v-if="dictionaryEntriesStatus === 'pending'"
+                        class="flex items-center justify-center p-6 text-muted"
+                      >
+                        <UIcon
+                          name="i-tabler-loader-2"
+                          class="size-5 animate-spin"
+                        />
                       </div>
-                      <UAlert v-else-if="dictionaryEntriesStatus === 'error'" color="error" variant="soft"
-                        :title="dictionaryEntriesError" class="m-3" />
-                      <div v-else-if="!dictionaryEntryItems.length"
-                        class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted">
-                        <UIcon name="i-tabler-book-2" class="size-6 text-dimmed" />
-                        <p class="mt-2">아직 등록된 용어가 없습니다.</p>
-                        <UButton v-if="selectedDictionary.canEdit" color="neutral" variant="soft" size="sm" class="mt-3"
-                          @click="openCreateDictionaryEntry">
+                      <UAlert
+                        v-else-if="dictionaryEntriesStatus === 'error'"
+                        color="error"
+                        variant="soft"
+                        :title="dictionaryEntriesError"
+                        class="m-3"
+                      />
+                      <div
+                        v-else-if="!dictionaryEntryItems.length"
+                        class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted"
+                      >
+                        <UIcon
+                          name="i-tabler-book-2"
+                          class="size-6 text-dimmed"
+                        />
+                        <p class="mt-2">
+                          아직 등록된 용어가 없습니다.
+                        </p>
+                        <UButton
+                          v-if="selectedDictionary.canEdit"
+                          color="neutral"
+                          variant="soft"
+                          size="sm"
+                          class="mt-3"
+                          @click="openCreateDictionaryEntry"
+                        >
                           용어 추가
                         </UButton>
                       </div>
-                      <div v-else class="flex flex-col">
+                      <div
+                        v-else
+                        class="flex flex-col"
+                      >
                         <div class="border-b border-default px-4 py-2 text-xs text-dimmed">
                           {{ formatCount(dictionaryEntries.total) }}개 용어
                         </div>
-                        <article v-for="entry in dictionaryEntryItems" :key="entry.id"
-                          class="flex flex-col gap-1 border-b border-default px-4 py-3 text-sm">
+                        <article
+                          v-for="entry in dictionaryEntryItems"
+                          :key="entry.id"
+                          class="flex flex-col gap-1 border-b border-default px-4 py-3 text-sm"
+                        >
                           <div class="flex items-start gap-2">
                             <span class="min-w-0 flex-1 whitespace-pre-wrap wrap-break-word font-medium">{{
                               entry.sourceText }}</span>
-                            <UIcon name="i-tabler-arrow-narrow-right" class="mt-0.5 size-4 shrink-0 text-dimmed" />
+                            <UIcon
+                              name="i-tabler-arrow-narrow-right"
+                              class="mt-0.5 size-4 shrink-0 text-dimmed"
+                            />
                             <span class="min-w-0 flex-1 whitespace-pre-wrap wrap-break-word">{{ entry.translation
-                              }}</span>
+                            }}</span>
                           </div>
-                          <p v-if="entry.note" class="whitespace-pre-wrap wrap-break-word text-xs text-muted">{{
-                            entry.note }}</p>
+                          <p
+                            v-if="entry.note"
+                            class="whitespace-pre-wrap wrap-break-word text-xs text-muted"
+                          >
+                            {{
+                              entry.note }}
+                          </p>
                           <div class="flex items-center gap-1 text-[10px] text-dimmed">
-                            <NuxtLink v-if="getDictionaryCreatorHandle(entry)"
+                            <NuxtLink
+                              v-if="getDictionaryCreatorHandle(entry)"
                               :to="getUserPath(getDictionaryCreatorHandle(entry))"
                               class="hover:underline underline-offset-2"
-                              :class="hasUserRoleIcon(entry.creatorRole) ? '-mt-0.5' : ''" @click.stop>
+                              :class="hasUserRoleIcon(entry.creatorRole) ? '-mt-0.5' : ''"
+                              @click.stop
+                            >
                               {{ formatHandle(getDictionaryCreatorHandle(entry)) }}
                             </NuxtLink>
                             <span v-else>알 수 없는 사용자</span>
-                            <AppUserRoleIcon :role="entry.creatorRole" icon-class="size-3" />
+                            <AppUserRoleIcon
+                              :role="entry.creatorRole"
+                              icon-class="size-3"
+                            />
                           </div>
                         </article>
                       </div>
@@ -2278,48 +2548,93 @@ watch(items, (nextItems) => {
 
                   <template v-else>
                     <div class="flex shrink-0 items-center justify-between gap-3 border-b border-default p-3">
-                      <p class="text-sm font-medium h-8 flex items-center">용어집</p>
-                      <UButton icon="i-tabler-plus" color="neutral" variant="soft" size="sm"
-                        @click="openCreateDictionary">
+                      <p class="text-sm font-medium h-8 flex items-center">
+                        용어집
+                      </p>
+                      <UButton
+                        icon="i-tabler-plus"
+                        color="neutral"
+                        variant="soft"
+                        size="sm"
+                        @click="openCreateDictionary"
+                      >
                         새 용어집
                       </UButton>
                     </div>
 
                     <div class="min-h-0 flex-1 overflow-y-auto">
-                      <div v-if="dictionariesStatus === 'pending'"
-                        class="flex items-center justify-center p-6 text-muted">
-                        <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
+                      <div
+                        v-if="dictionariesStatus === 'pending'"
+                        class="flex items-center justify-center p-6 text-muted"
+                      >
+                        <UIcon
+                          name="i-tabler-loader-2"
+                          class="size-5 animate-spin"
+                        />
                       </div>
-                      <div v-else-if="dictionariesStatus === 'error'" class="flex p-3">
-                        <UAlert color="error" variant="soft" :title="dictionariesError" />
+                      <div
+                        v-else-if="dictionariesStatus === 'error'"
+                        class="flex p-3"
+                      >
+                        <UAlert
+                          color="error"
+                          variant="soft"
+                          :title="dictionariesError"
+                        />
                       </div>
-                      <div v-else-if="!dictionaries.length"
-                        class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted">
-                        <UIcon name="i-tabler-books" class="size-6 text-dimmed" />
-                        <p class="mt-2">등록된 용어집이 없습니다.</p>
+                      <div
+                        v-else-if="!dictionaries.length"
+                        class="flex flex-col items-center justify-center p-6 text-center text-sm text-muted"
+                      >
+                        <UIcon
+                          name="i-tabler-books"
+                          class="size-6 text-dimmed"
+                        />
+                        <p class="mt-2">
+                          등록된 용어집이 없습니다.
+                        </p>
                       </div>
-                      <nav v-else class="flex flex-col">
-                        <div v-for="dictionary in dictionaries" :key="dictionary.id" role="button" tabindex="0"
+                      <nav
+                        v-else
+                        class="flex flex-col"
+                      >
+                        <div
+                          v-for="dictionary in dictionaries"
+                          :key="dictionary.id"
+                          role="button"
+                          tabindex="0"
                           class="flex min-w-0 items-start gap-3 border-b border-default px-4 py-3 text-left transition-colors hover:bg-elevated/70"
                           @click="selectDictionary(dictionary.id)"
                           @keydown.enter.prevent="selectDictionary(dictionary.id)"
-                          @keydown.space.prevent="selectDictionary(dictionary.id)">
-                          <UIcon :name="dictionary.visibility === 'public' ? 'i-tabler-book-2' : 'i-tabler-lock'"
-                            class="mt-0.5 size-4 shrink-0 text-dimmed" />
+                          @keydown.space.prevent="selectDictionary(dictionary.id)"
+                        >
+                          <UIcon
+                            :name="dictionary.visibility === 'public' ? 'i-tabler-book-2' : 'i-tabler-lock'"
+                            class="mt-0.5 size-4 shrink-0 text-dimmed"
+                          />
                           <span class="min-w-0 flex-1">
                             <span class="block truncate text-sm font-medium">{{ dictionary.name }}</span>
-                            <span v-if="dictionary.description" class="mt-0.5 block truncate text-xs text-muted">
+                            <span
+                              v-if="dictionary.description"
+                              class="mt-0.5 block truncate text-xs text-muted"
+                            >
                               {{ dictionary.description }}
                             </span>
                             <span class="mt-1 flex items-center gap-1 text-[10px] text-dimmed">
-                              <NuxtLink v-if="getDictionaryOwnerHandle(dictionary)"
+                              <NuxtLink
+                                v-if="getDictionaryOwnerHandle(dictionary)"
                                 :to="getUserPath(getDictionaryOwnerHandle(dictionary))"
                                 class="hover:underline underline-offset-2"
-                                :class="hasUserRoleIcon(dictionary.ownerRole) ? '-mt-0.5' : ''" @click.stop>
+                                :class="hasUserRoleIcon(dictionary.ownerRole) ? '-mt-0.5' : ''"
+                                @click.stop
+                              >
                                 {{ formatHandle(getDictionaryOwnerHandle(dictionary)) }}
                               </NuxtLink>
                               <span v-else>알 수 없는 사용자</span>
-                              <AppUserRoleIcon :role="dictionary.ownerRole" icon-class="size-3" />
+                              <AppUserRoleIcon
+                                :role="dictionary.ownerRole"
+                                icon-class="size-3"
+                              />
                               <span>· {{ formatCount(dictionary.entryCount) }}개 용어</span>
                             </span>
                           </span>
@@ -2329,142 +2644,327 @@ watch(items, (nextItems) => {
                   </template>
                 </template>
 
-                <UModal v-model:open="dictionaryModalOpen" title="새 용어집" :ui="{ footer: 'justify-end' }">
+                <UModal
+                  v-model:open="dictionaryModalOpen"
+                  title="새 용어집"
+                  :ui="{ footer: 'justify-end' }"
+                >
                   <template #body>
-                    <UForm id="editor-dictionary-form" :state="dictionaryForm" class="flex flex-col gap-4"
-                      @submit="createDictionary">
-                      <UFormField name="name" label="이름" required>
-                        <UInput v-model="dictionaryForm.name" color="neutral" maxlength="100" placeholder="용어집 이름"
-                          class="w-full" />
+                    <UForm
+                      id="editor-dictionary-form"
+                      :state="dictionaryForm"
+                      class="flex flex-col gap-4"
+                      @submit="createDictionary"
+                    >
+                      <UFormField
+                        name="name"
+                        label="이름"
+                        required
+                      >
+                        <UInput
+                          v-model="dictionaryForm.name"
+                          color="neutral"
+                          maxlength="100"
+                          placeholder="용어집 이름"
+                          class="w-full"
+                        />
                       </UFormField>
-                      <UFormField name="description" label="설명">
-                        <UTextarea v-model="dictionaryForm.description" color="neutral" :rows="3" maxlength="500"
-                          placeholder="용어집에 대한 설명" class="w-full" />
+                      <UFormField
+                        name="description"
+                        label="설명"
+                      >
+                        <UTextarea
+                          v-model="dictionaryForm.description"
+                          color="neutral"
+                          :rows="3"
+                          maxlength="500"
+                          placeholder="용어집에 대한 설명"
+                          class="w-full"
+                        />
                       </UFormField>
-                      <UFormField name="visibility" label="공개 범위">
-                        <USelect v-model="dictionaryForm.visibility" color="neutral"
+                      <UFormField
+                        name="visibility"
+                        label="공개 범위"
+                      >
+                        <USelect
+                          v-model="dictionaryForm.visibility"
+                          color="neutral"
                           :items="[{ label: '공개', value: 'public' }, { label: '비공개', value: 'private' }]"
-                          class="w-full" />
+                          class="w-full"
+                        />
                       </UFormField>
-                      <p v-if="dictionaryModalError" class="text-sm text-error">{{ dictionaryModalError }}</p>
+                      <p
+                        v-if="dictionaryModalError"
+                        class="text-sm text-error"
+                      >
+                        {{ dictionaryModalError }}
+                      </p>
                     </UForm>
                   </template>
                   <template #footer>
-                    <UButton color="neutral" variant="ghost" @click="dictionaryModalOpen = false">취소</UButton>
-                    <UButton type="submit" form="editor-dictionary-form" color="info" variant="soft"
-                      :loading="dictionaryModalSaving">
+                    <UButton
+                      color="neutral"
+                      variant="ghost"
+                      @click="dictionaryModalOpen = false"
+                    >
+                      취소
+                    </UButton>
+                    <UButton
+                      type="submit"
+                      form="editor-dictionary-form"
+                      color="info"
+                      variant="soft"
+                      :loading="dictionaryModalSaving"
+                    >
                       만들기
                     </UButton>
                   </template>
                 </UModal>
 
-                <UModal v-model:open="dictionaryEntryModalOpen" title="용어 추가" :ui="{ footer: 'justify-end' }">
+                <UModal
+                  v-model:open="dictionaryEntryModalOpen"
+                  title="용어 추가"
+                  :ui="{ footer: 'justify-end' }"
+                >
                   <template #body>
-                    <UForm id="editor-dictionary-entry-form" :state="dictionaryEntryForm" class="flex flex-col gap-4"
-                      @submit="createDictionaryEntry">
-                      <UFormField name="sourceText" label="원문" required>
-                        <UTextarea v-model="dictionaryEntryForm.sourceText" color="neutral" :rows="3" maxlength="500"
-                          placeholder="원문 용어" class="w-full" />
+                    <UForm
+                      id="editor-dictionary-entry-form"
+                      :state="dictionaryEntryForm"
+                      class="flex flex-col gap-4"
+                      @submit="createDictionaryEntry"
+                    >
+                      <UFormField
+                        name="sourceText"
+                        label="원문"
+                        required
+                      >
+                        <UTextarea
+                          v-model="dictionaryEntryForm.sourceText"
+                          color="neutral"
+                          :rows="3"
+                          maxlength="500"
+                          placeholder="원문 용어"
+                          class="w-full"
+                        />
                       </UFormField>
-                      <UFormField name="translation" label="번역" required>
-                        <UTextarea v-model="dictionaryEntryForm.translation" color="neutral" :rows="3" maxlength="500"
-                          placeholder="번역 용어" class="w-full" />
+                      <UFormField
+                        name="translation"
+                        label="번역"
+                        required
+                      >
+                        <UTextarea
+                          v-model="dictionaryEntryForm.translation"
+                          color="neutral"
+                          :rows="3"
+                          maxlength="500"
+                          placeholder="번역 용어"
+                          class="w-full"
+                        />
                       </UFormField>
-                      <UFormField name="note" label="메모">
-                        <UTextarea v-model="dictionaryEntryForm.note" color="neutral" :rows="3" maxlength="1000"
-                          placeholder="선택 사항" class="w-full" />
+                      <UFormField
+                        name="note"
+                        label="메모"
+                      >
+                        <UTextarea
+                          v-model="dictionaryEntryForm.note"
+                          color="neutral"
+                          :rows="3"
+                          maxlength="1000"
+                          placeholder="선택 사항"
+                          class="w-full"
+                        />
                       </UFormField>
-                      <p v-if="dictionaryEntryModalError" class="text-sm text-error">{{ dictionaryEntryModalError }}</p>
+                      <p
+                        v-if="dictionaryEntryModalError"
+                        class="text-sm text-error"
+                      >
+                        {{ dictionaryEntryModalError }}
+                      </p>
                     </UForm>
                   </template>
                   <template #footer>
-                    <UButton color="neutral" variant="ghost" @click="dictionaryEntryModalOpen = false">취소</UButton>
-                    <UButton type="submit" form="editor-dictionary-entry-form" color="info" variant="soft"
-                      :loading="dictionaryEntryModalSaving">
+                    <UButton
+                      color="neutral"
+                      variant="ghost"
+                      @click="dictionaryEntryModalOpen = false"
+                    >
+                      취소
+                    </UButton>
+                    <UButton
+                      type="submit"
+                      form="editor-dictionary-entry-form"
+                      color="info"
+                      variant="soft"
+                      :loading="dictionaryEntryModalSaving"
+                    >
                       추가
                     </UButton>
                   </template>
                 </UModal>
               </div>
 
-              <div v-else-if="dictionaryStatus === 'pending'" class="flex flex-1 flex-col">
+              <div
+                v-else-if="dictionaryStatus === 'pending'"
+                class="flex flex-1 flex-col"
+              >
                 <div class="flex shrink-0 items-center gap-2 border-b border-default p-3">
-                  <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm" aria-label="사전 메뉴로 돌아가기"
-                    @click="dictionarySelection = null" />
+                  <UButton
+                    icon="i-tabler-arrow-left"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="사전 메뉴로 돌아가기"
+                    @click="dictionarySelection = null"
+                  />
                   <div class="min-w-0">
-                    <p class="truncate text-sm font-medium">{{ dictionarySelection.originalText }}</p>
-                    <p class="truncate text-xs text-dimmed">{{ dictionaryKey }}</p>
+                    <p class="truncate text-sm font-medium">
+                      {{ dictionarySelection.originalText }}
+                    </p>
+                    <p class="truncate text-xs text-dimmed">
+                      {{ dictionaryKey }}
+                    </p>
                   </div>
                 </div>
                 <div class="flex min-h-0 flex-1 items-center justify-center">
-                  <UIcon name="i-tabler-loader-2" class="size-6 animate-spin" />
+                  <UIcon
+                    name="i-tabler-loader-2"
+                    class="size-6 animate-spin"
+                  />
                 </div>
               </div>
 
-              <div v-else-if="dictionaryStatus === 'error'" class="flex min-h-0 flex-1 flex-col">
+              <div
+                v-else-if="dictionaryStatus === 'error'"
+                class="flex min-h-0 flex-1 flex-col"
+              >
                 <div class="flex shrink-0 items-center gap-2 border-b border-default p-3">
-                  <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm" aria-label="사전 메뉴로 돌아가기"
-                    @click="dictionarySelection = null" />
+                  <UButton
+                    icon="i-tabler-arrow-left"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="사전 메뉴로 돌아가기"
+                    @click="dictionarySelection = null"
+                  />
                   <div class="min-w-0">
-                    <p class="truncate text-sm font-medium">{{ dictionarySelection.originalText }}</p>
-                    <p class="truncate text-xs text-dimmed">{{ dictionaryKey }}</p>
+                    <p class="truncate text-sm font-medium">
+                      {{ dictionarySelection.originalText }}
+                    </p>
+                    <p class="truncate text-xs text-dimmed">
+                      {{ dictionaryKey }}
+                    </p>
                   </div>
                 </div>
-                <UAlert color="error" variant="soft" title="사전 항목을 불러오지 못했습니다." :description="dictionaryError"
-                  class="m-4" />
+                <UAlert
+                  color="error"
+                  variant="soft"
+                  title="사전 항목을 불러오지 못했습니다."
+                  :description="dictionaryError"
+                  class="m-4"
+                />
               </div>
 
-              <div v-else-if="dictionaryStatus === 'success' && !dictionaryItem" class="flex min-h-0 flex-1 flex-col">
+              <div
+                v-else-if="dictionaryStatus === 'success' && !dictionaryItem"
+                class="flex min-h-0 flex-1 flex-col"
+              >
                 <div class="flex shrink-0 items-center gap-2 border-b border-default p-3">
-                  <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm" aria-label="사전 메뉴로 돌아가기"
-                    @click="dictionarySelection = null" />
+                  <UButton
+                    icon="i-tabler-arrow-left"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="사전 메뉴로 돌아가기"
+                    @click="dictionarySelection = null"
+                  />
                   <div class="min-w-0">
-                    <p class="truncate text-sm font-medium">{{ dictionarySelection.originalText }}</p>
-                    <p class="truncate text-xs text-dimmed">{{ dictionaryKey }}</p>
+                    <p class="truncate text-sm font-medium">
+                      {{ dictionarySelection.originalText }}
+                    </p>
+                    <p class="truncate text-xs text-dimmed">
+                      {{ dictionaryKey }}
+                    </p>
                   </div>
                 </div>
                 <div class="flex flex-1 items-center justify-center p-5 text-center text-sm text-muted">
                   <div>
-                    <UIcon name="i-tabler-file-off" class="mx-auto size-6 text-dimmed" />
-                    <p class="mt-2">대상 사전 항목을 찾을 수 없습니다.</p>
+                    <UIcon
+                      name="i-tabler-file-off"
+                      class="mx-auto size-6 text-dimmed"
+                    />
+                    <p class="mt-2">
+                      대상 사전 항목을 찾을 수 없습니다.
+                    </p>
                   </div>
                 </div>
               </div>
 
-              <div v-else-if="dictionaryItem" class="min-h-0 flex flex-1 flex-col">
+              <div
+                v-else-if="dictionaryItem"
+                class="min-h-0 flex flex-1 flex-col"
+              >
                 <div class="flex shrink-0 items-center gap-2 border-b border-default p-3">
-                  <UButton icon="i-tabler-arrow-left" color="neutral" variant="ghost" size="sm" aria-label="사전 메뉴로 돌아가기"
-                    @click="dictionarySelection = null" />
+                  <UButton
+                    icon="i-tabler-arrow-left"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="사전 메뉴로 돌아가기"
+                    @click="dictionarySelection = null"
+                  />
                   <div class="min-w-0 flex-1">
-                    <p class="truncate text-sm font-medium">{{ dictionarySelection.originalText }}</p>
-                    <p class="truncate text-xs text-dimmed">{{ dictionaryKey }}</p>
+                    <p class="truncate text-sm font-medium">
+                      {{ dictionarySelection.originalText }}
+                    </p>
+                    <p class="truncate text-xs text-dimmed">
+                      {{ dictionaryKey }}
+                    </p>
                   </div>
-                  <UButton color="neutral" variant="soft" size="xs" @click="editDictionaryItem">
+                  <UButton
+                    color="neutral"
+                    variant="soft"
+                    size="xs"
+                    @click="editDictionaryItem"
+                  >
                     수정
                   </UButton>
                 </div>
 
                 <div class="min-h-0 flex-1 overflow-y-auto p-4">
                   <div class="mt-1 flex flex-col gap-3 text-sm">
-                    <div v-for="source in visibleSourceLanguageItems" :key="source.key" class="flex flex-col gap-0.5">
+                    <div
+                      v-for="source in visibleSourceLanguageItems"
+                      :key="source.key"
+                      class="flex flex-col gap-0.5"
+                    >
                       <span class="text-[10px] text-dimmed">{{ source.label }}</span>
                       <div class="whitespace-pre-wrap wrap-break-word">
-                        <EditorSourceText :text="dictionaryItem[source.key] || null"
-                          @select="selectDictionaryReference">
-                          <template #empty>—</template>
+                        <EditorSourceText
+                          :text="dictionaryItem[source.key] || null"
+                          @select="selectDictionaryReference"
+                        >
+                          <template #empty>
+                            —
+                          </template>
                         </EditorSourceText>
                       </div>
                     </div>
 
                     <div class="flex flex-col gap-0.5 border-t border-default pt-3">
                       <span class="text-[10px] text-dimmed">한국어 번역</span>
-                      <p class="whitespace-pre-wrap wrap-break-word">{{ dictionaryItem.ko || '—' }}</p>
+                      <p class="whitespace-pre-wrap wrap-break-word">
+                        {{ dictionaryItem.ko || '—' }}
+                      </p>
                     </div>
 
-                    <div v-if="dictionaryItem.pendingStatus === 'pending'"
-                      class="flex flex-col gap-1 border-t border-default pt-3 text-info">
+                    <div
+                      v-if="dictionaryItem.pendingStatus === 'pending'"
+                      class="flex flex-col gap-1 border-t border-default pt-3 text-info"
+                    >
                       <span class="text-xs font-medium">승인 대기 번역</span>
-                      <p class="whitespace-pre-wrap wrap-break-word">{{ dictionaryItem.pendingKo || '—' }}</p>
+                      <p class="whitespace-pre-wrap wrap-break-word">
+                        {{ dictionaryItem.pendingKo || '—' }}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -2480,13 +2980,24 @@ watch(items, (nextItems) => {
                 </p>
 
                 <div class="flex flex-col text-sm">
-                  <button v-for="language in displayLanguageOptions" :key="language.key" type="button"
+                  <button
+                    v-for="language in displayLanguageOptions"
+                    :key="language.key"
+                    type="button"
                     class="flex items-center gap-2 rounded-xl py-1 pl-1 transition-colors hover:bg-muted"
                     :class="displayLanguages.includes(language.key) ? 'text-default' : 'text-dimmed hover:text-toned'"
                     :aria-pressed="displayLanguages.includes(language.key)"
-                    @click="toggleDisplayLanguage(language.key)">
-                    <UIcon v-if="displayLanguages.includes(language.key)" name="i-tabler-check" class="size-4" />
-                    <span v-else class="size-4" />
+                    @click="toggleDisplayLanguage(language.key)"
+                  >
+                    <UIcon
+                      v-if="displayLanguages.includes(language.key)"
+                      name="i-tabler-check"
+                      class="size-4"
+                    />
+                    <span
+                      v-else
+                      class="size-4"
+                    />
                     <span>{{ language.label }}</span>
                   </button>
                 </div>
@@ -2498,12 +3009,24 @@ watch(items, (nextItems) => {
                 </p>
 
                 <div class="flex flex-col text-sm">
-                  <button v-for="mode in diffModeOptions" :key="mode.key" type="button"
+                  <button
+                    v-for="mode in diffModeOptions"
+                    :key="mode.key"
+                    type="button"
                     class="flex items-start gap-2 rounded-xl py-1 pl-1 text-left transition-colors hover:bg-muted"
                     :class="diffMode === mode.key ? 'text-default' : 'text-dimmed hover:text-toned'"
-                    :aria-pressed="diffMode === mode.key" @click="diffMode = mode.key">
-                    <UIcon v-if="diffMode === mode.key" name="i-tabler-check" class="mt-0.5 size-4 shrink-0" />
-                    <span v-else class="mt-0.5 size-4 shrink-0" />
+                    :aria-pressed="diffMode === mode.key"
+                    @click="diffMode = mode.key"
+                  >
+                    <UIcon
+                      v-if="diffMode === mode.key"
+                      name="i-tabler-check"
+                      class="mt-0.5 size-4 shrink-0"
+                    />
+                    <span
+                      v-else
+                      class="mt-0.5 size-4 shrink-0"
+                    />
                     <span class="min-w-0">
                       <span class="block">{{ mode.label }}</span>
                       <span class="mt-0.5 block text-xs text-dimmed">{{ mode.description }}</span>
@@ -2514,35 +3037,66 @@ watch(items, (nextItems) => {
             </div>
           </template>
 
-          <div v-else class="flex flex-1 items-center justify-center p-5 text-center">
+          <div
+            v-else
+            class="flex flex-1 items-center justify-center p-5 text-center"
+          >
             <span class="text-sm text-muted">{{ activeSidebarMenuItem.label }} 기능은 준비 중입니다.</span>
           </div>
         </section>
 
         <!-- 사이드바 네비게이션 -->
         <nav
-          class="absolute inset-x-0 top-0 z-20 flex h-14 shrink-0 gap-2 bg-muted p-2.5 lg:inset-y-0 lg:left-auto lg:right-0 lg:h-auto lg:w-16 lg:flex-col lg:p-3">
+          class="absolute inset-x-0 top-0 z-20 flex h-14 shrink-0 gap-2 bg-muted p-2.5 lg:inset-y-0 lg:left-auto lg:right-0 lg:h-auto lg:w-16 lg:flex-col lg:p-3"
+        >
           <div class="flex min-w-0 flex-1 gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
-            <UTooltip v-for="menu in sidebarMenuItems" :key="menu.key" :text="menu.label" :delay-duration="0"
-              :content="{ side: 'left' }">
-              <UButton :icon="menu.icon" color="neutral" variant="ghost" size="lg"
+            <UTooltip
+              v-for="menu in sidebarMenuItems"
+              :key="menu.key"
+              :text="menu.label"
+              :delay-duration="0"
+              :content="{ side: 'left' }"
+            >
+              <UButton
+                :icon="menu.icon"
+                color="neutral"
+                variant="ghost"
+                size="lg"
                 :ui="{ leadingIcon: 'size-5 lg:size-6' }"
                 :class="activeSidebarMenu === menu.key ? 'bg-elevated text-default' : 'text-dimmed hover:text-default'"
-                :aria-label="menu.label" :aria-current="activeSidebarMenu === menu.key ? 'page' : undefined"
-                @click="selectSidebarMenu(menu.key)" />
+                :aria-label="menu.label"
+                :aria-current="activeSidebarMenu === menu.key ? 'page' : undefined"
+                @click="selectSidebarMenu(menu.key)"
+              />
             </UTooltip>
           </div>
 
-          <UButton icon="i-tabler-x" color="neutral" variant="ghost" size="lg" class="text-dimmed lg:hidden"
-            aria-label="사이드바 닫기" @click="isMobileSidebarOpen = false" />
+          <UButton
+            icon="i-tabler-x"
+            color="neutral"
+            variant="ghost"
+            size="lg"
+            class="text-dimmed lg:hidden"
+            aria-label="사이드바 닫기"
+            @click="isMobileSidebarOpen = false"
+          />
 
           <div class="hidden lg:block">
-            <UTooltip :text="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :delay-duration="0" :content="{ side: 'left' }">
-              <UButton :icon="isSidebarOpen ? 'i-tabler-layout-sidebar-right-filled' : 'i-tabler-layout-sidebar-right'"
-                color="neutral" variant="ghost" size="xl"
+            <UTooltip
+              :text="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'"
+              :delay-duration="0"
+              :content="{ side: 'left' }"
+            >
+              <UButton
+                :icon="isSidebarOpen ? 'i-tabler-layout-sidebar-right-filled' : 'i-tabler-layout-sidebar-right'"
+                color="neutral"
+                variant="ghost"
+                size="xl"
                 :class="isSidebarOpen ? 'text-default' : 'text-dimmed hover:text-default'"
-                :aria-label="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'" :aria-pressed="isSidebarOpen"
-                @click="isSidebarOpen = !isSidebarOpen" />
+                :aria-label="isSidebarOpen ? '사이드바 닫기' : '사이드바 열기'"
+                :aria-pressed="isSidebarOpen"
+                @click="isSidebarOpen = !isSidebarOpen"
+              />
             </UTooltip>
           </div>
         </nav>

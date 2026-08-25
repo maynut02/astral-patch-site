@@ -1,9 +1,10 @@
-import { readBody } from 'h3'
+import { requireCurrentSessionUser } from '../../../utils/auth-user'
 import { createEditorDictionary, getEditorDictionaryViewer } from '../../../utils/editor-dictionary'
+import { readJsonBody } from '../../../utils/request-security'
 
 export default defineEventHandler(async (event) => {
-  const session = await requireUserSession(event)
-  const body = await readBody<{ name?: unknown, description?: unknown, visibility?: unknown }>(event)
+  const user = await requireCurrentSessionUser(event)
+  const body = await readJsonBody<{ name?: unknown, description?: unknown, visibility?: unknown }>(event)
 
-  return createEditorDictionary(getEditorDictionaryViewer(session.user), body || {})
+  return createEditorDictionary(getEditorDictionaryViewer(user), body)
 })

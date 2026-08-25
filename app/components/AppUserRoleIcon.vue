@@ -20,6 +20,8 @@ const meta = computed(() => getUserRoleMeta(props.role))
   >
     <UIcon
       :name="meta.icon"
+      role="img"
+      :aria-label="meta.label"
       class="shrink-0 text-muted"
       :class="iconClass"
     />

@@ -1,9 +1,12 @@
+import { requireCurrentSessionUser } from '../utils/auth-user'
+import { assertMutationRequest } from '../utils/request-security'
 import { deleteUserAccount } from '../utils/user-account'
 
 export default defineEventHandler(async (event) => {
-  const session = await requireUserSession(event)
+  assertMutationRequest(event)
+  const user = await requireCurrentSessionUser(event)
 
-  await deleteUserAccount(session.user.id)
+  await deleteUserAccount(user.id)
   await clearUserSession(event)
 
   return { success: true }

@@ -9,20 +9,33 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
 
   ui: {
-    colorMode: false
+    colorMode: false,
+    experimental: {
+      componentDetection: true
+    }
   },
 
   runtimeConfig: {
     databaseUrl: process.env.DATABASE_URL || '',
-    databaseUrlDirect: process.env.DATABASE_URL_DIRECT || '',
     adminGoogleEmails: process.env.NUXT_ADMIN_GOOGLE_EMAILS || ''
   },
 
   routeRules: {
-    '/': { prerender: false }
+    '/**': {
+      headers: {
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=()'
+      }
+    }
   },
 
   compatibilityDate: '2026-06-30',
+
+  nitro: {
+    compressPublicAssets: true
+  },
 
   eslint: {
     config: {

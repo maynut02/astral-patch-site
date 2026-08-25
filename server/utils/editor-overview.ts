@@ -162,7 +162,7 @@ export async function getEditorOverview(): Promise<EditorOverviewResponse> {
     }
   })
 
-  const versions: EditorVersionProgress[] = versionRows.map((row) => ({
+  const versions: EditorVersionProgress[] = versionRows.map(row => ({
     id: row.id,
     version: row.version,
     revision: row.revision,

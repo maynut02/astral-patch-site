@@ -7,20 +7,28 @@ import type {
   EditorLanguage,
   EditorSourceChangeType
 } from '#shared/types/editor'
+import {
+  formatEditorDate as formatDate,
+  formatEditorHandle as formatHandle,
+  getEditorUserPath as getUserPath,
+  normalizeEditorHandle
+} from '~/utils/editor-helpers'
+import {
+  getEditorDiffParts,
+  getEditorSideDiffParts,
+  type EditorDiffPart
+} from '~/utils/editor-diff'
 
-type HistoryDiffPartType = 'same' | 'removed' | 'added'
 type HistoryColor = 'neutral' | 'success' | 'info' | 'warning' | 'error'
-
-interface HistoryDiffPart {
-  text: string
-  type: HistoryDiffPartType
-}
 
 interface HistoryValue {
   key: string
   label: string
   before: string
   after: string
+  unifiedParts: EditorDiffPart[]
+  beforeParts: EditorDiffPart[]
+  afterParts: EditorDiffPart[]
 }
 
 interface HistoryActionMeta {
@@ -47,6 +55,7 @@ const entries = ref<EditorHistoryEntry[]>([])
 const status = ref<'idle' | 'pending' | 'success' | 'error'>('idle')
 const reviewingId = ref<string | null>(null)
 const reviewError = ref('')
+const historyRequestId = ref(0)
 const { user } = useUserSession()
 const canReview = computed(() => ['admin', 'verified'].includes(String(user.value?.role ?? '')))
 
@@ -90,34 +99,14 @@ const sourceFields: Record<EditorLanguage, {
 
 const allSourceLanguages: EditorLanguage[] = ['cnS', 'en', 'jp', 'cnT']
 
-function normalizeHandle(value: unknown): string {
-  return typeof value === 'string' ? value.trim().replace(/^@+/, '') : ''
-}
-
-function getUserPath(handle: string): string {
-  return `/@${encodeURIComponent(handle)}`
-}
-
-function formatHandle(handle: string): string {
-  return `@${handle}`
-}
-
 function getActorHandle(entry: EditorHistoryEntry): string {
-  const handle = normalizeHandle(entry.handle)
+  const handle = normalizeEditorHandle(entry.handle)
 
   return handle || (entry.actorType === 'automation' ? 'Bot' : '')
 }
 
 function getReviewerHandle(entry: EditorHistoryEntry): string {
-  return normalizeHandle(entry.reviewerHandle)
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul',
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  }).format(new Date(value))
+  return normalizeEditorHandle(entry.reviewerHandle)
 }
 
 function getActionLabel(entry: EditorHistoryEntry): string {
@@ -139,87 +128,7 @@ function formatSourceRevision(entry: EditorHistoryEntry): string {
   return version ? `v${version}` : revision ? `r${revision}` : ''
 }
 
-function tokenize(value: string): string[] {
-  return value.match(/\s+|[\p{Script=Han}]|[\p{L}\p{N}]+|[^\p{L}\p{N}\s]/gu) ?? []
-}
-
-function getDiffParts(beforeValue: string, afterValue: string): HistoryDiffPart[] {
-  const before = beforeValue || ''
-  const after = afterValue || ''
-
-  if (!before && !after) {
-    return [{ text: '', type: 'same' }]
-  }
-
-  const beforeTokens = tokenize(before)
-  const afterTokens = tokenize(after)
-  const matrix = Array.from(
-    { length: beforeTokens.length + 1 },
-    () => Array<number>(afterTokens.length + 1).fill(0)
-  )
-
-  for (let beforeIndex = beforeTokens.length - 1; beforeIndex >= 0; beforeIndex--) {
-    for (let afterIndex = afterTokens.length - 1; afterIndex >= 0; afterIndex--) {
-      matrix[beforeIndex]![afterIndex] = beforeTokens[beforeIndex] === afterTokens[afterIndex]
-        ? matrix[beforeIndex + 1]![afterIndex + 1]! + 1
-        : Math.max(matrix[beforeIndex + 1]![afterIndex]!, matrix[beforeIndex]![afterIndex + 1]!)
-    }
-  }
-
-  const parts: HistoryDiffPart[] = []
-
-  function append(text: string, type: HistoryDiffPartType): void {
-    if (!text) {
-      return
-    }
-
-    const previous = parts.at(-1)
-    if (previous?.type === type) {
-      previous.text += text
-      return
-    }
-
-    parts.push({ text, type })
-  }
-
-  let beforeIndex = 0
-  let afterIndex = 0
-
-  while (beforeIndex < beforeTokens.length && afterIndex < afterTokens.length) {
-    if (beforeTokens[beforeIndex] === afterTokens[afterIndex]) {
-      append(beforeTokens[beforeIndex]!, 'same')
-      beforeIndex++
-      afterIndex++
-    } else if (matrix[beforeIndex + 1]![afterIndex]! >= matrix[beforeIndex]![afterIndex + 1]!) {
-      append(beforeTokens[beforeIndex]!, 'removed')
-      beforeIndex++
-    } else {
-      append(afterTokens[afterIndex]!, 'added')
-      afterIndex++
-    }
-  }
-
-  while (beforeIndex < beforeTokens.length) {
-    append(beforeTokens[beforeIndex]!, 'removed')
-    beforeIndex++
-  }
-
-  while (afterIndex < afterTokens.length) {
-    append(afterTokens[afterIndex]!, 'added')
-    afterIndex++
-  }
-
-  return parts
-}
-
-function getSideDiffParts(before: string, after: string, side: 'before' | 'after'): HistoryDiffPart[] {
-  const parts = getDiffParts(before, after)
-    .filter(part => side === 'before' ? part.type !== 'added' : part.type !== 'removed')
-
-  return parts.length ? parts : [{ text: '', type: 'same' }]
-}
-
-function getHistoryValues(entry: EditorHistoryEntry): HistoryValue[] {
+function getHistoryValues(entry: EditorHistoryEntry): Omit<HistoryValue, 'unifiedParts' | 'beforeParts' | 'afterParts'>[] {
   if (entry.action !== 'source_changed') {
     return [{
       key: 'ko',
@@ -243,7 +152,23 @@ function getHistoryValues(entry: EditorHistoryEntry): HistoryValue[] {
     .filter(value => value.before !== value.after)
 }
 
+const historyViews = computed(() => entries.value.map(entry => ({
+  entry,
+  values: getHistoryValues(entry).map((value) => {
+    const unifiedParts = getEditorDiffParts(value.before, value.after)
+
+    return {
+      ...value,
+      unifiedParts,
+      beforeParts: getEditorSideDiffParts(unifiedParts, 'before'),
+      afterParts: getEditorSideDiffParts(unifiedParts, 'after')
+    }
+  })
+})))
+
 async function loadHistory(): Promise<void> {
+  const requestId = ++historyRequestId.value
+
   if (!props.itemId) {
     entries.value = []
     status.value = 'idle'
@@ -255,10 +180,21 @@ async function loadHistory(): Promise<void> {
   reviewError.value = ''
 
   try {
-    const response = await $fetch<EditorHistoryResponse>(`/api/editor/items/${props.itemId}/history`)
+    const response = await $fetch<EditorHistoryResponse>(
+      `/api/editor/items/${encodeURIComponent(props.itemId)}/history`
+    )
+
+    if (requestId !== historyRequestId.value) {
+      return
+    }
+
     entries.value = response.entries
     status.value = 'success'
   } catch {
+    if (requestId !== historyRequestId.value) {
+      return
+    }
+
     entries.value = []
     status.value = 'error'
   }
@@ -277,7 +213,7 @@ async function reviewEntry(entry: EditorHistoryEntry, action: 'approve' | 'rejec
   reviewError.value = ''
 
   try {
-    await $fetch(`/api/editor/changes/${reviewingId.value}`, {
+    await $fetch(`/api/editor/changes/${encodeURIComponent(reviewingId.value)}`, {
       method: 'PATCH',
       body: { action }
     })
@@ -297,103 +233,190 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
   <div class="flex h-full min-h-0 flex-col">
     <div class="shrink-0 p-4">
       <div class="flex min-w-0 items-center gap-2">
-        <h2 class="min-w-0 flex-1 truncate text-sm font-medium text-toned" :title="itemKey">
+        <h2
+          class="min-w-0 flex-1 truncate text-sm font-medium text-toned"
+          :title="itemKey"
+        >
           {{ itemKey || '' }}
         </h2>
-        <span v-if="itemStatusLabel" class="shrink-0 text-xs font-medium" :class="itemStatusColor">
+        <span
+          v-if="itemStatusLabel"
+          class="shrink-0 text-xs font-medium"
+          :class="itemStatusColor"
+        >
           {{ itemStatusLabel }}
         </span>
       </div>
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto pb-4">
-      <div v-if="!itemId" class="flex h-full items-center justify-center text-center text-sm text-muted">
+      <div
+        v-if="!itemId"
+        class="flex h-full items-center justify-center text-center text-sm text-muted"
+      >
         <div>
-          <UIcon name="i-tabler-click" class="mx-auto size-6 text-dimmed" />
-          <p class="mt-2">변경 기록을 확인할 항목을 선택하세요.</p>
+          <UIcon
+            name="i-tabler-click"
+            class="mx-auto size-6 text-dimmed"
+          />
+          <p class="mt-2">
+            변경 기록을 확인할 항목을 선택하세요.
+          </p>
         </div>
       </div>
 
-      <div v-else-if="status === 'pending'" class="flex items-center justify-center p-5 text-muted">
-        <UIcon name="i-tabler-loader-2" class="size-5 animate-spin" />
+      <div
+        v-else-if="status === 'pending'"
+        class="flex items-center justify-center p-5 text-muted"
+      >
+        <UIcon
+          name="i-tabler-loader-2"
+          class="size-5 animate-spin"
+        />
       </div>
 
-      <UAlert v-else-if="status === 'error'" color="error" variant="soft" title="변경 기록을 불러오지 못했습니다."
-        description="잠시 후 다시 시도해 주세요." />
+      <UAlert
+        v-else-if="status === 'error'"
+        color="error"
+        variant="soft"
+        title="변경 기록을 불러오지 못했습니다."
+        description="잠시 후 다시 시도해 주세요."
+      />
 
-      <UAlert v-else-if="!entries.length" color="neutral" variant="soft" icon="i-tabler-history-off"
-        title="변경 기록이 없습니다." description="아직 저장된 변경 내역이 없습니다." />
+      <UAlert
+        v-else-if="!entries.length"
+        color="neutral"
+        variant="soft"
+        icon="i-tabler-history-off"
+        title="변경 기록이 없습니다."
+        description="아직 저장된 변경 내역이 없습니다."
+      />
 
-      <div v-else class="flex flex-col">
-        <UAlert v-if="reviewError" color="error" variant="soft" title="검토에 실패했습니다." :description="reviewError"
-          class="mb-4" />
+      <div
+        v-else
+        class="flex flex-col"
+      >
+        <UAlert
+          v-if="reviewError"
+          color="error"
+          variant="soft"
+          title="검토에 실패했습니다."
+          :description="reviewError"
+          class="mb-4"
+        />
 
-        <article v-for="(entry, index) in entries" :key="entry.id"
-          class="flex flex-col pl-2 pr-4 pt-1 hover:bg-elevated/40 transition-colors">
+        <article
+          v-for="(history, index) in historyViews"
+          :key="history.entry.id"
+          class="flex flex-col pl-2 pr-4 pt-1 hover:bg-elevated/40 transition-colors"
+        >
           <div class="flex items-center gap-2">
-            <div class="flex size-6 items-center justify-center rounded-full shrink-0"
-              :class="actionMeta[entry.action].toneClass">
-              <UIcon :name="actionMeta[entry.action].icon" class="size-4" />
+            <div
+              class="flex size-6 items-center justify-center rounded-full shrink-0"
+              :class="actionMeta[history.entry.action].toneClass"
+            >
+              <UIcon
+                :name="actionMeta[history.entry.action].icon"
+                class="size-4"
+              />
             </div>
 
-            <span class="flex flex-1 shrink-0 text-sm font-medium bg-transparent!"
-              :class="actionMeta[entry.action].toneClass">
-              {{ getActionLabel(entry) }}
+            <span
+              class="flex flex-1 shrink-0 text-sm font-medium bg-transparent!"
+              :class="actionMeta[history.entry.action].toneClass"
+            >
+              {{ getActionLabel(history.entry) }}
             </span>
 
             <div class="flex items-center gap-1 text-xs text-muted">
-              <NuxtLink v-if="getActorHandle(entry)" :to="getUserPath(getActorHandle(entry))"
+              <NuxtLink
+                v-if="getActorHandle(history.entry)"
+                :to="getUserPath(getActorHandle(history.entry))"
                 class="hover:underline underline-offset-2"
-                :class="hasUserRoleIcon(entry.actorRole) ? '-mt-0.5' : ''" @click.stop>
-                {{ formatHandle(getActorHandle(entry)) }}
+                :class="hasUserRoleIcon(history.entry.actorRole) ? '-mt-0.5' : ''"
+                @click.stop
+              >
+                {{ formatHandle(getActorHandle(history.entry)) }}
               </NuxtLink>
               <span v-else>알 수 없는 사용자</span>
-              <AppUserRoleIcon :role="entry.actorRole" icon-class="size-3.5" />
+              <AppUserRoleIcon
+                :role="history.entry.actorRole"
+                icon-class="size-3.5"
+              />
             </div>
           </div>
 
           <div class="flex gap-2">
             <div class="w-6 flex justify-center shrink-0 pt-1">
-              <div v-if="index < entries.length - 1" class="w-0.5 rounded-lg bg-elevated" />
+              <div
+                v-if="index < historyViews.length - 1"
+                class="w-0.5 rounded-lg bg-elevated"
+              />
             </div>
 
             <div class="flex-1 pb-12 flex flex-col gap-4">
               <!-- 작성자 -->
               <div class="flex items-center gap-2 text-xs text-muted">
-                <time class="flex-1 shrink-0 text-xs text-muted" :datetime="entry.createdAt">
-                  {{ formatDate(entry.createdAt) }}
+                <time
+                  class="flex-1 shrink-0 text-xs text-muted"
+                  :datetime="history.entry.createdAt"
+                >
+                  {{ formatDate(history.entry.createdAt) }}
                 </time>
 
                 <!-- 버전 -->
-                <div v-if="entry.action === 'source_changed' && formatSourceRevision(entry)"
-                  class="flex items-center gap-1 text-xs">
-                  <UIcon name="i-tabler-tag" class="size-3 mt-0.5" />
-                  <span class="">{{ formatSourceRevision(entry) }}</span>
+                <div
+                  v-if="history.entry.action === 'source_changed' && formatSourceRevision(history.entry)"
+                  class="flex items-center gap-1 text-xs"
+                >
+                  <UIcon
+                    name="i-tabler-tag"
+                    class="size-3 mt-0.5"
+                  />
+                  <span class="">{{ formatSourceRevision(history.entry) }}</span>
                 </div>
               </div>
 
               <!-- 통합 비교 -->
-              <div v-if="diffMode === 'unified'" class="flex flex-col gap-3">
-                <div v-for="value in getHistoryValues(entry)" :key="value.key" class="min-w-0 flex flex-col gap-0.5">
+              <div
+                v-if="diffMode === 'unified'"
+                class="flex flex-col gap-3"
+              >
+                <div
+                  v-for="value in history.values"
+                  :key="value.key"
+                  class="min-w-0 flex flex-col gap-0.5"
+                >
                   <span class="block text-[10px] text-dimmed">
                     {{ value.label }}
                   </span>
                   <p class="whitespace-pre-wrap wrap-break-word text-sm leading-6 min-h-5">
-                    <template v-for="(part, partIndex) in getDiffParts(value.before, value.after)"
-                      :key="`${part.type}-${partIndex}`">
-                      <span :class="part.type === 'removed'
-                        ? 'bg-error/10 text-error'
-                        : part.type === 'added'
-                          ? 'bg-success/10 text-success'
-                          : 'text-toned'">{{ part.text }}</span>
+                    <template
+                      v-for="(part, partIndex) in value.unifiedParts"
+                      :key="`${part.type}-${partIndex}`"
+                    >
+                      <span
+                        :class="part.type === 'removed'
+                          ? 'bg-error/10 text-error'
+                          : part.type === 'added'
+                            ? 'bg-success/10 text-success'
+                            : 'text-toned'"
+                      >{{ part.text }}</span>
                     </template>
                   </p>
                 </div>
               </div>
 
               <!-- 분할 비교 -->
-              <div v-else class="flex flex-col gap-4 py-2">
-                <div v-for="value in getHistoryValues(entry)" :key="value.key" class="min-w-0 flex flex-col gap-0.5">
+              <div
+                v-else
+                class="flex flex-col gap-4 py-2"
+              >
+                <div
+                  v-for="value in history.values"
+                  :key="value.key"
+                  class="min-w-0 flex flex-col gap-0.5"
+                >
                   <span class="block text-[10px] text-dimmed">
                     {{ value.label }}
                   </span>
@@ -401,8 +424,10 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                     <div class="min-w-0 flex flex-col gap-0.5">
                       <span class="block text-[10px] text-error">수정 전</span>
                       <p class="whitespace-pre-wrap wrap-break-word text-sm leading-6 min-h-5">
-                        <template v-for="(part, partIndex) in getSideDiffParts(value.before, value.after, 'before')"
-                          :key="`before-${part.type}-${partIndex}`">
+                        <template
+                          v-for="(part, partIndex) in value.beforeParts"
+                          :key="`before-${part.type}-${partIndex}`"
+                        >
                           <span :class="part.type === 'removed' ? 'bg-error/10 text-error' : 'text-toned'">
                             {{ part.text }}
                           </span>
@@ -412,8 +437,10 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                     <div class="min-w-0 flex flex-col gap-0.5">
                       <span class="block text-[10px] text-success">수정 후</span>
                       <p class="whitespace-pre-wrap wrap-break-word text-sm leading-6 min-h-5">
-                        <template v-for="(part, partIndex) in getSideDiffParts(value.before, value.after, 'after')"
-                          :key="`after-${part.type}-${partIndex}`">
+                        <template
+                          v-for="(part, partIndex) in value.afterParts"
+                          :key="`after-${part.type}-${partIndex}`"
+                        >
                           <span :class="part.type === 'added' ? 'bg-success/10 text-success' : 'text-toned'">
                             {{ part.text }}
                           </span>
@@ -424,37 +451,69 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                 </div>
               </div>
 
-              <div v-if="entry.action === 'translation_changed' && entry.reviewedAt"
+              <div
+                v-if="history.entry.action === 'translation_changed' && history.entry.reviewedAt"
                 class="flex flex-wrap flex-col gap-1 text-xs p-2 rounded-md"
-                :class="entry.status === 'approved' ? 'bg-success/5' : 'bg-error/5'">
+                :class="history.entry.status === 'approved' ? 'bg-success/5' : 'bg-error/5'"
+              >
                 <div class="flex items-center gap-1">
-                  <UIcon :name="entry.status === 'approved' ? 'i-tabler-check' : 'i-tabler-x'"
-                    :class="entry.status === 'approved' ? 'text-success' : 'text-error'" class="size-4" />
-                  <span :class="entry.status === 'approved' ? 'text-success' : 'text-error'" class="flex-1">
-                    {{ entry.status === 'approved' ? '승인' : '반려' }}
+                  <UIcon
+                    :name="history.entry.status === 'approved' ? 'i-tabler-check' : 'i-tabler-x'"
+                    :class="history.entry.status === 'approved' ? 'text-success' : 'text-error'"
+                    class="size-4"
+                  />
+                  <span
+                    :class="history.entry.status === 'approved' ? 'text-success' : 'text-error'"
+                    class="flex-1"
+                  >
+                    {{ history.entry.status === 'approved' ? '승인' : '반려' }}
                   </span>
 
                   <div class="flex items-center gap-1 text-muted">
-                    <NuxtLink v-if="getReviewerHandle(entry)" :to="getUserPath(getReviewerHandle(entry))"
+                    <NuxtLink
+                      v-if="getReviewerHandle(history.entry)"
+                      :to="getUserPath(getReviewerHandle(history.entry))"
                       class="hover:underline underline-offset-2"
-                      :class="hasUserRoleIcon(entry.reviewerRole) ? '-mt-0.5' : ''" @click.stop>
-                      {{ formatHandle(getReviewerHandle(entry)) }}
+                      :class="hasUserRoleIcon(history.entry.reviewerRole) ? '-mt-0.5' : ''"
+                      @click.stop
+                    >
+                      {{ formatHandle(getReviewerHandle(history.entry)) }}
                     </NuxtLink>
                     <span v-else>알 수 없는 사용자</span>
-                    <AppUserRoleIcon :role="entry.reviewerRole" icon-class="size-3.5" />
+                    <AppUserRoleIcon
+                      :role="history.entry.reviewerRole"
+                      icon-class="size-3.5"
+                    />
                   </div>
                 </div>
-                <time class="text-muted" :datetime="entry.reviewedAt">{{ formatDate(entry.reviewedAt) }}</time>
+                <time
+                  class="text-muted"
+                  :datetime="history.entry.reviewedAt"
+                >{{ formatDate(history.entry.reviewedAt) }}</time>
               </div>
 
-              <div v-if="canReview && entry.action === 'translation_changed' && entry.status === 'pending'"
-                class="mt-3 flex justify-end gap-2 border-t border-default pt-3">
-                <UButton color="error" variant="soft" size="sm" :loading="reviewingId === getReviewId(entry)"
-                  :disabled="Boolean(reviewingId)" @click="reviewEntry(entry, 'reject')">
+              <div
+                v-if="canReview && history.entry.action === 'translation_changed' && history.entry.status === 'pending'"
+                class="mt-3 flex justify-end gap-2 border-t border-default pt-3"
+              >
+                <UButton
+                  color="error"
+                  variant="soft"
+                  size="sm"
+                  :loading="reviewingId === getReviewId(history.entry)"
+                  :disabled="Boolean(reviewingId)"
+                  @click="reviewEntry(history.entry, 'reject')"
+                >
                   반려
                 </UButton>
-                <UButton color="success" variant="soft" size="sm" :loading="reviewingId === getReviewId(entry)"
-                  :disabled="Boolean(reviewingId)" @click="reviewEntry(entry, 'approve')">
+                <UButton
+                  color="success"
+                  variant="soft"
+                  size="sm"
+                  :loading="reviewingId === getReviewId(history.entry)"
+                  :disabled="Boolean(reviewingId)"
+                  @click="reviewEntry(history.entry, 'approve')"
+                >
                   승인
                 </UButton>
               </div>

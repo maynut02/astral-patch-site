@@ -11,6 +11,14 @@ import type {
   EditorDictionariesResponse
 } from '../../shared/types/editor-dictionary'
 import { resolveEditorRole, type EditorRole } from '../../shared/types/editor'
+import {
+  containsLikePattern,
+  getFirstQueryValue,
+  parseOptionalText,
+  parsePage as parseValidatedPage,
+  parseRequiredText,
+  parseUuid
+} from './validation'
 
 export const EDITOR_DICTIONARY_PAGE_SIZE = 50
 
@@ -99,6 +107,10 @@ export async function ensureEditorDictionaryTables(database: DatabaseClient = ge
         CREATE INDEX IF NOT EXISTS editor_dictionary_entries_search_idx
         ON editor_dictionary_entries (dictionary_id, source_text, translation)
       `
+      await database`
+        CREATE INDEX IF NOT EXISTS editor_dictionary_entries_sort_idx
+        ON editor_dictionary_entries (dictionary_id, source_text, id)
+      `
     })().catch((error) => {
       dictionaryTablesReady = undefined
       throw error
@@ -106,61 +118,6 @@ export async function ensureEditorDictionaryTables(database: DatabaseClient = ge
   }
 
   await dictionaryTablesReady
-}
-
-function getTextLength(value: string): number {
-  return Array.from(value).length
-}
-
-function parseRequiredText(value: unknown, field: string, maxLength: number): string {
-  if (typeof value !== 'string') {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `${field} is required`
-    })
-  }
-
-  const normalized = value.trim()
-
-  if (!normalized) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `${field} is required`
-    })
-  }
-
-  if (getTextLength(normalized) > maxLength) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `${field} is too long`
-    })
-  }
-
-  return normalized
-}
-
-function parseOptionalText(value: unknown, field: string, maxLength: number): string {
-  if (value === undefined || value === null) {
-    return ''
-  }
-
-  if (typeof value !== 'string') {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `${field} must be text`
-    })
-  }
-
-  const normalized = value.trim()
-
-  if (getTextLength(normalized) > maxLength) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `${field} is too long`
-    })
-  }
-
-  return normalized
 }
 
 function parseVisibility(value: unknown, fallback: EditorDictionaryVisibility = 'private'): EditorDictionaryVisibility {
@@ -179,39 +136,15 @@ function parseVisibility(value: unknown, fallback: EditorDictionaryVisibility = 
 }
 
 export function parseEditorDictionaryId(value: unknown): string {
-  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Invalid dictionary id'
-    })
-  }
-
-  return value
+  return parseUuid(value, 'Invalid dictionary id')
 }
 
 export function parseEditorDictionaryEntryId(value: unknown): string {
   return parseEditorDictionaryId(value)
 }
 
-function parsePage(value: unknown): number {
-  const page = Number(typeof value === 'string' ? value : '1')
-
-  if (!Number.isInteger(page) || page < 1 || page > 100000) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Invalid page'
-    })
-  }
-
-  return page
-}
-
 function getSearchValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    return typeof value[0] === 'string' ? value[0].trim() : ''
-  }
-
-  return typeof value === 'string' ? value.trim() : ''
+  return getFirstQueryValue(value).trim()
 }
 
 function toDictionary(row: DictionaryRow, viewer: EditorDictionaryViewer): EditorDictionary {
@@ -374,24 +307,24 @@ export async function getEditorDictionaryEntries(
   const database = getDatabase()
   await ensureEditorDictionaryTables(database)
   await requireDictionary(database, dictionaryId, viewer)
-  const page = parsePage(input.page)
+  const page = parseValidatedPage(input.page, 'Invalid page')
   const search = getSearchValue(input.search)
 
-  if (getTextLength(search) > 200) {
+  if (Array.from(search).length > 200) {
     throw createError({
       statusCode: 400,
       statusMessage: 'Search value is too long'
     })
   }
 
-  const pattern = `%${search}%`
+  const pattern = containsLikePattern(search)
   const where = database`
     e.dictionary_id = ${dictionaryId}
     AND (
       NOT ${Boolean(search)}
-      OR e.source_text ILIKE ${pattern}
-      OR e.translation ILIKE ${pattern}
-      OR e.note ILIKE ${pattern}
+      OR e.source_text ILIKE ${pattern} ESCAPE '\\'
+      OR e.translation ILIKE ${pattern} ESCAPE '\\'
+      OR e.note ILIKE ${pattern} ESCAPE '\\'
     )
   `
   const offset = (page - 1) * EDITOR_DICTIONARY_PAGE_SIZE

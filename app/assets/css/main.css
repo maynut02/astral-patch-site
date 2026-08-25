@@ -22,8 +22,12 @@
   --ui-radius: 0.25rem;
 }
 
-button {
+button:not(:disabled) {
   cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 .dark {
@@ -81,8 +85,11 @@ button {
   height: 5px;
 }
 
-* {
+html {
   scrollbar-width: thin;
   scrollbar-color: var(--ui-color-neutral-700) transparent;
+}
+
+body {
   overflow-wrap: anywhere;
 }

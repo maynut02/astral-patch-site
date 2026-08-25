@@ -1,4 +1,5 @@
 import { getQuery, getRouterParam } from 'h3'
+import { getCurrentSessionUser } from '../../../../utils/auth-user'
 import {
   getEditorDictionaryEntries,
   getEditorDictionaryViewer,
@@ -6,11 +7,11 @@ import {
 } from '../../../../utils/editor-dictionary'
 
 export default defineEventHandler(async (event) => {
-  const session = await getUserSession(event)
+  const user = await getCurrentSessionUser(event)
   const dictionaryId = parseEditorDictionaryId(getRouterParam(event, 'id'))
   const query = getQuery(event)
 
-  return getEditorDictionaryEntries(getEditorDictionaryViewer(session.user), dictionaryId, {
+  return getEditorDictionaryEntries(getEditorDictionaryViewer(user), dictionaryId, {
     page: query.page,
     search: query.search
   })
