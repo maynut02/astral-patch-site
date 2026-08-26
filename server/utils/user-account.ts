@@ -1,12 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
 import { BOT_GOOGLE_SUB, type AppRole } from './auth-user'
-import { ensureEditorDictionaryTables } from './editor-dictionary'
 import { getDatabase } from './database'
 
 export async function deleteUserAccount(googleSub: string): Promise<void> {
   const database = getDatabase()
-  await ensureEditorDictionaryTables(database)
 
   await database.begin(async (transaction) => {
     const [account] = await transaction<{ role: AppRole }[]>`

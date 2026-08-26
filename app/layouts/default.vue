@@ -76,7 +76,6 @@ watch(() => route.fullPath, () => {
 
     <USlideover
       v-model:open="isMobileNavigationOpen"
-      title="사이트 메뉴"
       side="right"
       :ui="{ overlay: 'z-200', content: 'z-200 max-w-80', header: 'min-h-14 px-4 py-3', body: 'p-2 sm:p-2' }"
     >

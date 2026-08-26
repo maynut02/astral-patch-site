@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
-import { ensureUsersTable } from './auth-user'
 import type { DatabaseClient } from './database'
 import { getDatabase } from './database'
 import type {
@@ -58,66 +57,6 @@ interface DictionaryEntryRow {
   creatorHandle: string | null
   createdAt: string
   updatedAt: string
-}
-
-let dictionaryTablesReady: Promise<void> | undefined
-
-export async function ensureEditorDictionaryTables(database: DatabaseClient = getDatabase()): Promise<void> {
-  await ensureUsersTable(database)
-
-  if (!dictionaryTablesReady) {
-    dictionaryTablesReady = (async () => {
-      await database`
-        CREATE TABLE IF NOT EXISTS editor_dictionaries (
-          id text PRIMARY KEY,
-          owner_id text NOT NULL REFERENCES app_users(google_sub) ON DELETE CASCADE,
-          name text NOT NULL,
-          description text NOT NULL DEFAULT '',
-          visibility text NOT NULL DEFAULT 'private'
-            CHECK (visibility IN ('public', 'private')),
-          created_at timestamptz NOT NULL DEFAULT now(),
-          updated_at timestamptz NOT NULL DEFAULT now()
-        )
-      `
-      await database`
-        CREATE INDEX IF NOT EXISTS editor_dictionaries_visibility_idx
-        ON editor_dictionaries (visibility, updated_at DESC)
-      `
-      await database`
-        CREATE INDEX IF NOT EXISTS editor_dictionaries_owner_idx
-        ON editor_dictionaries (owner_id, updated_at DESC)
-      `
-      await database`
-        CREATE TABLE IF NOT EXISTS editor_dictionary_entries (
-          id text PRIMARY KEY,
-          dictionary_id text NOT NULL REFERENCES editor_dictionaries(id) ON DELETE CASCADE,
-          source_text text NOT NULL,
-          translation text NOT NULL,
-          note text NOT NULL DEFAULT '',
-          created_by text NOT NULL REFERENCES app_users(google_sub),
-          created_at timestamptz NOT NULL DEFAULT now(),
-          updated_at timestamptz NOT NULL DEFAULT now()
-        )
-      `
-      await database`
-        CREATE INDEX IF NOT EXISTS editor_dictionary_entries_dictionary_idx
-        ON editor_dictionary_entries (dictionary_id, updated_at DESC)
-      `
-      await database`
-        CREATE INDEX IF NOT EXISTS editor_dictionary_entries_search_idx
-        ON editor_dictionary_entries (dictionary_id, source_text, translation)
-      `
-      await database`
-        CREATE INDEX IF NOT EXISTS editor_dictionary_entries_sort_idx
-        ON editor_dictionary_entries (dictionary_id, source_text, id)
-      `
-    })().catch((error) => {
-      dictionaryTablesReady = undefined
-      throw error
-    })
-  }
-
-  await dictionaryTablesReady
 }
 
 function parseVisibility(value: unknown, fallback: EditorDictionaryVisibility = 'private'): EditorDictionaryVisibility {
@@ -217,7 +156,6 @@ async function requireDictionary(
 
 export async function getEditorDictionaries(viewer: EditorDictionaryViewer): Promise<EditorDictionariesResponse> {
   const database = getDatabase()
-  await ensureEditorDictionaryTables(database)
 
   const rows = await database<DictionaryRow[]>`
     SELECT
@@ -251,7 +189,6 @@ export async function createEditorDictionary(
   input: { name?: unknown, description?: unknown, visibility?: unknown }
 ): Promise<EditorDictionary> {
   const database = getDatabase()
-  await ensureEditorDictionaryTables(database)
   const name = parseRequiredText(input.name, 'Dictionary name', 100)
   const description = parseOptionalText(input.description, 'Dictionary description', 500)
   const visibility = parseVisibility(input.visibility)
@@ -271,7 +208,6 @@ export async function updateEditorDictionary(
   input: { name?: unknown, description?: unknown, visibility?: unknown }
 ): Promise<EditorDictionary> {
   const database = getDatabase()
-  await ensureEditorDictionaryTables(database)
   const current = await requireDictionary(database, dictionaryId, viewer, true)
   const name = input.name === undefined ? current.name : parseRequiredText(input.name, 'Dictionary name', 100)
   const description = input.description === undefined
@@ -294,7 +230,6 @@ export async function updateEditorDictionary(
 
 export async function deleteEditorDictionary(viewer: EditorDictionaryViewer, dictionaryId: string): Promise<void> {
   const database = getDatabase()
-  await ensureEditorDictionaryTables(database)
   await requireDictionary(database, dictionaryId, viewer, true)
   await database`DELETE FROM editor_dictionaries WHERE id = ${dictionaryId}`
 }
@@ -305,7 +240,6 @@ export async function getEditorDictionaryEntries(
   input: { page?: unknown, search?: unknown }
 ): Promise<EditorDictionaryEntriesResponse> {
   const database = getDatabase()
-  await ensureEditorDictionaryTables(database)
   await requireDictionary(database, dictionaryId, viewer)
   const page = parseValidatedPage(input.page, 'Invalid page')
   const search = getSearchValue(input.search)
@@ -394,7 +328,6 @@ export async function createEditorDictionaryEntry(
   input: { sourceText?: unknown, translation?: unknown, note?: unknown }
 ): Promise<EditorDictionaryEntry> {
   const database = getDatabase()
-  await ensureEditorDictionaryTables(database)
   await requireDictionary(database, dictionaryId, viewer, true)
   const sourceText = parseRequiredText(input.sourceText, 'Source text', 500)
   const translation = parseRequiredText(input.translation, 'Translation', 500)
@@ -432,7 +365,6 @@ export async function updateEditorDictionaryEntry(
   input: { sourceText?: unknown, translation?: unknown, note?: unknown }
 ): Promise<EditorDictionaryEntry> {
   const database = getDatabase()
-  await ensureEditorDictionaryTables(database)
   await requireDictionary(database, dictionaryId, viewer, true)
   const current = await findEntry(database, dictionaryId, entryId)
 
@@ -482,7 +414,6 @@ export async function deleteEditorDictionaryEntry(
   entryId: string
 ): Promise<void> {
   const database = getDatabase()
-  await ensureEditorDictionaryTables(database)
   await requireDictionary(database, dictionaryId, viewer, true)
   const result = await database`
     DELETE FROM editor_dictionary_entries

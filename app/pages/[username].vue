@@ -53,18 +53,14 @@ useHead({ title: displayHandle })
           {{ initial }}
         </div>
 
-        <div class="mt-5 flex items-center gap-2">
-          <h1
-            class="text-2xl font-semibold text-default"
-            :class="hasUserRoleIcon(publicProfile.role) ? '-mt-0.5' : ''"
-          >
-            {{ displayHandle }}
-          </h1>
-          <AppUserRoleIcon
-            :role="publicProfile.role"
-            icon-class="size-5"
-          />
-        </div>
+        <AppUserIdentity
+          :handle="publicProfile.handle || handle"
+          :role="publicProfile.role"
+          :link="false"
+          text-class="text-2xl font-semibold text-default"
+          icon-class="size-5"
+          class="mt-5 gap-2"
+        />
       </div>
     </UCard>
   </div>

@@ -17,7 +17,8 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     databaseUrl: process.env.DATABASE_URL || '',
-    adminGoogleEmails: process.env.NUXT_ADMIN_GOOGLE_EMAILS || ''
+    aiApiKey: process.env.AI_API_KEY || '',
+    aiBaseUrl: process.env.AI_BASE_URL || ''
   },
 
   routeRules: {

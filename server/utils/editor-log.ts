@@ -1,5 +1,4 @@
 import { createError } from 'h3'
-import { ensureBotWorkMigration } from './auth-user'
 import { getDatabase, type DatabaseClient } from './database'
 import type {
   EditorChangeStatus,
@@ -77,7 +76,6 @@ export async function getEditorTranslationLogs(
   filters: EditorTranslationLogFilters
 ): Promise<EditorTranslationLogResponse> {
   const database = getDatabase()
-  await ensureBotWorkMigration(database)
 
   const offset = (filters.page - 1) * EDITOR_LOG_PAGE_SIZE
   const where = buildTranslationLogWhere(database, filters)
@@ -137,7 +135,6 @@ interface SourceRevisionRow extends Omit<EditorSourceRevision, 'totalChanges' | 
 
 export async function getEditorSourceRevisions(): Promise<EditorSourceRevisionsResponse> {
   const database = getDatabase()
-  await ensureBotWorkMigration(database)
   const rows = await database<SourceRevisionRow[]>`
     SELECT
       revision_id AS id,
@@ -170,7 +167,6 @@ export async function getEditorSourceChanges(
   page: number
 ): Promise<EditorSourceChangesResponse> {
   const database = getDatabase()
-  await ensureBotWorkMigration(database)
   const offset = (page - 1) * EDITOR_LOG_PAGE_SIZE
 
   const [countRows, entries] = await Promise.all([

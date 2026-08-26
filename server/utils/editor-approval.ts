@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
-import { ensureBotWorkMigration } from './auth-user'
 import { getDatabase } from './database'
 import { parseUuid } from './validation'
 import { resolveEditorRole, type EditorReviewAction, type EditorReviewResponse } from '../../shared/types/editor'
@@ -12,6 +11,11 @@ interface PendingEditorChange {
   sourceVersionId: string
   proposedText: string
   status: 'pending' | 'approved' | 'rejected' | 'superseded'
+}
+
+interface EditorChangeIdentity {
+  unitId: string
+  locale: string
 }
 
 export function parseEditorChangeId(value: unknown): string {
@@ -47,9 +51,33 @@ export async function reviewEditorChange(
 ): Promise<EditorReviewResponse> {
   const action = parseReviewAction(input.action)
   const database = getDatabase()
-  await ensureBotWorkMigration(database)
 
   return database.begin(async (transaction) => {
+    const [identity] = await transaction<EditorChangeIdentity[]>`
+      SELECT
+        unit_id AS "unitId",
+        locale
+      FROM translation_changes
+      WHERE id = ${changeId}
+    `
+
+    if (!identity) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: 'Translation change could not be found'
+      })
+    }
+
+    // Saving a proposal and reviewing proposals both lock the unit row. This prevents
+    // two reviewers from approving competing proposals at the same time and prevents
+    // a new pending proposal from slipping in between approval and superseding siblings.
+    await transaction`
+      SELECT id
+      FROM translation_units
+      WHERE id = ${identity.unitId}
+      FOR UPDATE
+    `
+
     const [change] = await transaction<PendingEditorChange[]>`
       SELECT
         id,
@@ -119,6 +147,18 @@ export async function reviewEditorChange(
           approved_by = EXCLUDED.approved_by,
           approved_at = EXCLUDED.approved_at,
           updated_at = now()
+      `
+
+      await transaction`
+        UPDATE translation_changes
+        SET
+          status = 'superseded',
+          reviewed_by = ${reviewerId},
+          reviewed_at = now()
+        WHERE unit_id = ${change.unitId}
+          AND locale = ${change.locale}
+          AND status = 'pending'
+          AND id <> ${change.id}
       `
     }
 

@@ -1,4 +1,3 @@
-import { ensureBotWorkMigration } from './auth-user'
 import { getDatabase } from './database'
 import type {
   EditorCategoryProgress,
@@ -53,7 +52,6 @@ function toSummary(total: number, counts: EditorProgressCounts): EditorProgressS
 
 export async function getEditorOverview(): Promise<EditorOverviewResponse> {
   const database = getDatabase()
-  await ensureBotWorkMigration(database)
 
   const [rows, versionRows] = await Promise.all([
     database<EditorOverviewRow[]>`

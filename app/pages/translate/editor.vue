@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type {
+  EditorAiTranslationResponse,
+  EditorBatchSaveResponse,
   EditorDiffMode,
   EditorItem,
   EditorItemStatusFilter,
@@ -27,13 +29,12 @@ import {
   useEditorDraftStorage,
   writeEditorStorageValue
 } from '~/composables/editor-drafts'
+import { getTranslationSyntaxWarning } from '~/utils/editor-validation'
 import {
   formatEditorCount as formatCount,
-  formatEditorHandle as formatHandle,
   formatEditorPercent as formatPercent,
   formatEditorVersion as getVersionLabel,
   getEditorQueryString as getQueryString,
-  getEditorUserPath as getUserPath,
   isEditorSearchMatch,
   isEditorSearchType,
   normalizeEditorHandle as normalizeHandle,
@@ -178,6 +179,8 @@ const selectFirstItemOnNextLoad = ref(false)
 const listContainer = ref<HTMLElement | null>(null)
 const scrollAfterLoad = ref(false)
 const isSaving = ref(false)
+const isAiTranslating = ref(false)
+const retainingItemId = ref<string | null>(null)
 
 const route = useRoute()
 const router = useRouter()
@@ -346,8 +349,8 @@ const itemStatusMeta: Record<EditorItemStatus, { label: string, color: string, t
   }
 }
 
-function getItemDraftKey(item: Pick<EditorItem, 'category' | 'unitKey'>): string {
-  return getDraftKey(item.category, item.unitKey)
+function getItemDraftKey(item: Pick<EditorItem, 'id'>): string {
+  return getDraftKey(item.id)
 }
 
 onMounted(() => {
@@ -909,6 +912,21 @@ const {
 const items = computed(() => itemsData.value?.items ?? [])
 const selectedItem = computed(() => items.value.find(item => item.id === selectedItemId.value) ?? null)
 const selectedItemKey = computed(() => selectedItem.value ? `${selectedItem.value.category}_${selectedItem.value.unitKey}` : '')
+const selectedItemHasSource = computed(() => selectedItem.value
+  ? [selectedItem.value.cnS, selectedItem.value.en, selectedItem.value.jp, selectedItem.value.cnT]
+      .some(text => text.trim())
+  : false)
+const aiTranslationTooltip = computed(() => {
+  if (isAiTranslating.value) {
+    return 'AI 번역 중'
+  }
+
+  if (!selectedItem.value) {
+    return '번역할 항목을 선택해 주세요.'
+  }
+
+  return selectedItemHasSource.value ? 'AI 번역' : '번역할 원문이 없습니다.'
+})
 const total = computed(() => itemsData.value?.total ?? 0)
 const totalPages = computed(() => Math.max(1, itemsData.value?.totalPages ?? 1))
 const isLoading = computed(() => itemsStatus.value === 'idle' || itemsStatus.value === 'pending')
@@ -1162,6 +1180,70 @@ function getItemStatusLabel(item: EditorItem): string {
   return itemStatusMeta[getItemStatus(item)].label
 }
 
+function canRetainItem(item: EditorItem): boolean {
+  return getItemStatus(item) === 'warning' && !hasItemDraft(item)
+}
+
+async function retainItemTranslation(item: EditorItem): Promise<void> {
+  if (!canRetainItem(item) || retainingItemId.value) {
+    return
+  }
+
+  if (!loggedIn.value) {
+    toast.add({
+      id: 'editor-retain-login-required',
+      title: '로그인이 필요합니다.',
+      description: '현재 번역을 유지하려면 로그인해 주세요.',
+      color: 'warning',
+      progress: false
+    })
+    return
+  }
+
+  retainingItemId.value = item.id
+
+  try {
+    const response = await $fetch<EditorSaveResponse>(
+      `/api/editor/items/${encodeURIComponent(item.id)}/retain`,
+      { method: 'POST' }
+    )
+
+    item.ko = response.ko
+    item.pendingStatus = response.status
+    persistedItemStates.value = {
+      ...persistedItemStates.value,
+      [item.id]: {
+        ko: response.ko,
+        pendingStatus: response.status,
+        approvedForCurrentSource: item.approvedForCurrentSource
+      }
+    }
+
+    await Promise.allSettled([refreshItems(), refreshOverview()])
+
+    if (selectedItemId.value === item.id && activeSidebarMenu.value === 'history') {
+      historyReloadKey.value += 1
+    }
+
+    toast.add({
+      id: `editor-retain-${item.id}`,
+      title: response.changed ? '현재 번역을 승인 대기로 등록했습니다.' : '이미 같은 내용이 승인 대기 중입니다.',
+      color: response.changed ? 'success' : 'info',
+      progress: false
+    })
+  } catch (error: unknown) {
+    toast.add({
+      id: `editor-retain-failed-${item.id}`,
+      title: '현재 번역을 유지하지 못했습니다.',
+      description: getRequestErrorMessage(error, '잠시 후 다시 시도해 주세요.'),
+      color: 'error',
+      progress: false
+    })
+  } finally {
+    retainingItemId.value = null
+  }
+}
+
 function setPage(nextPage: number): void {
   const targetPage = Math.min(Math.max(Math.trunc(nextPage), 1), totalPages.value)
   pageInput.value = String(targetPage)
@@ -1227,6 +1309,83 @@ function handleItemTranslationInput(item: EditorItem, value: string): void {
   updateItemDraft(item)
 }
 
+function getRequestErrorMessage(error: unknown, fallback: string): string {
+  if (!error || typeof error !== 'object') {
+    return fallback
+  }
+
+  const payload = error as {
+    data?: { statusMessage?: unknown, message?: unknown }
+    statusMessage?: unknown
+    message?: unknown
+  }
+  const candidates = [
+    payload.data?.statusMessage,
+    payload.data?.message,
+    payload.statusMessage,
+    payload.message
+  ]
+
+  return candidates.find((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+    || fallback
+}
+
+function getAiTranslationErrorMessage(error: unknown): string {
+  return getRequestErrorMessage(error, 'AI 번역에 실패했습니다.')
+}
+
+async function translateSelectedItemWithAi(): Promise<void> {
+  const item = selectedItem.value
+
+  if (!item || isAiTranslating.value || !selectedItemHasSource.value) {
+    return
+  }
+
+  if (!loggedIn.value) {
+    toast.add({
+      id: 'editor-ai-translation-login-required',
+      title: '로그인이 필요합니다.',
+      description: 'AI 번역을 사용하려면 로그인해 주세요.',
+      color: 'warning',
+      progress: false
+    })
+    return
+  }
+
+  isAiTranslating.value = true
+
+  try {
+    const response = await $fetch<EditorAiTranslationResponse>(
+      `/api/editor/items/${encodeURIComponent(item.id)}/ai-translation`,
+      {
+        method: 'POST',
+        body: {
+          sourceVersionId: item.sourceVersionId
+        }
+      }
+    )
+    const translatedText = response.text.trim()
+
+    if (response.itemId !== item.id
+      || response.sourceVersionId !== item.sourceVersionId
+      || !translatedText) {
+      throw new Error('AI 번역 결과가 현재 항목과 일치하지 않습니다.')
+    }
+
+    handleItemTranslationInput(item, translatedText)
+  } catch (error: unknown) {
+    toast.add({
+      id: 'editor-ai-translation-failed',
+      title: 'AI 번역에 실패했습니다.',
+      description: getAiTranslationErrorMessage(error),
+      color: 'error',
+      progress: false
+    })
+  } finally {
+    isAiTranslating.value = false
+  }
+}
+
 async function saveCurrentPage(): Promise<void> {
   const entries = currentPageDrafts.value
 
@@ -1259,29 +1418,38 @@ async function saveCurrentPage(): Promise<void> {
   isSaving.value = true
 
   try {
-    const results = await Promise.allSettled(entries.map(async ({ item, draft }) => {
-      const response = await $fetch<EditorSaveResponse>(`/api/editor/items/${encodeURIComponent(item.id)}`, {
-        method: 'PATCH',
-        body: {
+    const batch = await $fetch<EditorBatchSaveResponse>('/api/editor/items/batch', {
+      method: 'PATCH',
+      body: {
+        items: entries.map(({ item, draft }) => ({
+          id: item.id,
           text: draft.text
-        }
-      })
-
-      return { item, draft, response }
-    }))
-
+        }))
+      }
+    })
+    const entriesById = new Map(entries.map(entry => [entry.item.id, entry]))
+    const handledItemIds = new Set<string>()
     let savedCount = 0
     let failedCount = 0
     const savedDraftKeys: string[] = []
     const changedItemIds = new Set<string>()
 
-    for (const result of results) {
-      if (result.status === 'rejected') {
+    for (const result of batch.results) {
+      const entry = entriesById.get(result.itemId)
+
+      if (!entry || handledItemIds.has(result.itemId)) {
+        continue
+      }
+
+      handledItemIds.add(result.itemId)
+
+      if (!result.ok || !result.response) {
         failedCount += 1
         continue
       }
 
-      const { item, draft, response } = result.value
+      const { item, draft } = entry
+      const response = result.response
       const key = getItemDraftKey(item)
       const currentDraft = drafts.value[key]
 
@@ -1308,6 +1476,7 @@ async function saveCurrentPage(): Promise<void> {
       savedCount += 1
     }
 
+    failedCount += entries.length - handledItemIds.size
     removeDraftsByKeys(savedDraftKeys)
 
     await Promise.allSettled([refreshItems(), refreshOverview()])
@@ -1334,6 +1503,14 @@ async function saveCurrentPage(): Promise<void> {
         progress: false
       })
     }
+  } catch (error: unknown) {
+    toast.add({
+      id: 'editor-save-failed',
+      title: '번역을 저장하지 못했습니다.',
+      description: getRequestErrorMessage(error, '잠시 후 다시 시도해 주세요.'),
+      color: 'error',
+      progress: false
+    })
   } finally {
     isSaving.value = false
   }
@@ -1759,7 +1936,7 @@ watch(items, (nextItems) => {
               />
             </UTooltip>
             <UTooltip
-              text="AI 번역"
+              :text="aiTranslationTooltip"
               :delay-duration="0"
             >
               <UButton
@@ -1767,6 +1944,10 @@ watch(items, (nextItems) => {
                 color="neutral"
                 variant="ghost"
                 size="lg"
+                aria-label="AI 번역"
+                :loading="isAiTranslating"
+                :disabled="!selectedItem || !selectedItemHasSource || isAiTranslating || isSaving"
+                @click="translateSelectedItemWithAi"
               />
             </UTooltip>
             <UPopover
@@ -1941,6 +2122,28 @@ watch(items, (nextItems) => {
                       @update:model-value="handleItemTranslationInput(item, $event)"
                     />
                   </div>
+
+                  <!-- 비차단 번역 문법 경고 -->
+                  <UIcon
+                    v-if="getTranslationSyntaxWarning(item)"
+                    name="i-tabler-alert-triangle"
+                    class="absolute bottom-2.5 right-2.5 size-4 text-warning"
+                    :title="getTranslationSyntaxWarning(item)"
+                  />
+
+                  <!-- 확인 필요 번역 유지 -->
+                  <UButton
+                    v-if="canRetainItem(item)"
+                    label="유지"
+                    icon="i-tabler-check"
+                    color="warning"
+                    variant="soft"
+                    size="xs"
+                    class="absolute right-2 top-2 z-10"
+                    :loading="retainingItemId === item.id"
+                    :disabled="Boolean(retainingItemId) || isSaving"
+                    @click.stop="retainItemTranslation(item)"
+                  />
 
                   <!-- 변경 상태 -->
                   <UIcon
@@ -2393,22 +2596,12 @@ watch(items, (nextItems) => {
                           <span class="shrink-0">
                             {{ selectedDictionary.visibility === 'public' ? '공개 용어집' : '비공개 용어집' }} ·
                           </span>
-                          <NuxtLink
-                            v-if="getDictionaryOwnerHandle(selectedDictionary)"
-                            :to="getUserPath(getDictionaryOwnerHandle(selectedDictionary))"
-                            class="truncate hover:underline underline-offset-2"
-                            :class="hasUserRoleIcon(selectedDictionary.ownerRole) ? '-mt-0.5' : ''"
-                            @click.stop
-                          >
-                            {{ formatHandle(getDictionaryOwnerHandle(selectedDictionary)) }}
-                          </NuxtLink>
-                          <span
-                            v-else
-                            class="truncate"
-                          >알 수 없는 사용자</span>
-                          <AppUserRoleIcon
+                          <AppUserIdentity
+                            :handle="getDictionaryOwnerHandle(selectedDictionary)"
                             :role="selectedDictionary.ownerRole"
+                            text-class="text-xs text-dimmed"
                             icon-class="size-3"
+                            stop-propagation
                           />
                         </div>
                       </div>
@@ -2526,19 +2719,12 @@ watch(items, (nextItems) => {
                               entry.note }}
                           </p>
                           <div class="flex items-center gap-1 text-[10px] text-dimmed">
-                            <NuxtLink
-                              v-if="getDictionaryCreatorHandle(entry)"
-                              :to="getUserPath(getDictionaryCreatorHandle(entry))"
-                              class="hover:underline underline-offset-2"
-                              :class="hasUserRoleIcon(entry.creatorRole) ? '-mt-0.5' : ''"
-                              @click.stop
-                            >
-                              {{ formatHandle(getDictionaryCreatorHandle(entry)) }}
-                            </NuxtLink>
-                            <span v-else>알 수 없는 사용자</span>
-                            <AppUserRoleIcon
+                            <AppUserIdentity
+                              :handle="getDictionaryCreatorHandle(entry)"
                               :role="entry.creatorRole"
+                              text-class="text-[10px] text-dimmed"
                               icon-class="size-3"
+                              stop-propagation
                             />
                           </div>
                         </article>
@@ -2621,19 +2807,12 @@ watch(items, (nextItems) => {
                               {{ dictionary.description }}
                             </span>
                             <span class="mt-1 flex items-center gap-1 text-[10px] text-dimmed">
-                              <NuxtLink
-                                v-if="getDictionaryOwnerHandle(dictionary)"
-                                :to="getUserPath(getDictionaryOwnerHandle(dictionary))"
-                                class="hover:underline underline-offset-2"
-                                :class="hasUserRoleIcon(dictionary.ownerRole) ? '-mt-0.5' : ''"
-                                @click.stop
-                              >
-                                {{ formatHandle(getDictionaryOwnerHandle(dictionary)) }}
-                              </NuxtLink>
-                              <span v-else>알 수 없는 사용자</span>
-                              <AppUserRoleIcon
+                              <AppUserIdentity
+                                :handle="getDictionaryOwnerHandle(dictionary)"
                                 :role="dictionary.ownerRole"
+                                text-class="text-[10px] text-dimmed"
                                 icon-class="size-3"
+                                stop-propagation
                               />
                               <span>· {{ formatCount(dictionary.entryCount) }}개 용어</span>
                             </span>

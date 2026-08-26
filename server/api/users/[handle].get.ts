@@ -1,6 +1,6 @@
 import { createError, getRouterParam } from 'h3'
 import { getDatabase } from '../../utils/database'
-import { ensureUsersTable, type AppRole } from '../../utils/auth-user'
+import type { AppRole } from '../../utils/auth-user'
 import { HANDLE_PATTERN } from '../../utils/validation'
 
 interface PublicUser {
@@ -20,7 +20,6 @@ export default defineEventHandler(async (event) => {
   }
 
   const database = getDatabase()
-  await ensureUsersTable(database)
 
   const [user] = await database<PublicUser[]>`
     SELECT

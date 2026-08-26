@@ -63,7 +63,16 @@ function isEditorDraft(value: unknown): value is EditorDraft {
     && (draft.itemId === undefined || typeof draft.itemId === 'string')
 }
 
-export function getEditorDraftKey(category: string, unitKey: string): string {
+/**
+ * Draft persistence uses the database item UUID as the internal identity so lang/str
+ * rows with the same category and unit key cannot collide. Human-readable category
+ * and unitKey values remain stored in each draft for display and recovery.
+ */
+export function getEditorDraftKey(itemId: string): string {
+  return itemId
+}
+
+function getLegacyEditorDraftKey(category: string, unitKey: string): string {
   return `${category}::${unitKey}`
 }
 
@@ -146,18 +155,24 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
     let draftsChanged = false
 
     for (const item of itemsToApply) {
-      const key = getEditorDraftKey(item.category, item.unitKey)
-      const draft = nextDrafts[key]
+      const key = getEditorDraftKey(item.id)
+      const legacyKey = getLegacyEditorDraftKey(item.category, item.unitKey)
+      const currentDraft = nextDrafts[key]
+      const legacyDraft = nextDrafts[legacyKey]
+      const draft = currentDraft ?? legacyDraft
 
       if (!draft) {
         continue
       }
 
-      if (!draft.itemId) {
+      if (!currentDraft || draft.itemId !== item.id) {
+        const { [legacyKey]: _legacy, ...withoutLegacy } = nextDrafts
         nextDrafts = {
-          ...nextDrafts,
+          ...withoutLegacy,
           [key]: {
             ...draft,
+            category: item.category,
+            unitKey: item.unitKey,
             itemId: item.id
           }
         }
@@ -172,8 +187,8 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
     }
   }
 
-  function hasItemDraft(item: Pick<EditorItem, 'category' | 'unitKey'>): boolean {
-    return Boolean(drafts.value[getEditorDraftKey(item.category, item.unitKey)])
+  function hasItemDraft(item: Pick<EditorItem, 'id'>): boolean {
+    return Boolean(drafts.value[getEditorDraftKey(item.id)])
   }
 
   function removeDraftsByKeys(keys: string[]): void {

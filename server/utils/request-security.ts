@@ -30,8 +30,13 @@ function assertRequestBodySize(event: H3Event): void {
 export function assertSameOrigin(event: H3Event): void {
   const origin = getHeader(event, 'origin')
   const referer = getHeader(event, 'referer')
+  const fetchSite = getHeader(event, 'sec-fetch-site')?.toLowerCase()
   const requestOrigin = getRequestURL(event).origin
   let suppliedOrigin = origin || ''
+
+  if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+    rejectRequest(403, 'Cross-origin request is not allowed')
+  }
 
   if (!suppliedOrigin && referer) {
     try {

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   HANDLE_MAX_LENGTH,
-  formatHandle,
   getErrorStatus,
   getHandleInitial,
   getPublicProfilePath,
@@ -31,7 +30,6 @@ const deleteConfirmation = ref('')
 const deleting = ref(false)
 const deleteError = ref('')
 
-const displayHandle = computed(() => formatHandle(state.handle))
 const publicProfilePath = computed(() => getPublicProfilePath(state.handle))
 const initial = computed(() => getHandleInitial(state.handle))
 
@@ -157,25 +155,15 @@ async function deleteAccount(): Promise<void> {
         >
           {{ initial }}
         </div>
-        <div class="flex min-w-0 flex-1 items-center gap-2">
-          <NuxtLink
-            v-if="state.handle"
-            :to="publicProfilePath"
-            class="truncate text-lg font-semibold text-default hover:underline underline-offset-2"
-            :class="hasUserRoleIcon(user?.role) ? '-mt-0.5' : ''"
-          >
-            {{ displayHandle }}
-          </NuxtLink>
-          <span
-            v-else
-            class="truncate text-lg font-semibold text-default"
-            :class="hasUserRoleIcon(user?.role) ? '-mt-0.5' : ''"
-          >{{ displayHandle }}</span>
-          <AppUserRoleIcon
-            :role="user?.role"
-            icon-class="size-5"
-          />
-        </div>
+        <AppUserIdentity
+          :handle="state.handle"
+          :role="user?.role"
+          :to="publicProfilePath"
+          fallback="@handle"
+          text-class="text-lg font-semibold text-default"
+          icon-class="size-5"
+          class="max-w-full flex-1 gap-2"
+        />
       </div>
     </UCard>
 

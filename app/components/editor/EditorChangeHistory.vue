@@ -9,8 +9,6 @@ import type {
 } from '#shared/types/editor'
 import {
   formatEditorDate as formatDate,
-  formatEditorHandle as formatHandle,
-  getEditorUserPath as getUserPath,
   normalizeEditorHandle
 } from '~/utils/editor-helpers'
 import {
@@ -115,6 +113,33 @@ function getActionLabel(entry: EditorHistoryEntry): string {
   }
 
   return actionMeta[entry.action].label
+}
+
+function getReviewResultMeta(entry: EditorHistoryEntry) {
+  if (entry.status === 'approved') {
+    return {
+      label: '승인',
+      icon: 'i-tabler-check',
+      containerClass: 'bg-success/5',
+      textClass: 'text-success'
+    }
+  }
+
+  if (entry.status === 'superseded') {
+    return {
+      label: '다른 제안 승인으로 자동 종료',
+      icon: 'i-tabler-replace',
+      containerClass: 'bg-warning/5',
+      textClass: 'text-warning'
+    }
+  }
+
+  return {
+    label: '반려',
+    icon: 'i-tabler-x',
+    containerClass: 'bg-error/5',
+    textClass: 'text-error'
+  }
 }
 
 function formatSourceRevision(entry: EditorHistoryEntry): string {
@@ -328,22 +353,13 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
               {{ getActionLabel(history.entry) }}
             </span>
 
-            <div class="flex items-center gap-1 text-xs text-muted">
-              <NuxtLink
-                v-if="getActorHandle(history.entry)"
-                :to="getUserPath(getActorHandle(history.entry))"
-                class="hover:underline underline-offset-2"
-                :class="hasUserRoleIcon(history.entry.actorRole) ? '-mt-0.5' : ''"
-                @click.stop
-              >
-                {{ formatHandle(getActorHandle(history.entry)) }}
-              </NuxtLink>
-              <span v-else>알 수 없는 사용자</span>
-              <AppUserRoleIcon
-                :role="history.entry.actorRole"
-                icon-class="size-3.5"
-              />
-            </div>
+            <AppUserIdentity
+              :handle="getActorHandle(history.entry)"
+              :role="history.entry.actorRole"
+              text-class="text-xs text-muted"
+              icon-class="size-3.5"
+              stop-propagation
+            />
           </div>
 
           <div class="flex gap-2">
@@ -390,7 +406,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                   <span class="block text-[10px] text-dimmed">
                     {{ value.label }}
                   </span>
-                  <p class="whitespace-pre-wrap wrap-break-word text-sm leading-6 min-h-5">
+                  <p class="whitespace-pre-wrap text-sm leading-6 min-h-5">
                     <template
                       v-for="(part, partIndex) in value.unifiedParts"
                       :key="`${part.type}-${partIndex}`"
@@ -423,7 +439,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                   <div class="flex flex-col gap-2">
                     <div class="min-w-0 flex flex-col gap-0.5">
                       <span class="block text-[10px] text-error">수정 전</span>
-                      <p class="whitespace-pre-wrap wrap-break-word text-sm leading-6 min-h-5">
+                      <p class="whitespace-pre-wrap text-sm leading-6 min-h-5">
                         <template
                           v-for="(part, partIndex) in value.beforeParts"
                           :key="`before-${part.type}-${partIndex}`"
@@ -454,42 +470,34 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
               <div
                 v-if="history.entry.action === 'translation_changed' && history.entry.reviewedAt"
                 class="flex flex-wrap flex-col gap-1 text-xs p-2 rounded-md"
-                :class="history.entry.status === 'approved' ? 'bg-success/5' : 'bg-error/5'"
+                :class="getReviewResultMeta(history.entry).containerClass"
               >
                 <div class="flex items-center gap-1">
                   <UIcon
-                    :name="history.entry.status === 'approved' ? 'i-tabler-check' : 'i-tabler-x'"
-                    :class="history.entry.status === 'approved' ? 'text-success' : 'text-error'"
+                    :name="getReviewResultMeta(history.entry).icon"
+                    :class="getReviewResultMeta(history.entry).textClass"
                     class="size-4"
                   />
                   <span
-                    :class="history.entry.status === 'approved' ? 'text-success' : 'text-error'"
+                    :class="getReviewResultMeta(history.entry).textClass"
                     class="flex-1"
                   >
-                    {{ history.entry.status === 'approved' ? '승인' : '반려' }}
+                    {{ getReviewResultMeta(history.entry).label }}
                   </span>
 
-                  <div class="flex items-center gap-1 text-muted">
-                    <NuxtLink
-                      v-if="getReviewerHandle(history.entry)"
-                      :to="getUserPath(getReviewerHandle(history.entry))"
-                      class="hover:underline underline-offset-2"
-                      :class="hasUserRoleIcon(history.entry.reviewerRole) ? '-mt-0.5' : ''"
-                      @click.stop
-                    >
-                      {{ formatHandle(getReviewerHandle(history.entry)) }}
-                    </NuxtLink>
-                    <span v-else>알 수 없는 사용자</span>
-                    <AppUserRoleIcon
-                      :role="history.entry.reviewerRole"
-                      icon-class="size-3.5"
-                    />
-                  </div>
+                  <AppUserIdentity
+                    :handle="getReviewerHandle(history.entry)"
+                    :role="history.entry.reviewerRole"
+                    text-class="text-muted"
+                    icon-class="size-3.5"
+                    stop-propagation
+                  />
                 </div>
                 <time
                   class="text-muted"
                   :datetime="history.entry.reviewedAt"
-                >{{ formatDate(history.entry.reviewedAt) }}</time>
+                >{{ formatDate(history.entry.reviewedAt)
+                }}</time>
               </div>
 
               <div

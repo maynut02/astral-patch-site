@@ -90,6 +90,23 @@ export interface EditorSaveResponse {
   status: EditorChangeStatus | null
 }
 
+export interface EditorBatchSaveResult {
+  itemId: string
+  ok: boolean
+  response: EditorSaveResponse | null
+  error: string | null
+}
+
+export interface EditorBatchSaveResponse {
+  results: EditorBatchSaveResult[]
+}
+
+export interface EditorAiTranslationResponse {
+  itemId: string
+  sourceVersionId: string
+  text: string
+}
+
 export type EditorReviewAction = 'approve' | 'reject'
 
 export interface EditorReviewResponse {
