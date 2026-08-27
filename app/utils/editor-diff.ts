@@ -6,7 +6,9 @@ export interface EditorDiffPart {
 }
 
 function tokenize(value: string): string[] {
-  return value.match(/\s+|[\p{Script=Han}]|[\p{L}\p{N}]+|[^\p{L}\p{N}\s]/gu) ?? []
+  return value.match(
+    /\s+|[\p{Script=Han}\p{Script=Hangul}]|[\p{L}\p{N}]+|[^\p{L}\p{N}\s]/gu
+  ) ?? []
 }
 
 export function getEditorDiffParts(beforeValue: string, afterValue: string): EditorDiffPart[] {

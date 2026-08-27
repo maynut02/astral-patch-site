@@ -13,17 +13,26 @@ import {
   getEditorQueryString as getQueryString,
   normalizeEditorHandle as normalizeHandle
 } from '~/utils/editor-helpers'
+import {
+  getEditorDiffParts,
+  type EditorDiffPart
+} from '~/utils/editor-diff'
 
 type LogTab = 'translations' | 'source'
 type SourceLanguageKey = 'cnS' | 'en' | 'jp' | 'cnT'
-type TranslationLogEntryWithHandle = EditorTranslationLogEntry & { handle?: string | null }
+
+interface LogDiffValue {
+  key: string
+  label: string
+  parts: EditorDiffPart[]
+}
 
 const ALL_STATUS_VALUE = '__all_status__'
 const LOG_PAGE_SIZE = 50
 const BOT_HANDLE = 'Bot'
 
 const route = useRoute()
-const { loggedIn } = useUserSession()
+const router = useRouter()
 
 const defaultTranslationData: EditorTranslationLogResponse = {
   entries: [],
@@ -46,8 +55,8 @@ const defaultSourceChangesData: EditorSourceChangesResponse = {
 }
 
 const tabItems = [
-  { label: '번역 수정', value: 'translations', icon: 'i-tabler-language' },
-  { label: '원문 변경', value: 'source', icon: 'i-tabler-file-delta' }
+  { label: '번역 수정', value: 'translations' },
+  { label: '원문 변경', value: 'source' }
 ]
 
 const statusItems = [
@@ -72,27 +81,27 @@ const statusLabels: Record<EditorChangeStatus, string> = {
   superseded: '자동 종료'
 }
 
-const statusColors: Record<EditorChangeStatus, 'warning' | 'success' | 'error' | 'neutral'> = {
-  pending: 'warning',
-  approved: 'success',
-  rejected: 'error',
-  superseded: 'neutral'
-}
-
 const sourceChangeLabels = {
-  added: '새 항목',
-  modified: '원문 수정',
-  removed: '항목 삭제'
-} as const
-
-const sourceChangeColors = {
-  added: 'success',
-  modified: 'warning',
-  removed: 'error'
+  added: '원문 추가',
+  modified: '원문 변경',
+  removed: '원문 삭제'
 } as const
 
 function getTranslationHandle(entry: EditorTranslationLogEntry): string {
-  return normalizeHandle((entry as TranslationLogEntryWithHandle).handle)
+  return normalizeHandle(entry.handle)
+}
+
+function getReviewerHandle(entry: EditorTranslationLogEntry): string {
+  return normalizeHandle(entry.reviewerHandle)
+}
+
+function getReviewActionLabel(status: EditorChangeStatus): string {
+  return {
+    pending: '승인 대기',
+    approved: '승인',
+    rejected: '반려',
+    superseded: '종료'
+  }[status]
 }
 
 function getPage(value: unknown): number {
@@ -108,16 +117,31 @@ function getPage(value: unknown): number {
 function getInitialStatus(value: unknown): string {
   const status = getQueryString(value)
 
+  if (!status || status === 'all') {
+    return ALL_STATUS_VALUE
+  }
+
   return statusItems.some(item => item.value === status) ? status : ALL_STATUS_VALUE
 }
 
+function normalizeLogVersion(value: unknown): string {
+  return getQueryString(value).trim().replace(/^v/i, '')
+}
+
+function normalizeLogRevision(value: unknown): string {
+  return getQueryString(value).trim().replace(/^r/i, '')
+}
+
 const activeTab = ref<LogTab>(getQueryString(route.query.tab) === 'source' ? 'source' : 'translations')
+const initialPage = getPage(route.query.p)
 const translationSearchInput = ref(getQueryString(route.query.search))
 const translationSearch = ref(translationSearchInput.value.trim())
 const translationStatusFilter = ref(getInitialStatus(route.query.status))
-const translationPage = ref(getPage(route.query.translationPage))
-const sourceRevisionId = ref(getQueryString(route.query.revisionId))
-const sourcePage = ref(getPage(route.query.sourcePage))
+const translationPage = ref(activeTab.value === 'translations' ? initialPage : 1)
+const sourcePage = ref(activeTab.value === 'source' ? initialPage : 1)
+const sourceRevisionId = ref('')
+let applyingRouteQuery = false
+let pendingRouteQueryKey = ''
 
 const translationQuery = computed(() => ({
   page: translationPage.value,
@@ -126,37 +150,27 @@ const translationQuery = computed(() => ({
 }))
 
 const { data: translationData, status: translationStatus, error: translationError, refresh: refreshTranslations }
-  = await useFetch<EditorTranslationLogResponse>('/api/editor/log/translations', {
+  = useFetch<EditorTranslationLogResponse>('/api/editor/log/translations', {
     query: translationQuery,
-    default: () => defaultTranslationData
+    default: () => defaultTranslationData,
+    server: false,
+    lazy: true
   })
 
 const { data: sourceRevisionData, status: sourceRevisionStatus, error: sourceRevisionError, refresh: refreshSourceRevisions }
-  = await useFetch<EditorSourceRevisionsResponse>('/api/editor/log/source-revisions', {
-    default: () => defaultSourceRevisionsData
+  = useFetch<EditorSourceRevisionsResponse>('/api/editor/log/source-revisions', {
+    default: () => defaultSourceRevisionsData,
+    immediate: activeTab.value === 'source',
+    server: false,
+    lazy: true
   })
 
 const sourceRevisions = computed<EditorSourceRevision[]>(() => sourceRevisionData.value?.revisions ?? [])
 const sourceRevisionItems = computed(() => sourceRevisions.value.map(revision => ({
-  label: `v${revision.gameVersion} · r${revision.revision} · ${revision.totalChanges.toLocaleString()}개 변경`,
+  label: `v${revision.gameVersion} · r${revision.revision}`,
   value: revision.id
 })))
 const selectedRevision = computed(() => sourceRevisions.value.find(revision => revision.id === sourceRevisionId.value) ?? null)
-
-watch(sourceRevisions, (revisions) => {
-  if (!revisions.length) {
-    sourceRevisionId.value = ''
-    return
-  }
-
-  if (!revisions.some(revision => revision.id === sourceRevisionId.value)) {
-    sourceRevisionId.value = revisions[0]?.id ?? ''
-  }
-}, { immediate: true })
-
-watch(sourceRevisionId, () => {
-  sourcePage.value = 1
-})
 
 const sourceChangesQuery = computed(() => ({
   revisionId: sourceRevisionId.value || undefined,
@@ -164,11 +178,59 @@ const sourceChangesQuery = computed(() => ({
 }))
 
 const { data: sourceChangesData, status: sourceChangesStatus, error: sourceChangesError, refresh: refreshSourceChanges }
-  = await useFetch<EditorSourceChangesResponse>('/api/editor/log/source-changes', {
+  = useFetch<EditorSourceChangesResponse>('/api/editor/log/source-changes', {
     query: sourceChangesQuery,
     default: () => defaultSourceChangesData,
-    immediate: Boolean(sourceRevisionId.value)
+    immediate: false,
+    watch: false,
+    server: false
   })
+
+watch(sourceRevisions, (revisions) => {
+  if (!revisions.length) {
+    sourceRevisionId.value = ''
+    return
+  }
+
+  const routeVersion = normalizeLogVersion(route.query.version)
+  const routeRevisionValue = normalizeLogRevision(route.query.revision)
+  const routeRevision = routeVersion && routeRevisionValue
+    ? revisions.find(revision =>
+      normalizeLogVersion(revision.gameVersion) === routeVersion
+      && normalizeLogRevision(revision.revision) === routeRevisionValue
+    )
+    : undefined
+  const currentRevision = revisions.find(revision => revision.id === sourceRevisionId.value)
+  const nextRevision = routeRevision ?? currentRevision ?? revisions[0]
+
+  if (!nextRevision) {
+    return
+  }
+
+  const revisionChanged = sourceRevisionId.value !== nextRevision.id
+  sourceRevisionId.value = nextRevision.id
+
+  if (activeTab.value === 'source') {
+    const routeTab = getQueryString(route.query.tab) === 'source'
+
+    if (routeTab && (!routeVersion || !routeRevisionValue)) {
+      syncLogRouteQuery('replace')
+    }
+
+    if (revisionChanged || !sourceChangesData.value?.entries.length) {
+      void refreshSourceChanges()
+    }
+  }
+}, { immediate: activeTab.value === 'source' })
+
+watch(sourcePage, (page, previousPage) => {
+  if (page === previousPage || !sourceRevisionId.value) {
+    return
+  }
+
+  syncLogRouteQuery()
+  void refreshSourceChanges()
+})
 
 const translationEntries = computed(() => translationData.value?.entries ?? [])
 const translationTotal = computed(() => translationData.value?.total ?? 0)
@@ -176,31 +238,44 @@ const translationTotalPages = computed(() => translationData.value?.totalPages ?
 const sourceEntries = computed(() => sourceChangesData.value?.entries ?? [])
 const sourceTotal = computed(() => sourceChangesData.value?.total ?? 0)
 const sourceTotalPages = computed(() => sourceChangesData.value?.totalPages ?? 1)
-const translationLoading = computed(() => translationStatus.value === 'pending')
-const sourceLoading = computed(() => sourceRevisionStatus.value === 'pending' || sourceChangesStatus.value === 'pending')
-const activeLoading = computed(() => activeTab.value === 'translations' ? translationLoading.value : sourceLoading.value)
-
-const selectedTranslation = ref<EditorTranslationLogEntry | null>(null)
-const selectedSource = ref<EditorSourceChangeEntry | null>(null)
-const detailOpen = ref(false)
-const selectedUnitId = computed(() => selectedTranslation.value?.unitId ?? selectedSource.value?.unitId ?? '')
+const translationLoading = computed(() => translationStatus.value === 'idle' || translationStatus.value === 'pending')
+const sourceLoading = computed(() =>
+  sourceRevisionStatus.value === 'idle'
+  || sourceRevisionStatus.value === 'pending'
+  || (Boolean(sourceRevisionId.value) && (sourceChangesStatus.value === 'idle' || sourceChangesStatus.value === 'pending'))
+)
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 watch(translationSearchInput, (value) => {
   if (searchTimer) {
     clearTimeout(searchTimer)
+    searchTimer = undefined
+  }
+
+  if (applyingRouteQuery) {
+    return
   }
 
   searchTimer = setTimeout(() => {
     searchTimer = undefined
     translationSearch.value = value.trim()
     translationPage.value = 1
+    syncLogRouteQuery()
   }, 300)
 })
 
 watch(translationStatusFilter, () => {
+  if (applyingRouteQuery) {
+    return
+  }
+
   translationPage.value = 1
+  syncLogRouteQuery()
+})
+
+watch(translationPage, () => {
+  syncLogRouteQuery()
 })
 
 watch(translationTotalPages, (value) => {
@@ -215,81 +290,287 @@ watch(sourceTotalPages, (value) => {
   }
 })
 
+onMounted(() => {
+  syncLogRouteQuery('replace')
+})
+
 onBeforeUnmount(() => {
   if (searchTimer) {
     clearTimeout(searchTimer)
   }
 })
 
-function updateActiveTab(value: string | number | undefined) {
-  activeTab.value = value === 'source' ? 'source' : 'translations'
+function getLogQueryKey(query: Record<string, string>): string {
+  return JSON.stringify(Object.entries(query).sort(([left], [right]) => left.localeCompare(right)))
+}
+
+function syncLogRouteQuery(mode: 'push' | 'replace' = 'push'): void {
+  if (!import.meta.client || applyingRouteQuery) {
+    return
+  }
+
+  const query: Record<string, string> = {
+    tab: activeTab.value
+  }
+
+  if (activeTab.value === 'translations') {
+    if (translationSearch.value) {
+      query.search = translationSearch.value
+    }
+
+    if (translationStatusFilter.value !== ALL_STATUS_VALUE) {
+      query.status = translationStatusFilter.value
+    }
+
+    if (translationPage.value > 1) {
+      query.p = String(translationPage.value)
+    }
+  } else {
+    if (sourcePage.value > 1) {
+      query.p = String(sourcePage.value)
+    }
+
+    if (selectedRevision.value) {
+      query.version = normalizeLogVersion(selectedRevision.value.gameVersion)
+      query.revision = normalizeLogRevision(selectedRevision.value.revision)
+    } else {
+      const routeVersion = normalizeLogVersion(route.query.version)
+      const routeRevision = normalizeLogRevision(route.query.revision)
+
+      if (routeVersion && routeRevision) {
+        query.version = routeVersion
+        query.revision = routeRevision
+      }
+    }
+  }
+
+  const currentQuery = Object.fromEntries(
+    Object.entries(route.query)
+      .filter(([, value]) => typeof value === 'string' && value)
+      .map(([key, value]) => [key, String(value)])
+  )
+  const nextKey = getLogQueryKey(query)
+
+  if (nextKey === getLogQueryKey(currentQuery) || nextKey === pendingRouteQueryKey) {
+    return
+  }
+
+  pendingRouteQueryKey = nextKey
+  const navigation = mode === 'replace' ? router.replace : router.push
+
+  void navigation({ path: route.path, query }).finally(() => {
+    if (pendingRouteQueryKey === nextKey) {
+      pendingRouteQueryKey = ''
+    }
+  })
+}
+
+async function applyLogRouteQuery(): Promise<void> {
+  if (!import.meta.client) {
+    return
+  }
+
+  applyingRouteQuery = true
+
+  try {
+    const nextTab: LogTab = getQueryString(route.query.tab) === 'source' ? 'source' : 'translations'
+    const nextPage = getPage(route.query.p)
+    activeTab.value = nextTab
+
+    if (nextTab === 'translations') {
+      if (searchTimer) {
+        clearTimeout(searchTimer)
+        searchTimer = undefined
+      }
+
+      const nextSearch = getQueryString(route.query.search).trim()
+      translationSearchInput.value = nextSearch
+      translationSearch.value = nextSearch
+      translationStatusFilter.value = getInitialStatus(route.query.status)
+      translationPage.value = nextPage
+      return
+    }
+
+    const previousRevisionId = sourceRevisionId.value
+    const previousPage = sourcePage.value
+    sourcePage.value = nextPage
+    const hadRevisions = sourceRevisions.value.length > 0
+
+    if (!hadRevisions && sourceRevisionStatus.value !== 'pending') {
+      await refreshSourceRevisions()
+    }
+
+    const routeVersion = normalizeLogVersion(route.query.version)
+    const routeRevisionValue = normalizeLogRevision(route.query.revision)
+    const routeRevision = routeVersion && routeRevisionValue
+      ? sourceRevisions.value.find(revision =>
+        normalizeLogVersion(revision.gameVersion) === routeVersion
+        && normalizeLogRevision(revision.revision) === routeRevisionValue
+      )
+      : undefined
+    const nextRevision = routeRevision ?? sourceRevisions.value[0]
+
+    if (nextRevision) {
+      sourceRevisionId.value = nextRevision.id
+    }
+
+    if (hadRevisions
+      && sourceRevisionId.value
+      && sourceRevisionId.value !== previousRevisionId
+      && sourcePage.value === previousPage) {
+      await refreshSourceChanges()
+    }
+  } finally {
+    await nextTick()
+    applyingRouteQuery = false
+  }
+}
+
+watch(() => route.fullPath, () => {
+  void applyLogRouteQuery()
+})
+
+async function updateActiveTab(value: string | number | undefined) {
+  const nextTab: LogTab = value === 'source' ? 'source' : 'translations'
+
+  if (nextTab === activeTab.value) {
+    return
+  }
+
+  activeTab.value = nextTab
+
+  if (nextTab === 'source') {
+    if (!sourceRevisions.value.length && sourceRevisionStatus.value !== 'pending') {
+      await refreshSourceRevisions()
+    }
+
+    if (!sourceRevisionId.value) {
+      sourceRevisionId.value = sourceRevisions.value[0]?.id ?? ''
+    }
+  }
+
+  syncLogRouteQuery()
 }
 
 function selectSourceRevision(value: string | undefined) {
-  sourceRevisionId.value = value || sourceRevisions.value[0]?.id || ''
-}
+  const nextRevisionId = value || sourceRevisions.value[0]?.id || ''
 
-function previewText(value: string | null, fallback = '없음'): string {
-  const text = value?.trim() || ''
-
-  if (!text) {
-    return fallback
+  if (nextRevisionId === sourceRevisionId.value) {
+    return
   }
 
-  return text.length > 180 ? `${text.slice(0, 180)}…` : text
+  sourceRevisionId.value = nextRevisionId
+  const pageChanged = sourcePage.value !== 1
+  sourcePage.value = 1
+  syncLogRouteQuery()
+
+  if (!pageChanged && sourceRevisionId.value) {
+    void refreshSourceChanges()
+  }
 }
 
-function getSourceValue(entry: EditorSourceChangeEntry, side: 'before' | 'after', language: SourceLanguageKey): string | null {
-  if (side === 'before') {
-    return {
+function getSourceValue(
+  entry: EditorSourceChangeEntry,
+  side: 'before' | 'after',
+  language: SourceLanguageKey
+): string | null {
+  const values = side === 'before'
+    ? {
       cnS: entry.beforeCnS,
       en: entry.beforeEn,
       jp: entry.beforeJp,
       cnT: entry.beforeCnT
-    }[language]
-  }
-
-  return {
-    cnS: entry.afterCnS,
-    en: entry.afterEn,
-    jp: entry.afterJp,
-    cnT: entry.afterCnT
-  }[language]
-}
-
-function sourcePreview(entry: EditorSourceChangeEntry, side: 'before' | 'after'): string {
-  const firstValue = sourceLanguageItems
-    .map(language => ({ label: language.label, value: getSourceValue(entry, side, language.key) }))
-    .find(language => Boolean(language.value?.trim()))
-
-  return firstValue ? `${firstValue.label} · ${previewText(firstValue.value)}` : '없음'
-}
-
-function openTranslationDetail(entry: EditorTranslationLogEntry) {
-  selectedTranslation.value = entry
-  selectedSource.value = null
-  detailOpen.value = true
-}
-
-function openSourceDetail(entry: EditorSourceChangeEntry) {
-  selectedSource.value = entry
-  selectedTranslation.value = null
-  detailOpen.value = true
-}
-
-async function openSelectedItem() {
-  if (!selectedUnitId.value) {
-    return
-  }
-
-  detailOpen.value = false
-  await navigateTo({
-    path: '/translate/editor',
-    query: {
-      itemId: selectedUnitId.value,
-      edit: 'true'
     }
-  })
+    : {
+      cnS: entry.afterCnS,
+      en: entry.afterEn,
+      jp: entry.afterJp,
+      cnT: entry.afterCnT
+    }
+
+  return values[language]
+}
+
+function makeUnifiedDiffValue(key: string, label: string, before: string | null, after: string | null): LogDiffValue {
+  return {
+    key,
+    label,
+    parts: getEditorDiffParts(before ?? '', after ?? '')
+  }
+}
+
+function getTranslationDiffParts(entry: EditorTranslationLogEntry): EditorDiffPart[] {
+  return getEditorDiffParts(entry.previousText ?? '', entry.proposedText)
+}
+
+function getSourceDiffValues(entry: EditorSourceChangeEntry): LogDiffValue[] {
+  return sourceLanguageItems
+    .map(language => makeUnifiedDiffValue(
+      language.key,
+      language.label,
+      getSourceValue(entry, 'before', language.key),
+      getSourceValue(entry, 'after', language.key)
+    ))
+    .filter((value, index) => {
+      const language = sourceLanguageItems[index]!
+      return getSourceValue(entry, 'before', language.key) !== getSourceValue(entry, 'after', language.key)
+    })
+}
+
+function getTranslationStatusMeta(status: EditorChangeStatus): {
+  icon: string
+  containerClass: string
+} {
+  return {
+    pending: {
+      icon: 'i-tabler-clock-hour-4',
+      containerClass: 'bg-warning/15 text-warning'
+    },
+    approved: {
+      icon: 'i-tabler-check',
+      containerClass: 'bg-success/15 text-success'
+    },
+    rejected: {
+      icon: 'i-tabler-x',
+      containerClass: 'bg-error/15 text-error'
+    },
+    superseded: {
+      icon: 'i-tabler-replace',
+      containerClass: 'bg-elevated text-muted'
+    }
+  }[status]
+}
+
+function getSourceToneClass(changeType: EditorSourceChangeEntry['changeType']): string {
+  return {
+    added: 'bg-success/15 text-success',
+    modified: 'bg-warning/15 text-warning',
+    removed: 'bg-error/15 text-error'
+  }[changeType]
+}
+
+function getSourceTextClass(changeType: EditorSourceChangeEntry['changeType']): string {
+  return {
+    added: 'text-success',
+    modified: 'text-warning',
+    removed: 'text-error'
+  }[changeType]
+}
+
+function getSourceActionIcon(changeType: EditorSourceChangeEntry['changeType']): string {
+  return {
+    added: 'i-tabler-database-plus',
+    modified: 'i-tabler-database-import',
+    removed: 'i-tabler-database-minus'
+  }[changeType]
+}
+
+function getSourceRevisionLabel(): string {
+  if (!selectedRevision.value) {
+    return ''
+  }
+
+  return `v${selectedRevision.value.gameVersion} · r${selectedRevision.value.revision}`
 }
 
 async function retryActiveLog() {
@@ -299,542 +580,256 @@ async function retryActiveLog() {
   }
 
   await refreshSourceRevisions()
-
-  if (sourceRevisionId.value) {
-    await refreshSourceChanges()
-  }
 }
 </script>
 
 <template>
-  <div class="w-full max-w-400 mx-auto px-4 pb-12 md:px-6">
-    <div class="flex flex-col gap-5 py-5 md:flex-row md:items-end md:justify-between md:py-8">
-      <div>
-        <p class="text-xs font-semibold tracking-[0.18em] text-muted">
-          TRANSLATION LOG
-        </p>
-        <h1 class="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">
-          변경 기록
-        </h1>
-        <p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          사용자가 제안한 번역 수정과 게임 원문이 바뀐 기록을 구분해서 확인할 수 있습니다.
-        </p>
-      </div>
-
-      <UButton
-        to="/translate/editor"
-        icon="i-tabler-pencil"
-        color="neutral"
-        variant="soft"
-        class="w-fit rounded-xl"
-      >
-        에디터 열기
-      </UButton>
+  <div class="mx-auto flex w-full max-w-400 flex-col gap-3 px-3 py-5 md:px-5">
+    <div class="flex items-center justify-between gap-5">
+      <h1 class="text-xl font-semibold md:text-2xl">
+        변경 기록
+      </h1>
     </div>
 
-    <UTabs
-      :model-value="activeTab"
-      :items="tabItems"
-      color="neutral"
-      variant="link"
-      :ui="{ list: 'border-b border-default', trigger: 'px-1.5 pb-3 mr-5' }"
-      @update:model-value="updateActiveTab"
-    />
+    <div class="flex flex-col md:flex-row gap-3">
+      <UTabs :model-value="activeTab" :items="tabItems" :content="false" size="xs" color="neutral" class="w-fit"
+        :ui="{ trigger: 'px-3', list: 'bg-muted' }" @update:model-value="updateActiveTab" />
 
-    <section
-      v-if="activeTab === 'translations'"
-      class="mt-6 flex flex-col gap-5"
-    >
-      <div class="flex flex-col gap-3 rounded-2xl border border-default bg-muted/30 p-4 sm:flex-row sm:items-center">
-        <UInput
-          v-model="translationSearchInput"
-          icon="i-tabler-search"
-          color="neutral"
-          variant="soft"
-          placeholder="카테고리, 항목, 사용자, 번역 내용 검색"
-          class="w-full sm:flex-1"
-          :ui="{ base: 'rounded-xl' }"
-        />
-        <USelect
-          v-model="translationStatusFilter"
-          :items="statusItems"
-          color="neutral"
-          variant="soft"
-          class="w-full sm:w-40"
-          :ui="{ base: 'rounded-xl' }"
-        />
+      <div v-if="activeTab === 'translations'" class="flex gap-3 items-center">
+        <UInput v-model="translationSearchInput" icon="i-tabler-search" color="neutral" variant="soft" placeholder="검색"
+          class="w-full sm:flex-1" />
+        <USelect v-model="translationStatusFilter" :items="statusItems" color="neutral" variant="soft" class="w-28" />
       </div>
 
-      <UAlert
-        v-if="translationError"
-        color="error"
-        variant="soft"
-        title="번역 변경 기록을 불러오지 못했습니다."
-        description="잠시 후 다시 시도해 주세요."
-      >
-        <template #actions>
-          <UButton
-            size="sm"
-            color="error"
-            variant="outline"
-            @click="retryActiveLog"
-          >
-            다시 시도
-          </UButton>
-        </template>
-      </UAlert>
+      <div v-else class="flex gap-3 items-center">
+        <USelect :model-value="sourceRevisionId" :items="sourceRevisionItems" color="neutral" variant="soft"
+          class="w-full sm:w-48" :disabled="!sourceRevisionItems.length" @update:model-value="selectSourceRevision" />
+      </div>
+    </div>
 
-      <div class="flex items-center justify-between gap-3 text-sm">
-        <span class="rounded-xl bg-muted px-3 py-2 text-muted">총 {{ translationTotal.toLocaleString() }}건</span>
-        <span
-          v-if="translationTotal"
-          class="text-xs text-muted"
-        >
-          {{ translationData?.page ?? translationPage }} / {{ translationTotalPages }} 페이지
+    <ClientOnly>
+      <section v-if="activeTab === 'translations'" class="flex flex-col">
+        <UAlert v-if="translationError" class="my-4" color="error" variant="soft" title="번역 변경 기록을 불러오지 못했습니다."
+          description="잠시 후 다시 시도해 주세요.">
+          <template #actions>
+            <UButton size="sm" color="error" variant="outline" @click="retryActiveLog">
+              다시 시도
+            </UButton>
+          </template>
+        </UAlert>
+
+        <div v-if="translationLoading && !translationEntries.length"
+          class="flex items-center justify-center p-12 text-muted">
+          <AppLoadingSpinner />
+        </div>
+
+        <UAlert v-else-if="!translationError && !translationEntries.length" class="my-4" color="neutral" variant="soft"
+          icon="i-tabler-history-off" title="번역 수정 기록이 없습니다."
+          description="검색어나 상태 조건을 바꿔 보거나, 아직 저장된 번역 수정이 없는지 확인해 주세요." />
+
+        <div v-else-if="translationEntries.length" class="relative flex flex-col">
+          <div v-if="translationLoading" class="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center">
+            <div
+              class="flex items-center gap-2 rounded-lg bg-elevated/80 px-3 py-2 text-xs text-muted shadow-sm backdrop-blur-lg">
+              <UIcon name="i-tabler-loader-2" class="size-4 animate-spin" />
+              <span>불러오는 중</span>
+            </div>
+          </div>
+          <span class="shrink-0 text-xs text-muted pb-3">
+            총 {{ translationTotal.toLocaleString() }}건
+          </span>
+
+          <article v-for="(entry, index) in translationEntries" :key="entry.id"
+            class="flex flex-col pt-1 transition-colors rounded-lg">
+            <div class="flex items-center gap-2">
+              <div class="flex size-6 shrink-0 items-center justify-center rounded-full"
+                :class="getTranslationStatusMeta(entry.status).containerClass" :title="statusLabels[entry.status]"
+                :aria-label="statusLabels[entry.status]">
+                <UIcon :name="getTranslationStatusMeta(entry.status).icon" class="size-4" />
+              </div>
+
+              <NuxtLink :to="{
+                path: '/translate/editor',
+                query: {
+                  file: entry.category,
+                  search: `${entry.category}_${entry.unitKey}`,
+                  searchType: 'key',
+                  match: 'exact',
+                  page: '1'
+                }
+              }" class="min-w-0 flex-1 truncate text-sm font-medium text-default hover:underline underline-offset-2"
+                :title="`${entry.category}_${entry.unitKey}`">
+                {{ entry.category }}_{{ entry.unitKey }}
+              </NuxtLink>
+            </div>
+
+            <div class="flex gap-2">
+              <div class="flex w-6 shrink-0 justify-center pt-1">
+                <div v-if="index < translationEntries.length - 1" class="w-0.5 rounded-lg bg-elevated" />
+              </div>
+
+              <div class="flex min-w-0 flex-1 flex-col gap-4 pb-12">
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+                  <span class="flex min-w-0 items-center gap-1.5">
+                    <span class="text-dimmed">생성</span>
+                    <time :datetime="entry.createdAt">{{ formatDate(entry.createdAt) }}</time>
+                    <span aria-hidden="true">·</span>
+                    <AppUserIdentity :handle="getTranslationHandle(entry)" :role="entry.actorRole"
+                      text-class="text-xs text-muted" icon-class="size-3.5" stop-propagation />
+                  </span>
+
+                  <span v-if="entry.reviewedAt" class="flex min-w-0 items-center gap-1.5">
+                    <span class="text-dimmed">{{ getReviewActionLabel(entry.status) }}</span>
+                    <time :datetime="entry.reviewedAt">{{ formatDate(entry.reviewedAt) }}</time>
+                    <span aria-hidden="true">·</span>
+                    <AppUserIdentity :handle="getReviewerHandle(entry)" :role="entry.reviewerRole" fallback="시스템"
+                      text-class="text-xs text-muted" icon-class="size-3.5" stop-propagation />
+                  </span>
+                </div>
+
+                <p class="min-h-5 whitespace-pre-wrap wrap-break-word px-3 py-2 bg-muted rounded-lg text-sm leading-6">
+                  <template v-for="(part, partIndex) in getTranslationDiffParts(entry)"
+                    :key="`${part.type}-${partIndex}`">
+                    <span :class="part.type === 'removed'
+                      ? 'bg-error/10 text-error'
+                      : part.type === 'added'
+                        ? 'bg-success/10 text-success'
+                        : 'text-toned'">{{ part.text }}</span>
+                  </template>
+                </p>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div v-if="translationTotal" class="sticky bottom-4 z-20 flex justify-center pt-5 pointer-events-none">
+          <EditorPageController v-model:page="translationPage" :total-pages="translationTotalPages"
+            :disabled="translationLoading" class="pointer-events-auto" />
+        </div>
+      </section>
+
+      <section v-else class="flex flex-col">
+        <span class="shrink-0 text-xs text-muted pb-3">
+          총 {{ sourceTotal.toLocaleString() }}건
         </span>
-      </div>
 
-      <UAlert
-        v-if="!translationLoading && !translationEntries.length"
-        color="neutral"
-        variant="soft"
-        icon="i-tabler-history-off"
-        title="번역 수정 기록이 없습니다."
-        description="검색어나 상태 조건을 바꿔 보거나, 아직 저장된 번역 수정이 없는지 확인해 주세요."
-      />
-
-      <div
-        v-else
-        class="flex flex-col gap-3"
-      >
-        <article
-          v-for="entry in translationEntries"
-          :key="entry.id"
-          role="button"
-          tabindex="0"
-          class="group cursor-pointer rounded-2xl border border-default bg-default p-4 text-left transition-colors hover:border-accented hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-inverted/30"
-          @click="openTranslationDetail(entry)"
-          @keydown.enter.prevent="openTranslationDetail(entry)"
-          @keydown.space.prevent="openTranslationDetail(entry)"
-        >
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="flex min-w-0 flex-wrap items-center gap-2">
-              <UBadge
-                color="neutral"
-                variant="soft"
-              >
-                {{ entry.category }}
-              </UBadge>
-              <span class="truncate text-sm font-medium">{{ entry.unitKey }}</span>
-            </div>
-            <UBadge
-              :color="statusColors[entry.status]"
-              variant="soft"
-            >
-              {{ statusLabels[entry.status] }}
-            </UBadge>
+        <div v-if="selectedRevision"
+          class="flex flex-wrap items-center gap-x-3 gap-y-2 bg-muted rounded-md px-4 py-3 text-xs text-muted">
+          <span class="font-medium text-toned">{{ getSourceRevisionLabel() }}</span>
+          <span>생성: {{ formatDate(selectedRevision.detectedAt) }}</span>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span class="text-success">추가 {{ selectedRevision.addedCount }}</span>
+            <span class="text-warning">수정 {{ selectedRevision.modifiedCount }}</span>
+            <span class="text-error">삭제 {{ selectedRevision.removedCount }}</span>
           </div>
-
-          <div class="mt-4 grid gap-3 md:grid-cols-2">
-            <div class="min-w-0 rounded-xl bg-muted/60 p-3">
-              <p class="text-xs font-medium text-muted">
-                수정 전
-              </p>
-              <p class="mt-2 whitespace-pre-wrap wrap-break-word text-sm leading-6">
-                {{ previewText(entry.previousText, '미번역') }}
-              </p>
-            </div>
-            <div class="min-w-0 rounded-xl bg-muted/60 p-3">
-              <p class="text-xs font-medium text-muted">
-                수정 후
-              </p>
-              <p class="mt-2 whitespace-pre-wrap wrap-break-word text-sm leading-6">
-                {{ previewText(entry.proposedText) }}
-              </p>
-            </div>
-          </div>
-
-          <div class="mt-4 flex items-center justify-between gap-3 text-xs text-muted">
-            <span class="flex min-w-0 items-center gap-1">
-              <AppUserIdentity
-                :handle="getTranslationHandle(entry)"
-                :role="entry.actorRole"
-                text-class="text-xs text-muted"
-                icon-class="size-3.5"
-                stop-propagation
-              />
-              <span aria-hidden="true">·</span>
-              <span>{{ formatDate(entry.createdAt) }}</span>
-            </span>
-            <span class="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100">
-              상세 보기 <UIcon
-                name="i-tabler-arrow-up-right"
-                class="size-4"
-              />
-            </span>
-          </div>
-        </article>
-      </div>
-
-      <div
-        v-if="translationTotal"
-        class="flex justify-center pt-2"
-      >
-        <UPagination
-          v-model:page="translationPage"
-          :total="translationTotal"
-          :items-per-page="translationData?.pageSize ?? LOG_PAGE_SIZE"
-          :disabled="translationLoading"
-        />
-      </div>
-    </section>
-
-    <section
-      v-else
-      class="mt-6 flex flex-col gap-5"
-    >
-      <div class="flex flex-col gap-3 rounded-2xl border border-default bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p class="text-sm font-medium">
-            게임 원문 변경
-          </p>
-          <p class="mt-1 text-xs text-muted">
-            Bot이 감지한 원문 변경만 표시합니다.
-          </p>
         </div>
-        <USelect
-          :model-value="sourceRevisionId"
-          :items="sourceRevisionItems"
-          color="neutral"
-          variant="soft"
-          class="w-full sm:w-72"
-          :disabled="!sourceRevisionItems.length"
-          :ui="{ base: 'rounded-xl' }"
-          @update:model-value="selectSourceRevision"
-        />
-      </div>
 
-      <UAlert
-        v-if="sourceRevisionError || sourceChangesError"
-        color="error"
-        variant="soft"
-        title="원문 변경 기록을 불러오지 못했습니다."
-        description="잠시 후 다시 시도해 주세요."
-      >
-        <template #actions>
-          <UButton
-            size="sm"
-            color="error"
-            variant="outline"
-            @click="retryActiveLog"
-          >
-            다시 시도
-          </UButton>
-        </template>
-      </UAlert>
+        <UAlert v-if="sourceRevisionError || sourceChangesError" class="my-4" color="error" variant="soft"
+          title="원문 변경 기록을 불러오지 못했습니다." description="잠시 후 다시 시도해 주세요.">
+          <template #actions>
+            <UButton size="sm" color="error" variant="outline" @click="retryActiveLog">
+              다시 시도
+            </UButton>
+          </template>
+        </UAlert>
 
-      <div
-        v-if="selectedRevision"
-        class="flex flex-col gap-4 rounded-2xl border border-default p-4 sm:flex-row sm:items-center sm:justify-between"
-      >
-        <div>
-          <p class="font-semibold">
-            v{{ selectedRevision.gameVersion }} · revision {{ selectedRevision.revision }}
-          </p>
-          <p class="mt-1 text-xs text-muted">
-            감지 시각 {{ formatDate(selectedRevision.detectedAt) }}
-          </p>
+        <div v-if="sourceLoading && !sourceEntries.length" class="flex items-center justify-center p-12 text-muted">
+          <AppLoadingSpinner />
         </div>
-        <div class="flex flex-wrap gap-2">
-          <UBadge
-            color="success"
-            variant="soft"
-          >
-            추가 {{ selectedRevision.addedCount }}
-          </UBadge>
-          <UBadge
-            color="warning"
-            variant="soft"
-          >
-            수정 {{ selectedRevision.modifiedCount }}
-          </UBadge>
-          <UBadge
-            color="error"
-            variant="soft"
-          >
-            삭제 {{ selectedRevision.removedCount }}
-          </UBadge>
-        </div>
-      </div>
 
-      <UAlert
-        v-if="!sourceLoading && !sourceRevisions.length"
-        color="neutral"
-        variant="soft"
-        icon="i-tabler-file-off"
-        title="원문 변경 기록이 없습니다."
-        description="Bot이 감지한 원문 변경이 아직 등록되지 않았습니다."
-      />
+        <UAlert v-else-if="!sourceRevisionError && !sourceChangesError && !sourceRevisions.length" class="my-4"
+          color="neutral" variant="soft" icon="i-tabler-file-off" title="원문 변경 기록이 없습니다."
+          description="Bot이 감지한 원문 변경이 아직 등록되지 않았습니다." />
 
-      <UAlert
-        v-else-if="!sourceLoading && sourceRevisionId && !sourceEntries.length"
-        color="neutral"
-        variant="soft"
-        icon="i-tabler-file-search"
-        title="선택한 버전에 변경 항목이 없습니다."
-        description="다른 버전·리비전을 선택해 보세요."
-      />
+        <UAlert v-else-if="!sourceChangesError && sourceRevisionId && !sourceEntries.length" class="my-4"
+          color="neutral" variant="soft" icon="i-tabler-file-search" title="선택한 버전에 변경 항목이 없습니다."
+          description="다른 버전·리비전을 선택해 보세요." />
 
-      <div
-        v-else
-        class="flex flex-col gap-3"
-      >
-        <article
-          v-for="entry in sourceEntries"
-          :key="entry.id"
-          role="button"
-          tabindex="0"
-          class="group cursor-pointer rounded-2xl border border-default bg-default p-4 text-left transition-colors hover:border-accented hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-inverted/30"
-          @click="openSourceDetail(entry)"
-          @keydown.enter.prevent="openSourceDetail(entry)"
-          @keydown.space.prevent="openSourceDetail(entry)"
-        >
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="flex min-w-0 flex-wrap items-center gap-2">
-              <UBadge
-                color="neutral"
-                variant="soft"
-              >
-                {{ entry.category }}
-              </UBadge>
-              <span class="truncate text-sm font-medium">{{ entry.unitKey }}</span>
-            </div>
-            <UBadge
-              :color="sourceChangeColors[entry.changeType]"
-              variant="soft"
-            >
-              {{ sourceChangeLabels[entry.changeType] }}
-            </UBadge>
-          </div>
-
-          <div class="mt-4 grid gap-3 md:grid-cols-2">
-            <div class="min-w-0 rounded-xl bg-muted/60 p-3">
-              <p class="text-xs font-medium text-muted">
-                변경 전
-              </p>
-              <p class="mt-2 whitespace-pre-wrap wrap-break-word text-sm leading-6">
-                {{ sourcePreview(entry, 'before') }}
-              </p>
-            </div>
-            <div class="min-w-0 rounded-xl bg-muted/60 p-3">
-              <p class="text-xs font-medium text-muted">
-                변경 후
-              </p>
-              <p class="mt-2 whitespace-pre-wrap wrap-break-word text-sm leading-6">
-                {{ sourcePreview(entry, 'after') }}
-              </p>
+        <div v-else-if="sourceEntries.length" class="relative flex flex-col pt-3">
+          <div v-if="sourceLoading" class="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center">
+            <div
+              class="flex items-center gap-2 rounded-lg bg-elevated/80 px-3 py-2 text-xs text-muted shadow-sm backdrop-blur-lg">
+              <UIcon name="i-tabler-loader-2" class="size-4 animate-spin" />
+              <span>불러오는 중</span>
             </div>
           </div>
-
-          <div class="mt-4 flex items-center justify-between gap-3 text-xs text-muted">
-            <span class="flex items-center gap-1">
-              <AppUserIdentity
-                :handle="BOT_HANDLE"
-                role="bot"
-                text-class="text-xs text-muted"
-                icon-class="size-3.5"
-                stop-propagation
-              />
-              <span>이 감지한 원문 변경 · {{ formatDate(entry.createdAt) }}</span>
-            </span>
-            <span class="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100">
-              상세 보기 <UIcon
-                name="i-tabler-arrow-up-right"
-                class="size-4"
-              />
-            </span>
-          </div>
-        </article>
-      </div>
-
-      <div
-        v-if="sourceTotal"
-        class="flex justify-center pt-2"
-      >
-        <UPagination
-          v-model:page="sourcePage"
-          :total="sourceTotal"
-          :items-per-page="sourceChangesData?.pageSize ?? LOG_PAGE_SIZE"
-          :disabled="sourceLoading"
-        />
-      </div>
-    </section>
-
-    <USlideover
-      v-model:open="detailOpen"
-      side="right"
-      inset
-      :ui="{ content: 'max-w-2xl' }"
-    >
-      <template #content>
-        <div class="flex h-full flex-col">
-          <div class="flex items-start justify-between gap-4 border-b border-default px-5 py-4">
-            <div>
-              <p class="text-xs font-medium text-muted">
-                항목 상세
-              </p>
-              <h2 class="mt-1 text-lg font-semibold">
-                {{ selectedTranslation?.unitKey ?? selectedSource?.unitKey }}
-              </h2>
-            </div>
-            <UButton
-              icon="i-tabler-x"
-              color="neutral"
-              variant="ghost"
-              aria-label="닫기"
-              class="rounded-xl"
-              @click="detailOpen = false"
-            />
-          </div>
-
-          <div class="flex-1 overflow-y-auto p-5">
-            <template v-if="selectedTranslation">
-              <div class="flex flex-wrap items-center gap-2">
-                <UBadge
-                  color="neutral"
-                  variant="soft"
-                >
-                  {{ selectedTranslation.category }}
-                </UBadge>
-                <UBadge
-                  :color="statusColors[selectedTranslation.status]"
-                  variant="soft"
-                >
-                  {{ statusLabels[selectedTranslation.status] }}
-                </UBadge>
+          <article v-for="(entry, index) in sourceEntries" :key="entry.id" class="flex flex-col pt-1 transition-colors">
+            <div class="flex items-center gap-2">
+              <div class="flex size-6 shrink-0 items-center justify-center rounded-full"
+                :class="getSourceToneClass(entry.changeType)">
+                <UIcon :name="getSourceActionIcon(entry.changeType)" class="size-4" />
               </div>
 
-              <div class="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
-                <span class="flex items-center gap-1">
-                  <AppUserIdentity
-                    :handle="getTranslationHandle(selectedTranslation)"
-                    :role="selectedTranslation.actorRole"
-                    text-class="text-sm text-muted"
-                    icon-class="size-4"
-                    stop-propagation
-                  />
-                </span>
-                <span>{{ formatDate(selectedTranslation.createdAt) }}</span>
-                <span v-if="selectedTranslation.reviewedAt">검토 {{ formatDate(selectedTranslation.reviewedAt) }}</span>
+              <NuxtLink :to="{
+                path: '/translate/editor',
+                query: {
+                  file: entry.category,
+                  search: `${entry.category}_${entry.unitKey}`,
+                  searchType: 'key',
+                  match: 'exact',
+                  page: '1'
+                }
+              }" class="min-w-0 flex-1 truncate text-sm font-medium text-default hover:underline underline-offset-2"
+                :title="`${entry.category}_${entry.unitKey}`">
+                {{ entry.category }}_{{ entry.unitKey }}
+              </NuxtLink>
+            </div>
+
+            <div class="flex gap-2">
+              <div class="flex w-6 shrink-0 justify-center pt-1">
+                <div v-if="index < sourceEntries.length - 1" class="w-0.5 rounded-lg bg-elevated" />
               </div>
 
-              <div class="mt-6 grid gap-4">
-                <div>
-                  <p class="mb-2 text-xs font-medium text-muted">
-                    수정 전
-                  </p>
-                  <p class="whitespace-pre-wrap wrap-break-word rounded-xl bg-muted p-4 text-sm leading-6">
-                    {{ selectedTranslation.previousText || '미번역' }}
-                  </p>
+              <div class="flex min-w-0 flex-1 flex-col gap-4 pb-12">
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+                  <span class="font-medium" :class="getSourceTextClass(entry.changeType)">
+                    {{ sourceChangeLabels[entry.changeType] }}
+                  </span>
+                  <span class="flex min-w-0 items-center gap-1.5">
+                    <span class="text-dimmed">생성</span>
+                    <time :datetime="entry.createdAt">{{ formatDate(entry.createdAt) }}</time>
+                    <span aria-hidden="true">·</span>
+                    <AppUserIdentity :handle="BOT_HANDLE" role="bot" text-class="text-xs text-muted"
+                      icon-class="size-3.5" stop-propagation />
+                  </span>
+                  <span class="flex items-center gap-1">
+                    <UIcon name="i-tabler-tag" class="size-3" />
+                    {{ getSourceRevisionLabel() }}
+                  </span>
                 </div>
-                <div>
-                  <p class="mb-2 text-xs font-medium text-muted">
-                    수정 후
-                  </p>
-                  <p class="whitespace-pre-wrap wrap-break-word rounded-xl bg-muted p-4 text-sm leading-6">
-                    {{ selectedTranslation.proposedText }}
-                  </p>
-                </div>
-              </div>
-            </template>
 
-            <template v-else-if="selectedSource">
-              <div class="flex flex-wrap items-center gap-2">
-                <UBadge
-                  color="neutral"
-                  variant="soft"
-                >
-                  {{ selectedSource.category }}
-                </UBadge>
-                <UBadge
-                  :color="sourceChangeColors[selectedSource.changeType]"
-                  variant="soft"
-                >
-                  {{ sourceChangeLabels[selectedSource.changeType] }}
-                </UBadge>
-              </div>
-
-              <div class="mt-4 flex items-center gap-1 text-sm text-muted">
-                <AppUserIdentity
-                  :handle="BOT_HANDLE"
-                  role="bot"
-                  text-class="text-sm text-muted"
-                  stop-propagation
-                />
-                <span>이 감지한 원문 변경 · {{ formatDate(selectedSource.createdAt) }}</span>
-              </div>
-
-              <div class="mt-6 flex flex-col gap-4">
-                <div
-                  v-for="language in sourceLanguageItems"
-                  :key="language.key"
-                  class="rounded-xl border border-default p-4"
-                >
-                  <p class="text-sm font-semibold">
-                    {{ language.label }}
-                  </p>
-                  <div class="mt-3 grid gap-3 md:grid-cols-2">
-                    <div>
-                      <p class="text-xs font-medium text-muted">
-                        변경 전
-                      </p>
-                      <p class="mt-1 whitespace-pre-wrap wrap-break-word text-sm leading-6">
-                        {{ getSourceValue(selectedSource, 'before', language.key) || '없음' }}
-                      </p>
-                    </div>
-                    <div>
-                      <p class="text-xs font-medium text-muted">
-                        변경 후
-                      </p>
-                      <p class="mt-1 whitespace-pre-wrap wrap-break-word text-sm leading-6">
-                        {{ getSourceValue(selectedSource, 'after', language.key) || '없음' }}
-                      </p>
-                    </div>
+                <div class="flex flex-col gap-4 py-2">
+                  <div v-for="value in getSourceDiffValues(entry)" :key="value.key"
+                    class="flex min-w-0 flex-col gap-0.5">
+                    <span class="block text-[10px] text-dimmed">{{ value.label }}</span>
+                    <p
+                      class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6 px-3 py-2 bg-muted rounded-lg">
+                      <template v-for="(part, partIndex) in value.parts" :key="`${part.type}-${partIndex}`">
+                        <span :class="part.type === 'removed'
+                          ? 'bg-error/10 text-error'
+                          : part.type === 'added'
+                            ? 'bg-success/10 text-success'
+                            : 'text-toned'">{{ part.text }}</span>
+                      </template>
+                    </p>
                   </div>
                 </div>
               </div>
-            </template>
-          </div>
+            </div>
+          </article>
+        </div>
 
-          <div class="border-t border-default p-5">
-            <UButton
-              block
-              icon="i-tabler-edit"
-              color="info"
-              variant="soft"
-              class="rounded-xl"
-              :disabled="!selectedUnitId"
-              @click="openSelectedItem"
-            >
-              {{ loggedIn ? '에디터에서 수정' : '에디터에서 항목 보기' }}
-            </UButton>
-          </div>
+        <div v-if="sourceTotal" class="sticky bottom-4 z-20 flex justify-center pt-5 pointer-events-none">
+          <EditorPageController v-model:page="sourcePage" :total-pages="sourceTotalPages" :disabled="sourceLoading"
+            class="pointer-events-auto" />
+        </div>
+      </section>
+
+      <template #fallback>
+        <div class="flex items-center justify-center p-12 text-muted">
+          <AppLoadingSpinner />
         </div>
       </template>
-    </USlideover>
-
-    <div
-      v-if="activeLoading"
-      class="fixed inset-0 z-[100] flex items-center justify-center bg-default/30 backdrop-blur-sm"
-      role="status"
-      aria-live="polite"
-      aria-label="변경 기록을 불러오는 중"
-    >
-      <UIcon
-        name="i-tabler-loader-2"
-        class="size-10 animate-spin text-default"
-      />
-      <span class="sr-only">변경 기록을 불러오는 중입니다.</span>
-    </div>
+    </ClientOnly>
   </div>
 </template>

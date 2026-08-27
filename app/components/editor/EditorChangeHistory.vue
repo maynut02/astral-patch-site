@@ -294,10 +294,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
         v-else-if="status === 'pending'"
         class="flex items-center justify-center p-5 text-muted"
       >
-        <UIcon
-          name="i-tabler-loader-2"
-          class="size-5 animate-spin"
-        />
+        <AppLoadingSpinner />
       </div>
 
       <UAlert

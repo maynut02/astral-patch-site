@@ -1,7 +1,6 @@
 import { createError } from 'h3'
 import type { H3Event } from 'h3'
 import { getDatabase } from './database'
-import { HANDLE_PATTERN } from './validation'
 
 export type AppRole = 'admin' | 'verified' | 'user' | 'bot'
 
@@ -69,83 +68,6 @@ export async function upsertGoogleUser(profile: GoogleProfile): Promise<AppUser>
   }
 
   return user
-}
-
-function getTextLength(value: string): number {
-  return Array.from(value).length
-}
-
-function parseProfileValue(value: unknown, field: string): string {
-  if (typeof value !== 'string') {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `${field} is required`
-    })
-  }
-
-  const normalized = value.trim()
-
-  if (!normalized) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `${field} is required`
-    })
-  }
-
-  if (getTextLength(normalized) > 20) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `${field} must be 20 characters or fewer`
-    })
-  }
-
-  return normalized
-}
-
-export async function updateUserProfile(googleSub: string, input: { handle?: unknown }): Promise<AppUser> {
-  const handle = parseProfileValue(input.handle, 'Handle')
-
-  if (!HANDLE_PATTERN.test(handle)) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Handle may contain only letters and numbers'
-    })
-  }
-
-  const database = getDatabase()
-
-  try {
-    const [user] = await database<AppUser[]>`
-      UPDATE app_users
-      SET
-        handle = ${handle},
-        updated_at = now()
-      WHERE google_sub = ${googleSub}
-      RETURNING
-        google_sub AS "googleSub",
-        email,
-        handle,
-        "role" AS role
-    `
-
-    if (!user) {
-      throw createError({
-        statusCode: 404,
-        statusMessage: 'User could not be found'
-      })
-    }
-
-    return user
-  } catch (error: unknown) {
-    if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
-      throw createError({
-        statusCode: 409,
-        statusMessage: 'Handle is already in use'
-      })
-    }
-
-    throw error
-  }
 }
 
 /**

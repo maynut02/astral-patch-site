@@ -130,6 +130,8 @@ export interface EditorTranslationLogEntry {
   unitKey: string
   actorRole: EditorRole
   handle: string | null
+  reviewerRole: EditorRole | null
+  reviewerHandle: string | null
   previousText: string | null
   proposedText: string
   status: EditorChangeStatus

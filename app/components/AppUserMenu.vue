@@ -26,7 +26,7 @@ const menuItems = computed(() => [{
   icon: 'i-tabler-user-circle',
   to: publicProfilePath.value
 }, {
-  label: '설정',
+  label: '계정 설정',
   icon: 'i-tabler-settings',
   to: '/setting'
 }, {
@@ -46,21 +46,12 @@ function login() {
 </script>
 
 <template>
-  <UDropdownMenu
-    v-if="ready && loggedIn"
-    :items="menuItems"
-    :content="{ align: 'end', sideOffset: 8 }"
-    :ui="{ content: 'w-52' }"
-  >
+  <UDropdownMenu v-if="ready && loggedIn" :items="menuItems" :content="{ align: 'end', sideOffset: 8 }"
+    :ui="{ content: 'w-52' }">
     <template #default="{ open }">
-      <button
-        type="button"
-        aria-label="사용자 메뉴"
-        :aria-expanded="open"
-        aria-haspopup="menu"
+      <button type="button" aria-label="사용자 메뉴" :aria-expanded="open" aria-haspopup="menu"
         class="flex shrink-0 items-center justify-center rounded-md text-sm font-semibold text-default transition-colors"
-        :class="[triggerClass, open ? 'bg-accented/75' : '', 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary']"
-      >
+        :class="[triggerClass, open ? 'bg-accented/75' : '', 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary']">
         <span class="flex size-6 items-center justify-center rounded-full bg-inverted text-xs text-inverted">
           {{ initial }}
         </span>
@@ -68,53 +59,28 @@ function login() {
     </template>
 
     <template #content-top="{ sub }">
-      <div
-        v-if="!sub"
-        class="flex items-center min-w-0 gap-3 px-3 py-3 border-b border-default"
-      >
+      <div v-if="!sub" class="flex items-center min-w-0 gap-3 px-3 py-3 border-b border-default">
         <div
-          class="flex size-6 shrink-0 items-center justify-center rounded-full bg-inverted text-sm font-semibold text-inverted"
-        >
+          class="flex size-6 shrink-0 items-center justify-center rounded-full bg-inverted text-sm font-semibold text-inverted">
           {{ initial }}
         </div>
         <div class="min-w-0 flex-1">
-          <AppUserIdentity
-            :handle="user?.handle"
-            :role="user?.role"
-            :to="publicProfilePath"
-            text-class="text-sm font-semibold text-default"
-            class="max-w-full gap-2"
-          />
+          <AppUserIdentity :handle="user?.handle" :role="user?.role" :to="publicProfilePath"
+            text-class="text-sm font-semibold text-default" class="max-w-full gap-2" />
         </div>
       </div>
     </template>
   </UDropdownMenu>
 
-  <button
-    v-else-if="ready"
-    type="button"
-    aria-label="Google 로그인"
-    :class="triggerClass"
-    class="flex shrink-0 items-center justify-center rounded-md bg-elevated/75 text-muted transition-colors hover:text-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-    @click="login"
-  >
-    <UIcon
-      name="i-tabler-user-key"
-      class="size-5"
-    />
+  <button v-else-if="ready" type="button" aria-label="Google 로그인" :class="triggerClass"
+    class="flex shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:text-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    @click="login">
+    <UIcon name="i-tabler-user-key" class="size-5" />
   </button>
 
-  <div
-    v-else
-    :class="triggerClass"
+  <div v-else :class="triggerClass"
     class="flex shrink-0 items-center justify-center rounded-md border border-accented/30 bg-elevated/60 text-muted backdrop-blur-lg"
-    aria-label="로그인 상태 확인 중"
-    role="status"
-    aria-live="polite"
-  >
-    <UIcon
-      name="i-tabler-loader-2"
-      class="size-5 animate-spin"
-    />
+    aria-label="로그인 상태 확인 중" role="status" aria-live="polite">
+    <AppLoadingSpinner />
   </div>
 </template>

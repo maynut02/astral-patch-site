@@ -9,7 +9,7 @@ interface AstralReference {
 
 type Segment
   = | { type: 'text', content: string }
-    | { type: 'astral', linkType: AstralLinkType, id: string, content: string }
+  | { type: 'astral', linkType: AstralLinkType, id: string, content: string }
 
 const props = defineProps<{
   text: string | null
@@ -61,26 +61,12 @@ function selectReference(part: Extract<Segment, { type: 'astral' }>): void {
 
 <template>
   <span>
-    <slot
-      v-if="!text"
-      name="empty"
-    />
+    <slot v-if="!text" name="empty" />
     <template v-else>
-      <template
-        v-for="(part, index) in segments"
-        :key="index"
-      >
-        <span
-          v-if="part.type === 'text'"
-          class="whitespace-pre-wrap"
-        >{{ part.content }}</span>
-        <button
-          v-else
-          type="button"
-          class="inline p-0 font-inherit text-info hover:underline underline-offset-2"
-          :aria-label="`${part.linkType} ${part.id} 사전에서 보기`"
-          @click="selectReference(part)"
-        >
+      <template v-for="(part, index) in segments" :key="index">
+        <span v-if="part.type === 'text'" class="whitespace-pre-wrap">{{ part.content }}</span>
+        <button v-else type="button" class="inline p-0 font-inherit text-info hover:underline underline-offset-2"
+          :aria-label="`${part.linkType} ${part.id} 사전에서 보기`" @click="selectReference(part)">
           {{ part.content }}
         </button>
       </template>

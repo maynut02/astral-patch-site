@@ -12,7 +12,7 @@ useHead({
   }
 })
 
-const toaster = { expand: true, position: 'top-center' }
+const toaster = { expand: false, position: 'top-center' }
 
 const title = '아스트랄 파티 한글패치'
 const description = ''
@@ -29,10 +29,7 @@ useSeoMeta({
 
 <template>
   <UApp :toaster="toaster">
-    <NuxtLoadingIndicator
-      color="var(--color-neutral-300)"
-      :height="2"
-    />
+    <NuxtLoadingIndicator color="var(--color-neutral-300)" :height="2" />
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>

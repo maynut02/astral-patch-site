@@ -13,17 +13,7 @@ const meta = computed(() => getUserRoleMeta(props.role))
 </script>
 
 <template>
-  <UTooltip
-    v-if="meta"
-    :text="meta.label"
-    :delay-duration="0"
-  >
-    <UIcon
-      :name="meta.icon"
-      role="img"
-      :aria-label="meta.label"
-      class="shrink-0 text-muted"
-      :class="iconClass"
-    />
+  <UTooltip v-if="meta" :text="meta.label" :delay-duration="0">
+    <UIcon :name="meta.icon" role="img" :aria-label="meta.label" class="shrink-0 text-muted" :class="iconClass" />
   </UTooltip>
 </template>

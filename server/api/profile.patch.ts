@@ -1,12 +1,13 @@
-import { requireCurrentSessionUser, updateUserProfile } from '../utils/auth-user'
+import { requireCurrentSessionUser } from '../utils/auth-user'
 import { readJsonBody } from '../utils/request-security'
+import { saveUserProfileDetails, type UserProfileUpdateInput } from '../utils/profile-details'
 
 export default defineEventHandler(async (event) => {
   const currentUser = await requireCurrentSessionUser(event)
-  const body = await readJsonBody<{ handle?: unknown }>(event)
+  const body = await readJsonBody<UserProfileUpdateInput>(event)
   const session = await getUserSession(event)
 
-  const user = await updateUserProfile(currentUser.id, body)
+  const user = await saveUserProfileDetails(currentUser.id, body)
 
   await setUserSession(event, {
     ...session,
@@ -19,6 +20,10 @@ export default defineEventHandler(async (event) => {
   })
 
   return {
-    handle: user.handle
+    handle: user.handle,
+    role: user.role,
+    gameUid: user.gameUid,
+    gameInviteCode: user.gameInviteCode,
+    socialLinks: user.socialLinks
   }
 })

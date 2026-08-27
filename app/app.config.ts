@@ -65,7 +65,7 @@ export default defineAppConfig({
 
     toast: {
       slots: {
-        root: 'bg-default/75 backdrop-blur-lg ring-0'
+        root: 'bg-elevated/75 backdrop-blur-lg ring-0'
       }
     }
   }
