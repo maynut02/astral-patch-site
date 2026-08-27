@@ -68,7 +68,14 @@ SQL
 run_migrations() {
   for file in $(migration_files); do
     name="$(basename "$file")"
-    applied="$(psql_base --tuples-only --no-align --set=name="$name" -c "SELECT 1 FROM astral_schema_migrations WHERE name = :'name' LIMIT 1")"
+    applied="$(
+      psql_base --tuples-only --no-align --set=name="$name" <<'SQL'
+SELECT 1
+FROM astral_schema_migrations
+WHERE name = :'name'
+LIMIT 1;
+SQL
+    )"
 
     if [ "$applied" = "1" ]; then
       echo "[migrate] skipped $name"
