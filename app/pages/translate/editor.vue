@@ -103,7 +103,7 @@ definePageMeta({
 
 const isSidebarOpen = ref(true)
 const isMobileSidebarOpen = ref(false)
-const activeSidebarMenu = ref<SidebarMenu>('list')
+const activeSidebarMenu = ref<SidebarMenu>('history')
 const page = ref(1)
 const optionsPopoverOpen = ref(false)
 const searchInput = ref('')

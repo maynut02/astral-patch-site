@@ -1,0 +1,40 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy through SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT || 22 }}
+          script: |
+            set -Eeuo pipefail
+
+            SITE_DIR='${{ secrets.SERVER_WORK_DIR }}'
+            PATCH_DIR='${{ secrets.PATCH_SERVER_WORK_DIR }}'
+
+            cd "$SITE_DIR"
+            git fetch origin
+            git checkout master
+            git pull --ff-only origin master
+
+            cd "$PATCH_DIR"
+            git fetch origin
+            git checkout main
+            git pull --ff-only origin main
+
+            cd "$SITE_DIR"
+            docker compose -p astral-patch up -d postgres-db
+            docker compose -p astral-patch --profile migration run --rm db-migrate
+            docker compose -p astral-patch up -d --build astral-patch-site
+            docker compose -p astral-patch ps

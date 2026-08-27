@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Astral Patch PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:45:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

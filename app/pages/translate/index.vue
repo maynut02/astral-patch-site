@@ -181,7 +181,7 @@ function getVersionPath(version: string, revision: string): string {
       </h1>
 
       <ClientOnly>
-        <div v-if="!hasError && !isLoading" class="flex items-center gap-4 px-3 h-7 md:h-8 bg-elevated rounded-md">
+        <div v-if="!hasError && !isLoading" class="flex items-center gap-4 px-3 h-7 md:h-8 bg-muted rounded-md">
           <!-- 전체 상태별 비율 -->
           <div class="hidden sm:flex gap-3 shrink-0">
             <UTooltip v-for="status in visibleStatuses" :key="status" :text="EDITOR_STATUS_META[status].label">
