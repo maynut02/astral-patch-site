@@ -65,7 +65,7 @@ DB host port는 `127.0.0.1:5433`에만 bind됩니다.
 docker compose -p astral-patch --profile migration run --rm db-migrate
 ```
 
-`schema_migrations` 테이블이 생성되고 이미 적용된 migration은 이후 자동으로 건너뜁니다.
+`astral_schema_migrations` 테이블이 생성되고 이미 적용된 migration은 이후 자동으로 건너뜁니다.
 
 ## 3B. Neon 기존 DB를 이전하는 경우
 
@@ -95,7 +95,7 @@ cat astral-neon.dump | docker compose -p astral-patch exec -T postgres-db sh -c 
     --if-exists'
 ```
 
-기존 Neon DB는 `schema_migrations`를 사용하지 않았으므로, **복원한 dump가 현재 저장소의 모든 migration을 이미 포함한다는 것을 확인한 뒤에만** migration history를 adopt합니다.
+기존 Neon DB는 `astral_schema_migrations`를 사용하지 않았으므로, **복원한 dump가 현재 저장소의 모든 migration을 이미 포함한다는 것을 확인한 뒤에만** migration history를 adopt합니다.
 
 ```bash
 ASTRAL_MIGRATION_ADOPT_CONFIRM=YES \

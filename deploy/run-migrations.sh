@@ -37,7 +37,7 @@ wait_for_database() {
 
 ensure_history_table() {
   psql_base <<'SQL'
-CREATE TABLE IF NOT EXISTS schema_migrations (
+CREATE TABLE IF NOT EXISTS astral_schema_migrations (
   name text PRIMARY KEY,
   applied_at timestamptz NOT NULL DEFAULT now()
 );
@@ -57,7 +57,7 @@ adopt_existing_schema() {
   for file in $(migration_files); do
     name="$(basename "$file")"
     psql_base --set=name="$name" <<'SQL'
-INSERT INTO schema_migrations (name)
+INSERT INTO astral_schema_migrations (name)
 VALUES (:'name')
 ON CONFLICT (name) DO NOTHING;
 SQL
@@ -68,7 +68,7 @@ SQL
 run_migrations() {
   for file in $(migration_files); do
     name="$(basename "$file")"
-    applied="$(psql_base --tuples-only --no-align --set=name="$name" -c "SELECT 1 FROM schema_migrations WHERE name = :'name' LIMIT 1")"
+    applied="$(psql_base --tuples-only --no-align --set=name="$name" -c "SELECT 1 FROM astral_schema_migrations WHERE name = :'name' LIMIT 1")"
 
     if [ "$applied" = "1" ]; then
       echo "[migrate] skipped $name"
@@ -79,7 +79,7 @@ run_migrations() {
     {
       echo 'BEGIN;'
       cat "$file"
-      printf '\nINSERT INTO schema_migrations (name) VALUES ('
+      printf '\nINSERT INTO astral_schema_migrations (name) VALUES ('
       printf "'%s'" "$(printf '%s' "$name" | sed "s/'/''/g")"
       echo ');'
       echo 'COMMIT;'
