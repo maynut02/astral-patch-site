@@ -1,13 +1,25 @@
 name: Deploy production
 
 on:
+  workflow_run:
+    workflows:
+      - ci
+    branches:
+      - master
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: astral-patch-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Deploy through SSH
@@ -22,11 +34,19 @@ jobs:
 
             SITE_DIR='${{ secrets.SERVER_WORK_DIR }}'
             PATCH_DIR='${{ secrets.PATCH_SERVER_WORK_DIR }}'
+            DEPLOY_SHA='${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}'
 
             cd "$SITE_DIR"
-            git fetch origin
+            CURRENT_SHA="$(git rev-parse HEAD)"
+            git fetch origin master
+
+            if [ "$CURRENT_SHA" != "$DEPLOY_SHA" ] && git merge-base --is-ancestor "$DEPLOY_SHA" "$CURRENT_SHA"; then
+              echo "Skipping outdated deployment $DEPLOY_SHA; server already has newer $CURRENT_SHA"
+              exit 0
+            fi
+
             git checkout master
-            git pull --ff-only origin master
+            git reset --hard "$DEPLOY_SHA"
 
             cd "$PATCH_DIR"
             git fetch origin
@@ -35,6 +55,59 @@ jobs:
 
             cd "$SITE_DIR"
             docker compose -p astral-patch up -d postgres-db
+
+            # Keep the installed backup service in sync with the repository.
+            sudo -n install -m 0755 deploy/backup-db.sh /usr/local/sbin/astral-patch-backup-db
+            sudo -n install -m 0644 deploy/systemd/astral-patch-db-backup.service /etc/systemd/system/astral-patch-db-backup.service
+            sudo -n install -m 0644 deploy/systemd/astral-patch-db-backup.timer /etc/systemd/system/astral-patch-db-backup.timer
+
+            if ! sudo -n test -f /etc/default/astral-patch; then
+              defaults_file="$(mktemp)"
+              {
+                printf 'ASTRAL_APP_DIR=%s\n' "$SITE_DIR"
+                printf 'ASTRAL_COMPOSE_PROJECT=astral-patch\n'
+                printf 'ASTRAL_BACKUP_DIR=/var/backups/astral-patch\n'
+                printf 'ASTRAL_BACKUP_RETENTION_DAYS=14\n'
+                printf 'ASTRAL_R2_BACKUP_ENABLED=false\n'
+              } > "$defaults_file"
+              sudo -n install -m 0644 "$defaults_file" /etc/default/astral-patch
+              rm -f "$defaults_file"
+            fi
+
+            sudo -n systemctl daemon-reload
+            sudo -n systemctl enable --now astral-patch-db-backup.timer
+
+            # The image is small and rebuilding it ensures uploader changes are deployed too.
+            docker compose -p astral-patch --profile backup build r2-backup
+
+            # Snapshot the current database before applying any new migration.
+            # Running the systemd service also loads /etc/default/astral-patch,
+            # including the optional R2 backup setting.
+            sudo -n systemctl start astral-patch-db-backup.service
+
             docker compose -p astral-patch --profile migration run --rm db-migrate
             docker compose -p astral-patch up -d --build astral-patch-site
+
+            APP_PORT="$(sed -n 's/^ASTRAL_APP_PORT=//p' .env | tail -1)"
+            APP_PORT="${APP_PORT:-3001}"
+            case "$APP_PORT" in
+              *[!0-9]*|'')
+                echo "Invalid ASTRAL_APP_PORT: $APP_PORT" >&2
+                exit 1
+                ;;
+            esac
+
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error "http://127.0.0.1:${APP_PORT}/" >/dev/null; then
+                echo "Astral Patch site is healthy on 127.0.0.1:${APP_PORT}"
+                break
+              fi
+
+              if [ "$attempt" -eq 30 ]; then
+                docker compose -p astral-patch logs --tail=150 astral-patch-site
+                exit 1
+              fi
+              sleep 2
+            done
+
             docker compose -p astral-patch ps

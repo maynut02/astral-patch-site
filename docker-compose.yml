@@ -21,6 +21,17 @@ services:
       postgres-db:
         condition: service_healthy
 
+  r2-backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.r2-backup
+    env_file:
+      - .env
+    profiles:
+      - backup
+    volumes:
+      - ${ASTRAL_BACKUP_DIR:-/var/backups/astral-patch}:/backup:ro
+
   postgres-db:
     image: postgres:18-alpine
     restart: always

@@ -14,6 +14,7 @@ ASTRAL_APP_DIR="${ASTRAL_APP_DIR:-/home/ubuntu/astral-patch-site}"
 ASTRAL_PATCH_REPO_DIR="${ASTRAL_PATCH_REPO_DIR:-/home/ubuntu/astral-party-korean-patch}"
 ASTRAL_BACKUP_DIR="${ASTRAL_BACKUP_DIR:-/var/backups/astral-patch}"
 ASTRAL_BACKUP_RETENTION_DAYS="${ASTRAL_BACKUP_RETENTION_DAYS:-14}"
+ASTRAL_R2_BACKUP_ENABLED="${ASTRAL_R2_BACKUP_ENABLED:-false}"
 ASTRAL_NGINX_SITE_NAME="${ASTRAL_NGINX_SITE_NAME:-astral-patch-site}"
 ACME_ROOT="/var/www/astral-patch-site-acme"
 NGINX_SITE_PATH="/etc/nginx/conf.d/${ASTRAL_NGINX_SITE_NAME}.conf"
@@ -28,6 +29,11 @@ done
 
 if ! [[ "$ASTRAL_APP_PORT" =~ ^[0-9]+$ ]] || (( ASTRAL_APP_PORT < 1 || ASTRAL_APP_PORT > 65535 )); then
   echo "ASTRAL_APP_PORT must be a valid TCP port" >&2
+  exit 1
+fi
+
+if [[ "$ASTRAL_R2_BACKUP_ENABLED" != "true" && "$ASTRAL_R2_BACKUP_ENABLED" != "false" ]]; then
+  echo "ASTRAL_R2_BACKUP_ENABLED must be true or false" >&2
   exit 1
 fi
 
@@ -72,14 +78,20 @@ install -m 0644 "$SCRIPT_DIR/systemd/astral-patch-db-backup.timer" /etc/systemd/
 install -d -m 0755 /etc/default
 {
   printf 'ASTRAL_APP_DIR=%q\n' "$ASTRAL_APP_DIR"
+  printf 'ASTRAL_COMPOSE_PROJECT=%q\n' "astral-patch"
   printf 'ASTRAL_PATCH_REPO_DIR=%q\n' "$ASTRAL_PATCH_REPO_DIR"
   printf 'ASTRAL_BACKUP_DIR=%q\n' "$ASTRAL_BACKUP_DIR"
   printf 'ASTRAL_BACKUP_RETENTION_DAYS=%q\n' "$ASTRAL_BACKUP_RETENTION_DAYS"
+  printf 'ASTRAL_R2_BACKUP_ENABLED=%q\n' "$ASTRAL_R2_BACKUP_ENABLED"
 } > /etc/default/astral-patch
 chmod 0644 /etc/default/astral-patch
 
 systemctl daemon-reload
 systemctl enable --now astral-patch-db-backup.timer
+
+if [[ "$ASTRAL_R2_BACKUP_ENABLED" == "true" ]]; then
+  docker compose --project-directory "$ASTRAL_APP_DIR" -p astral-patch --profile backup build r2-backup
+fi
 
 if systemctl list-unit-files certbot.timer 2>/dev/null | grep -q '^certbot.timer'; then
   systemctl enable --now certbot.timer

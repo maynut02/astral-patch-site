@@ -7,3 +7,4 @@ After=docker.service
 Type=oneshot
 EnvironmentFile=/etc/default/astral-patch
 ExecStart=/usr/local/sbin/astral-patch-backup-db
+TimeoutStartSec=30min
