@@ -90,7 +90,7 @@ export function parseOptionalText(value: unknown, field: string, maxLength: numb
   return normalized
 }
 
-/** Escape PostgreSQL ILIKE wildcards while keeping the value parameterized. */
+// ILIKE 와일드카드를 이스케이프해 파라미터 검색 의미를 보존한다.
 export function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&')
 }

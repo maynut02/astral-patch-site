@@ -248,15 +248,24 @@ async function deleteAccount(): Promise<void> {
 
     <div class="flex min-w-0 items-center gap-3">
       <div
-        class="flex size-8 shrink-0 items-center justify-center rounded-full bg-inverted text-base font-semibold text-inverted">
+        class="flex size-8 shrink-0 items-center justify-center rounded-full bg-inverted text-base font-semibold text-inverted"
+      >
         {{ initial }}
       </div>
-      <AppUserIdentity :handle="state.handle" :role="user?.role" :to="publicProfilePath" fallback="@handle"
-        text-class="text-lg font-semibold text-default" icon-class="size-5" class="max-w-full flex-1 gap-2" />
+      <AppUserIdentity
+        :handle="state.handle"
+        :role="user?.role"
+        :to="publicProfilePath"
+        fallback="@handle"
+        text-class="text-lg font-semibold text-default"
+        icon-class="size-5"
+        class="max-w-full flex-1 gap-2"
+      />
     </div>
 
     <UCard
-      :ui="{ header: 'px-5 py-4 sm:px-6', body: 'px-5 py-5 sm:px-6', footer: 'px-5 py-4 sm:px-6' }">
+      :ui="{ header: 'px-5 py-4 sm:px-6', body: 'px-5 py-5 sm:px-6', footer: 'px-5 py-4 sm:px-6' }"
+    >
       <template #header>
         <div>
           <h2 class="font-semibold text-default">
@@ -268,19 +277,47 @@ async function deleteAccount(): Promise<void> {
         </div>
       </template>
 
-      <UAlert v-if="profileLoadError" class="mb-5" color="error" variant="soft" :description="profileLoadError">
+      <UAlert
+        v-if="profileLoadError"
+        class="mb-5"
+        color="error"
+        variant="soft"
+        :description="profileLoadError"
+      >
         <template #actions>
-          <UButton size="sm" color="error" variant="outline" @click="loadProfile">
+          <UButton
+            size="sm"
+            color="error"
+            variant="outline"
+            @click="loadProfile"
+          >
             다시 시도
           </UButton>
         </template>
       </UAlert>
 
-      <UForm :state="state" class="space-y-5" @submit="submit">
-        <UFormField name="handle" label="핸들" description="영문과 숫자만 사용할 수 있는 고유 ID입니다." required
-          :error="errors.handle || undefined">
-          <UInput v-model="state.handle" :maxlength="HANDLE_MAX_LENGTH" autocomplete="username" color="neutral"
-            class="w-full" placeholder="handle" :disabled="profileLoading" :ui="{ base: 'h-8 leading-5 pl-7' }">
+      <UForm
+        :state="state"
+        class="space-y-5"
+        @submit="submit"
+      >
+        <UFormField
+          name="handle"
+          label="핸들"
+          description="영문과 숫자만 사용할 수 있는 고유 ID입니다."
+          required
+          :error="errors.handle || undefined"
+        >
+          <UInput
+            v-model="state.handle"
+            :maxlength="HANDLE_MAX_LENGTH"
+            autocomplete="username"
+            color="neutral"
+            class="w-full"
+            placeholder="handle"
+            :disabled="profileLoading"
+            :ui="{ base: 'h-8 leading-5 pl-7' }"
+          >
             <template #leading>
               <span class="text-muted">@</span>
             </template>
@@ -288,66 +325,150 @@ async function deleteAccount(): Promise<void> {
         </UFormField>
 
         <div class="grid gap-5 sm:grid-cols-2">
-          <UFormField name="gameUid" label="게임 UID" description="프로필 - UID" :error="errors.gameUid || undefined">
-            <UInput :model-value="state.gameUid" :maxlength="GAME_PROFILE_VALUE_MAX_LENGTH" inputmode="numeric"
-              pattern="[0-9]*" autocomplete="off" color="neutral" class="w-full" placeholder="UID"
-              :disabled="profileLoading" :ui="{ base: 'h-8 leading-5' }"
-              @update:model-value="state.gameUid = sanitizeGameUid($event)" />
+          <UFormField
+            name="gameUid"
+            label="게임 UID"
+            description="프로필 - UID"
+            :error="errors.gameUid || undefined"
+          >
+            <UInput
+              :model-value="state.gameUid"
+              :maxlength="GAME_PROFILE_VALUE_MAX_LENGTH"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              autocomplete="off"
+              color="neutral"
+              class="w-full"
+              placeholder="UID"
+              :disabled="profileLoading"
+              :ui="{ base: 'h-8 leading-5' }"
+              @update:model-value="state.gameUid = sanitizeGameUid($event)"
+            />
           </UFormField>
 
-          <UFormField name="gameInviteCode" label="게임 초대 코드" description="임무 - 초대 보상 - 나의 초대 코드"
-            :error="errors.gameInviteCode || undefined">
-            <UInput :model-value="state.gameInviteCode" :maxlength="GAME_PROFILE_VALUE_MAX_LENGTH"
-              pattern="[A-Za-z0-9]*" autocomplete="off" color="neutral" class="w-full" placeholder="초대 코드"
-              :disabled="profileLoading" :ui="{ base: 'h-8 leading-5' }"
-              @update:model-value="state.gameInviteCode = sanitizeGameInviteCode($event)" />
+          <UFormField
+            name="gameInviteCode"
+            label="게임 초대 코드"
+            description="임무 - 초대 보상 - 나의 초대 코드"
+            :error="errors.gameInviteCode || undefined"
+          >
+            <UInput
+              :model-value="state.gameInviteCode"
+              :maxlength="GAME_PROFILE_VALUE_MAX_LENGTH"
+              pattern="[A-Za-z0-9]*"
+              autocomplete="off"
+              color="neutral"
+              class="w-full"
+              placeholder="초대 코드"
+              :disabled="profileLoading"
+              :ui="{ base: 'h-8 leading-5' }"
+              @update:model-value="state.gameInviteCode = sanitizeGameInviteCode($event)"
+            />
           </UFormField>
         </div>
 
         <div class="flex flex-col gap-3 border-t border-default pt-5">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <h3 class="text-sm font-medium text-default">소셜미디어 링크</h3>
-              <p class="mt-0.5 text-xs text-muted">최대 {{ SOCIAL_LINK_MAX_COUNT }}개까지 등록할 수 있습니다.</p>
+              <h3 class="text-sm font-medium text-default">
+                소셜미디어 링크
+              </h3>
+              <p class="mt-0.5 text-xs text-muted">
+                최대 {{ SOCIAL_LINK_MAX_COUNT }}개까지 등록할 수 있습니다.
+              </p>
             </div>
-            <UButton type="button" icon="i-tabler-plus" color="neutral" variant="soft" size="sm"
-              :disabled="profileLoading || state.socialLinks.length >= SOCIAL_LINK_MAX_COUNT" @click="addSocialLink">
+            <UButton
+              type="button"
+              icon="i-tabler-plus"
+              color="neutral"
+              variant="soft"
+              size="sm"
+              :disabled="profileLoading || state.socialLinks.length >= SOCIAL_LINK_MAX_COUNT"
+              @click="addSocialLink"
+            >
               링크 추가
             </UButton>
           </div>
 
-          <div v-if="state.socialLinks.length" class="flex flex-col gap-3">
-            <div v-for="(link, index) in state.socialLinks" :key="link.key"
-              class="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.6fr)_auto]">
+          <div
+            v-if="state.socialLinks.length"
+            class="flex flex-col gap-3"
+          >
+            <div
+              v-for="(link, index) in state.socialLinks"
+              :key="link.key"
+              class="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.6fr)_auto]"
+            >
               <UFormField :error="errors.socialLinks[index]?.label || undefined">
-                <UInput v-model="link.label" :maxlength="SOCIAL_LINK_LABEL_MAX_LENGTH" color="neutral" class="w-full"
-                  placeholder="예: X, YouTube, GitHub" :disabled="profileLoading"
-                  :ui="{ base: 'h-8 leading-5' }" />
+                <UInput
+                  v-model="link.label"
+                  :maxlength="SOCIAL_LINK_LABEL_MAX_LENGTH"
+                  color="neutral"
+                  class="w-full"
+                  placeholder="예: X, YouTube, GitHub"
+                  :disabled="profileLoading"
+                  :ui="{ base: 'h-8 leading-5' }"
+                />
               </UFormField>
 
               <UFormField :error="errors.socialLinks[index]?.url || undefined">
-                <UInput v-model="link.url" :maxlength="SOCIAL_LINK_URL_MAX_LENGTH" type="url" color="neutral"
-                  class="w-full" placeholder="https://..." :disabled="profileLoading"
-                  :ui="{ base: 'h-8 leading-5' }" />
+                <UInput
+                  v-model="link.url"
+                  :maxlength="SOCIAL_LINK_URL_MAX_LENGTH"
+                  type="url"
+                  color="neutral"
+                  class="w-full"
+                  placeholder="https://..."
+                  :disabled="profileLoading"
+                  :ui="{ base: 'h-8 leading-5' }"
+                />
               </UFormField>
 
-              <UButton type="button" icon="i-tabler-trash" color="error" variant="ghost" class="self-start"
-                aria-label="소셜 링크 삭제" :disabled="profileLoading" @click="removeSocialLink(index)" />
+              <UButton
+                type="button"
+                icon="i-tabler-trash"
+                color="error"
+                variant="ghost"
+                class="self-start"
+                aria-label="소셜 링크 삭제"
+                :disabled="profileLoading"
+                @click="removeSocialLink(index)"
+              />
             </div>
           </div>
 
-          <p v-else class="text-sm text-muted">등록된 소셜미디어 링크가 없습니다.</p>
+          <p
+            v-else
+            class="text-sm text-muted"
+          >
+            등록된 소셜미디어 링크가 없습니다.
+          </p>
         </div>
 
-        <UAlert v-if="serverError" color="error" variant="soft" :description="serverError" />
+        <UAlert
+          v-if="serverError"
+          color="error"
+          variant="soft"
+          :description="serverError"
+        />
 
         <div class="flex justify-end gap-2 border-t border-default pt-5">
-          <UButton type="button" color="neutral" variant="ghost"
-            :disabled="profileLoading || Boolean(profileLoadError) || !isDirty || submitting" @click="resetProfile">
+          <UButton
+            type="button"
+            color="neutral"
+            variant="ghost"
+            :disabled="profileLoading || Boolean(profileLoadError) || !isDirty || submitting"
+            @click="resetProfile"
+          >
             되돌리기
           </UButton>
-          <UButton type="submit" color="neutral" variant="soft" :loading="submitting"
-            :disabled="profileLoading || Boolean(profileLoadError) || !isDirty">
+          <UButton
+            type="submit"
+            color="neutral"
+            variant="soft"
+            :loading="submitting"
+            :disabled="profileLoading || Boolean(profileLoadError) || !isDirty"
+          >
             변경사항 저장
           </UButton>
         </div>
@@ -366,35 +487,73 @@ async function deleteAccount(): Promise<void> {
         </div>
       </template>
 
-      <UButton color="error" variant="soft" icon="i-tabler-user-minus" class="shrink-0" :disabled="isBot"
-        @click="deleteModalOpen = true">
+      <UButton
+        color="error"
+        variant="soft"
+        icon="i-tabler-user-minus"
+        class="shrink-0"
+        :disabled="isBot"
+        @click="deleteModalOpen = true"
+      >
         계정 탈퇴
       </UButton>
     </UCard>
 
-    <UModal v-model:open="deleteModalOpen" title="계정을 탈퇴하시겠습니까?" description="이 작업은 취소하거나 되돌릴 수 없습니다."
-      :dismissible="!deleting" :close="!deleting" :ui="{ footer: 'justify-end' }">
+    <UModal
+      v-model:open="deleteModalOpen"
+      title="계정을 탈퇴하시겠습니까?"
+      description="이 작업은 취소하거나 되돌릴 수 없습니다."
+      :dismissible="!deleting"
+      :close="!deleting"
+      :ui="{ footer: 'justify-end' }"
+    >
       <template #body>
         <div class="space-y-4">
-          <UAlert color="error" variant="soft" icon="i-tabler-alert-triangle"
-            description="프로필과 소유한 용어집이 영구적으로 삭제됩니다. 번역 기록에서는 개인 정보가 제거됩니다." />
+          <UAlert
+            color="error"
+            variant="soft"
+            icon="i-tabler-alert-triangle"
+            description="프로필과 소유한 용어집이 영구적으로 삭제됩니다. 번역 기록에서는 개인 정보가 제거됩니다."
+          />
 
           <UFormField label="확인을 위해 ‘탈퇴’를 입력해 주세요.">
-            <UInput v-model="deleteConfirmation" color="neutral" class="w-full" autocomplete="off" placeholder="탈퇴"
-              :disabled="deleting" :ui="{ base: 'h-8 leading-5' }" @keydown.enter.prevent="deleteAccount" />
+            <UInput
+              v-model="deleteConfirmation"
+              color="neutral"
+              class="w-full"
+              autocomplete="off"
+              placeholder="탈퇴"
+              :disabled="deleting"
+              :ui="{ base: 'h-8 leading-5' }"
+              @keydown.enter.prevent="deleteAccount"
+            />
           </UFormField>
 
-          <p v-if="deleteError" class="text-sm text-error">
+          <p
+            v-if="deleteError"
+            class="text-sm text-error"
+          >
             {{ deleteError }}
           </p>
         </div>
       </template>
 
       <template #footer>
-        <UButton color="neutral" variant="ghost" :disabled="deleting" @click="deleteModalOpen = false">
+        <UButton
+          color="neutral"
+          variant="ghost"
+          :disabled="deleting"
+          @click="deleteModalOpen = false"
+        >
           취소
         </UButton>
-        <UButton color="error" variant="soft" :loading="deleting" :disabled="!canDeleteAccount" @click="deleteAccount">
+        <UButton
+          color="error"
+          variant="soft"
+          :loading="deleting"
+          :disabled="!canDeleteAccount"
+          @click="deleteAccount"
+        >
           계정 영구 삭제
         </UButton>
       </template>

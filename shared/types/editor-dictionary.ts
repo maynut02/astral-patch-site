@@ -1,11 +1,11 @@
-import type { EditorRole } from './editor'
+import type { UserRole } from './user'
 
 export type EditorDictionaryVisibility = 'public' | 'private'
 
 export interface EditorDictionary {
   id: string
   ownerId: string
-  ownerRole: EditorRole
+  ownerRole: UserRole
   ownerHandle: string | null
   name: string
   description: string
@@ -27,7 +27,7 @@ export interface EditorDictionaryEntry {
   translation: string
   note: string
   createdBy: string
-  creatorRole: EditorRole
+  creatorRole: UserRole
   creatorHandle: string | null
   createdAt: string
   updatedAt: string

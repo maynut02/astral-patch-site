@@ -1,8 +1,7 @@
+import type { UserRole } from '#shared/types/user'
 import { createError } from 'h3'
 import type { H3Event } from 'h3'
 import { getDatabase } from './database'
-
-export type AppRole = 'admin' | 'verified' | 'user' | 'bot'
 
 export const BOT_GOOGLE_SUB = 'bot'
 export const BOT_HANDLE = 'Bot'
@@ -17,14 +16,14 @@ export interface AppUser {
   googleSub: string
   email: string
   handle: string | null
-  role: AppRole
+  role: UserRole
 }
 
 export interface CurrentSessionUser {
   id: string
   email: string
   handle: string | null
-  role: AppRole
+  role: UserRole
 }
 
 export async function upsertGoogleUser(profile: GoogleProfile): Promise<AppUser> {
@@ -70,10 +69,7 @@ export async function upsertGoogleUser(profile: GoogleProfile): Promise<AppUser>
   return user
 }
 
-/**
- * Session claims can outlive a role or profile change in the database. Read the
- * current account before authorizing sensitive operations and refresh stale claims.
- */
+// 민감한 작업 전 DB의 최신 계정 정보를 읽어 세션 권한을 동기화한다.
 export async function getCurrentSessionUser(event: H3Event): Promise<CurrentSessionUser | null> {
   const session = await getUserSession(event)
   const sessionUser = session.user

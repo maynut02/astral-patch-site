@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
+import type { UserRole } from '#shared/types/user'
 import { createError } from 'h3'
-import { BOT_GOOGLE_SUB, type AppRole } from './auth-user'
+import { BOT_GOOGLE_SUB } from './auth-user'
 import { getDatabase } from './database'
 
 export async function deleteUserAccount(googleSub: string): Promise<void> {
   const database = getDatabase()
 
   await database.begin(async (transaction) => {
-    const [account] = await transaction<{ role: AppRole }[]>`
+    const [account] = await transaction<{ role: UserRole }[]>`
       SELECT "role"
       FROM app_users
       WHERE google_sub = ${googleSub}

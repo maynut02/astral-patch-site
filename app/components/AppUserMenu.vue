@@ -25,7 +25,10 @@ function login() {
 </script>
 
 <template>
-  <AppUserMenuContent v-if="ready && loggedIn" side="bottom">
+  <AppUserMenuContent
+    v-if="ready && loggedIn"
+    side="bottom"
+  >
     <template #trigger="{ open }">
       <button
         type="button"

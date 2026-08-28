@@ -68,8 +68,7 @@ export default defineEventHandler(async (event): Promise<EditorBatchSaveResponse
 
   const results: EditorBatchSaveResponse['results'] = []
 
-  // Process sequentially to keep database pressure predictable. Each item keeps its own
-  // transaction so a stale source or validation error does not roll back unrelated edits.
+  // 항목별 트랜잭션을 순차 실행해 DB 부하와 부분 실패 범위를 제한한다.
   for (const item of items) {
     try {
       const response = await saveEditorTranslation(item.itemId, user.id, { text: item.text })

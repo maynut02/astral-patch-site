@@ -1,13 +1,13 @@
 import { createError, getRouterParam } from 'h3'
 import type { UserSocialLink } from '#shared/types/profile'
+import type { UserRole } from '#shared/types/user'
 import { getDatabase } from '../../utils/database'
-import type { AppRole } from '../../utils/auth-user'
 import { HANDLE_PATTERN } from '../../utils/validation'
 
 interface PublicUserRow {
   googleSub: string
   handle: string
-  role: AppRole
+  role: UserRole
   gameUid: string | null
   gameInviteCode: string | null
   translationCount: number

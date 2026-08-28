@@ -179,36 +179,61 @@ function getVersionPath(version: string, revision: string): string {
     <header class="flex flex-col gap-5">
       <div class="flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
         <div class="flex items-center gap-2">
-          <UIcon name="i-tabler-language" class="size-5" />
-          <h1 class="text-xl font-semibold -mt-0.75">번역 대시보드</h1>
+          <UIcon
+            name="i-tabler-language"
+            class="size-5"
+          />
+          <h1 class="text-xl font-semibold -mt-0.75">
+            번역 대시보드
+          </h1>
         </div>
 
         <div class="flex items-center gap-2">
-          <UButton to="/translate/editor" icon="i-tabler-arrow-right" color="info" variant="soft" size="md"
-            class="px-3 shrink-0 flex-row-reverse self-start">
+          <UButton
+            to="/translate/editor"
+            icon="i-tabler-arrow-right"
+            color="info"
+            variant="soft"
+            size="md"
+            class="px-3 shrink-0 flex-row-reverse self-start"
+          >
             번역하러 가기
           </UButton>
         </div>
       </div>
 
-      <!-- 상태 대시보드 -->
       <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <div class="flex flex-1 flex-col gap-2 p-4 bg-muted border border-default">
           <span class="text-xs text-muted">최신 버전</span>
           <ClientOnly>
-            <div v-if="isLoading" class="flex flex-col gap-1">
+            <div
+              v-if="isLoading"
+              class="flex flex-col gap-1"
+            >
               <USkeleton class="h-7 w-20" />
               <USkeleton class="h-4 w-28" />
             </div>
-            <div v-else class="flex flex-col gap-1">
-              <span class="truncate text-xl font-semibold"
-                :title="latestVersion ? getVersionLabel(latestVersion.version, latestVersion.revision) : undefined">
+            <div
+              v-else
+              class="flex flex-col gap-1"
+            >
+              <span
+                class="truncate text-xl font-semibold"
+                :title="latestVersion ? getVersionLabel(latestVersion.version, latestVersion.revision) : undefined"
+              >
                 {{ latestVersion ? getVersionLabel(latestVersion.version, latestVersion.revision) : '—' }}
               </span>
-              <time v-if="latestVersion" class="text-xs text-muted" :datetime="latestVersion.detectedAt">
+              <time
+                v-if="latestVersion"
+                class="text-xs text-muted"
+                :datetime="latestVersion.detectedAt"
+              >
                 {{ formatEditorDate(latestVersion.detectedAt) }}
               </time>
-              <span v-else class="text-xs text-muted">—</span>
+              <span
+                v-else
+                class="text-xs text-muted"
+              >—</span>
             </div>
             <template #fallback>
               <div class="flex flex-col gap-1">
@@ -222,8 +247,14 @@ function getVersionPath(version: string, revision: string): string {
         <div class="flex flex-1 flex-col gap-2 p-4 bg-muted border border-default">
           <span class="text-xs text-muted">전체 항목</span>
           <ClientOnly>
-            <USkeleton v-if="isLoading" class="h-7 w-20" />
-            <span v-else class="text-xl font-semibold">
+            <USkeleton
+              v-if="isLoading"
+              class="h-7 w-20"
+            />
+            <span
+              v-else
+              class="text-xl font-semibold"
+            >
               {{ formatEditorCount(overview.overall.total) }}개
             </span>
             <template #fallback>
@@ -232,17 +263,30 @@ function getVersionPath(version: string, revision: string): string {
           </ClientOnly>
         </div>
 
-        <div v-for="status in visibleStatuses" :key="status"
-          class="flex flex-1 flex-col gap-2 p-4 bg-muted border border-default" :class="`dashboard-card--${status}`">
-          <span class="text-xs" :class="EDITOR_STATUS_META[status].textColor">
+        <div
+          v-for="status in visibleStatuses"
+          :key="status"
+          class="flex flex-1 flex-col gap-2 p-4 bg-muted border border-default"
+          :class="`dashboard-card--${status}`"
+        >
+          <span
+            class="text-xs"
+            :class="EDITOR_STATUS_META[status].textColor"
+          >
             {{ EDITOR_STATUS_META[status].label }}
           </span>
           <ClientOnly>
-            <div v-if="isLoading" class="flex flex-col gap-1">
+            <div
+              v-if="isLoading"
+              class="flex flex-col gap-1"
+            >
               <USkeleton class="h-7 w-20" />
               <USkeleton class="h-4 w-28" />
             </div>
-            <div v-else class="flex flex-col gap-1">
+            <div
+              v-else
+              class="flex flex-col gap-1"
+            >
               <span class="text-xl font-medium">
                 {{ formatEditorPercent(overview.overall[status], overview.overall.total) }}
               </span>
@@ -260,78 +304,142 @@ function getVersionPath(version: string, revision: string): string {
         </div>
       </div>
 
-      <!-- 페이지 컨트롤러 -->
       <div class="flex items-center gap-3">
-        <!-- 목록 타입 -->
-        <UTabs v-model="listMode" :content="false" :items="items" color="neutral" size="sm"
-          :ui="{ trigger: 'h-7 leading-4 px-3', list: 'h-9 bg-elevated/50 p-1' }" class="w-fit" />
+        <UTabs
+          v-model="listMode"
+          :content="false"
+          :items="items"
+          color="neutral"
+          size="sm"
+          :ui="{ trigger: 'h-7 leading-4 px-3', list: 'h-9 bg-elevated/50 p-1' }"
+          class="w-fit"
+        />
 
-        <!-- 검색 -->
-        <UInput v-model="fileSearchValue" type="search" icon="i-tabler-search" color="neutral" variant="soft" size="lg"
+        <UInput
+          v-model="fileSearchValue"
+          type="search"
+          icon="i-tabler-search"
+          color="neutral"
+          variant="soft"
+          size="lg"
           :aria-label="listMode === 'category' ? '파일 검색' : '버전 검색'"
-          :placeholder="listMode === 'category' ? '파일 검색' : '버전 검색'" class="h-9"
-          :ui="{ base: 'h-9 leading-5', trailing: 'pe-1', leadingIcon: 'size-4' }">
-          <template v-if="fileSearchValue.length" #trailing>
-            <UButton color="neutral" variant="link" size="sm" icon="i-tabler-x" aria-label="검색어 지우기"
-              @click="fileSearchValue = ''" />
+          :placeholder="listMode === 'category' ? '파일 검색' : '버전 검색'"
+          class="h-9"
+          :ui="{ base: 'h-9 leading-5', trailing: 'pe-1', leadingIcon: 'size-4' }"
+        >
+          <template
+            v-if="fileSearchValue.length"
+            #trailing
+          >
+            <UButton
+              color="neutral"
+              variant="link"
+              size="sm"
+              icon="i-tabler-x"
+              aria-label="검색어 지우기"
+              @click="fileSearchValue = ''"
+            />
           </template>
         </UInput>
       </div>
     </header>
 
     <ClientOnly>
-      <div v-if="hasError" class="flex flex-col pt-5">
-        <UAlert class="mt-2" color="error" variant="soft" title="에디터 진행 상황을 불러오지 못했습니다." description="잠시 후 다시 시도해 주세요.">
+      <div
+        v-if="hasError"
+        class="flex flex-col pt-5"
+      >
+        <UAlert
+          class="mt-2"
+          color="error"
+          variant="soft"
+          title="에디터 진행 상황을 불러오지 못했습니다."
+          description="잠시 후 다시 시도해 주세요."
+        >
           <template #actions>
-            <UButton size="sm" color="error" variant="outline" @click="refreshOverview()">
+            <UButton
+              size="sm"
+              color="error"
+              variant="outline"
+              @click="refreshOverview()"
+            >
               다시 시도
             </UButton>
           </template>
         </UAlert>
       </div>
 
-      <div v-else-if="isLoading" class="flex flex-1 justify-center pt-5">
+      <div
+        v-else-if="isLoading"
+        class="flex flex-1 justify-center pt-5"
+      >
         <AppLoadingSpinner class="text-muted" />
       </div>
 
-      <div v-else-if="!visibleRows.length" class="flex flex-1 items-center justify-center pt-5">
+      <div
+        v-else-if="!visibleRows.length"
+        class="flex flex-1 items-center justify-center pt-5"
+      >
         <div class="flex flex-col items-center gap-2">
-          <UIcon :name="listMode === 'category' ? 'i-tabler-file-off' : 'i-tabler-tag-off'" class="size-8" />
+          <UIcon
+            :name="listMode === 'category' ? 'i-tabler-file-off' : 'i-tabler-tag-off'"
+            class="size-8"
+          />
           <span class="text-base font-medium">
             {{ hasRowsForMode ? '검색 결과가 없습니다.' : listMode === 'category' ? '등록된 카테고리가 없습니다.' : '등록된 버전이 없습니다.' }}
           </span>
           <span class="text-sm text-muted">
-            {{ hasRowsForMode ? (listMode === 'category' ? '다른 파일명을 검색해 보세요.' : '다른 버전을 검색해 보세요.') : listMode ===
-              'category'
+            {{ hasRowsForMode ? (listMode === 'category' ? '다른 파일명을 검색해 보세요.' : '다른 버전을 검색해 보세요.') : listMode
+              === 'category'
               ? '번역할 파일이 준비되면 이곳에 표시됩니다.' : '변경된 버전이 준비되면 이곳에 표시됩니다.' }}
           </span>
         </div>
       </div>
 
-      <div v-else class="flex flex-col pt-5 pb-20">
-        <div v-for="row in visibleRows" :key="row.key"
-          class="flex items-center hover:bg-muted first:border-t border-b border-default transition-colors">
-          <!-- 파일명 -->
-          <NuxtLink v-if="row.path" :to="row.path"
-            class="flex flex-1 items-center gap-2 py-3 pl-2 md:pl-3 min-w-0 text-sm hover:underline underline-offset-2">
-            <UIcon :name="listMode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
-              class="size-5 shrink-0 text-muted" />
+      <div
+        v-else
+        class="flex flex-col pt-5 pb-20"
+      >
+        <div
+          v-for="row in visibleRows"
+          :key="row.key"
+          class="flex items-center hover:bg-muted first:border-t border-b border-default transition-colors"
+        >
+          <NuxtLink
+            v-if="row.path"
+            :to="row.path"
+            class="flex flex-1 items-center gap-2 py-3 pl-2 md:pl-3 min-w-0 text-sm hover:underline underline-offset-2"
+          >
+            <UIcon
+              :name="listMode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
+              class="size-5 shrink-0 text-muted"
+            />
             <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
           </NuxtLink>
 
-          <div v-else class="flex flex-1 items-center gap-2 py-3 pl-2 md:pl-3 min-w-0 text-sm">
-            <UIcon :name="listMode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
-              class="size-5 shrink-0 text-muted" />
+          <div
+            v-else
+            class="flex flex-1 items-center gap-2 py-3 pl-2 md:pl-3 min-w-0 text-sm"
+          >
+            <UIcon
+              :name="listMode === 'category' ? 'i-tabler-file-filled' : 'i-tabler-tag-filled'"
+              class="size-5 shrink-0 text-muted"
+            />
             <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
           </div>
 
           <div class="flex items-center gap-4 pl-3 pr-1 md:pr-2">
-            <!-- 파일 상태별 비율 -->
             <div class="hidden sm:flex gap-3">
-              <UTooltip v-for="status in visibleStatuses" :key="status"
-                :text="`${EDITOR_STATUS_META[status].label} (${formatEditorCount(row.counts[status])}개)`">
+              <UTooltip
+                v-for="status in visibleStatuses"
+                :key="status"
+                :text="`${EDITOR_STATUS_META[status].label} (${formatEditorCount(row.counts[status])}개)`"
+              >
                 <div class="flex items-center gap-1 text-xs font-mono">
-                  <div class="size-1.5 rounded-full" :class="EDITOR_STATUS_META[status].color" />
+                  <div
+                    class="size-1.5 rounded-full"
+                    :class="EDITOR_STATUS_META[status].color"
+                  />
                   <span class="w-10 shrink-0">
                     {{ formatEditorPercent(row.counts[status], row.total) }}
                   </span>
@@ -339,11 +447,13 @@ function getVersionPath(version: string, revision: string): string {
               </UTooltip>
             </div>
 
-            <!-- 파일 진행도 바 -->
-            <TranslationProgressPopover :label="row.label" :counts="row.counts" :total="row.total"
-              aria-label="파일 번역 진행률" />
+            <TranslationProgressPopover
+              :label="row.label"
+              :counts="row.counts"
+              :total="row.total"
+              aria-label="파일 번역 진행률"
+            />
 
-            <!-- 파일 내 항목 갯수 -->
             <span class="w-12 shrink-0 text-xs font-mono">
               {{ formatEditorCount(row.total) }}
             </span>

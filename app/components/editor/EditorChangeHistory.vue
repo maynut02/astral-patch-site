@@ -368,7 +368,6 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
             </div>
 
             <div class="flex-1 pb-12 flex flex-col gap-4">
-              <!-- 작성자 -->
               <div class="flex items-center gap-2 text-xs text-muted">
                 <time
                   class="flex-1 shrink-0 text-xs text-muted"
@@ -377,7 +376,6 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                   {{ formatDate(history.entry.createdAt) }}
                 </time>
 
-                <!-- 버전 -->
                 <div
                   v-if="history.entry.action === 'source_changed' && formatSourceRevision(history.entry)"
                   class="flex items-center gap-1 text-xs"
@@ -390,7 +388,6 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                 </div>
               </div>
 
-              <!-- 통합 비교 -->
               <div
                 v-if="diffMode === 'unified'"
                 class="flex flex-col gap-3"
@@ -420,7 +417,6 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                 </div>
               </div>
 
-              <!-- 분할 비교 -->
               <div
                 v-else
                 class="flex flex-col gap-4 py-2"

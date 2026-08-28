@@ -104,7 +104,7 @@ function signRequest(config, method, objectKey, payloadHash, extraHeaders = {}) 
   const canonicalUri = `/${encodeS3Path(config.bucketName)}/${encodeS3Path(objectKey)}`
   const credentialScope = `${dateStamp}/${config.region}/s3/aws4_request`
   const headersToSign = {
-    host: config.host,
+    'host': config.host,
     'x-amz-content-sha256': payloadHash,
     'x-amz-date': amzDate,
     ...Object.fromEntries(
@@ -132,7 +132,7 @@ function signRequest(config, method, objectKey, payloadHash, extraHeaders = {}) 
   return {
     url: `${config.endpoint}${canonicalUri}`,
     headers: {
-      Authorization: `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+      'Authorization': `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
       'x-amz-content-sha256': payloadHash,
       'x-amz-date': amzDate,
       ...extraHeaders

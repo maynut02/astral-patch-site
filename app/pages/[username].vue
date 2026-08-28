@@ -93,12 +93,19 @@ useHead({ title: displayHandle })
     <UCard :ui="{ root: 'w-full max-w-md', body: 'px-5 py-8' }">
       <div class="flex flex-col items-center text-center">
         <div
-          class="flex size-20 items-center justify-center rounded-full bg-inverted text-4xl font-semibold text-inverted">
+          class="flex size-20 items-center justify-center rounded-full bg-inverted text-4xl font-semibold text-inverted"
+        >
           {{ initial }}
         </div>
 
-        <AppUserIdentity :handle="publicProfile.handle || handle" :role="publicProfile.role" :link="false"
-          text-class="text-2xl font-semibold text-default" icon-class="size-5" class="mt-5 gap-2" />
+        <AppUserIdentity
+          :handle="publicProfile.handle || handle"
+          :role="publicProfile.role"
+          :link="false"
+          text-class="text-2xl font-semibold text-default"
+          icon-class="size-5"
+          class="mt-5 gap-2"
+        />
       </div>
 
       <div class="mt-5 grid grid-cols-2 gap-3">
@@ -113,35 +120,85 @@ useHead({ title: displayHandle })
         </div>
       </div>
 
-      <div v-if="hasProfileDetails" class="mt-5 flex flex-col gap-5">
-        <div v-if="hasGameInfo" class="grid gap-3 sm:grid-cols-2 border-t border-default pt-5">
-          <div v-if="publicProfile.gameUid" class="min-w-0">
-            <p class="text-xs text-dimmed">게임 UID</p>
-            <button type="button" class="flex min-w-0 items-center gap-2 text-left group" title="클릭하여 복사"
-              aria-label="게임 UID 복사" @click="copyProfileValue(publicProfile.gameUid, '게임 UID')">
+      <div
+        v-if="hasProfileDetails"
+        class="mt-5 flex flex-col gap-5"
+      >
+        <div
+          v-if="hasGameInfo"
+          class="grid gap-3 sm:grid-cols-2 border-t border-default pt-5"
+        >
+          <div
+            v-if="publicProfile.gameUid"
+            class="min-w-0"
+          >
+            <p class="text-xs text-dimmed">
+              게임 UID
+            </p>
+            <button
+              type="button"
+              class="flex min-w-0 items-center gap-2 text-left group"
+              title="클릭하여 복사"
+              aria-label="게임 UID 복사"
+              @click="copyProfileValue(publicProfile.gameUid, '게임 UID')"
+            >
               <span class="mt-1 break-all text-sm font-medium text-default">{{ publicProfile.gameUid }}</span>
-              <UIcon name="i-tabler-copy" class="mt-1 size-3.5 shrink-0 text-dimmed group-hover:text-default" />
+              <UIcon
+                name="i-tabler-copy"
+                class="mt-1 size-3.5 shrink-0 text-dimmed group-hover:text-default"
+              />
             </button>
           </div>
 
-          <div v-if="publicProfile.gameInviteCode" class="min-w-0">
-            <p class="text-xs text-dimmed">게임 초대 코드</p>
-            <button type="button" class="flex min-w-0 items-center gap-2 text-left group" title="클릭하여 복사"
-              aria-label="게임 초대 코드 복사" @click="copyProfileValue(publicProfile.gameInviteCode, '게임 초대 코드')">
+          <div
+            v-if="publicProfile.gameInviteCode"
+            class="min-w-0"
+          >
+            <p class="text-xs text-dimmed">
+              게임 초대 코드
+            </p>
+            <button
+              type="button"
+              class="flex min-w-0 items-center gap-2 text-left group"
+              title="클릭하여 복사"
+              aria-label="게임 초대 코드 복사"
+              @click="copyProfileValue(publicProfile.gameInviteCode, '게임 초대 코드')"
+            >
               <span class="mt-1 break-all text-sm font-medium text-default">{{ publicProfile.gameInviteCode }}</span>
-              <UIcon name="i-tabler-copy" class="mt-1 size-3.5 shrink-0 text-dimmed group-hover:text-default" />
+              <UIcon
+                name="i-tabler-copy"
+                class="mt-1 size-3.5 shrink-0 text-dimmed group-hover:text-default"
+              />
             </button>
           </div>
         </div>
 
-        <div v-if="publicProfile.socialLinks.length" class="flex flex-col gap-2 border-t border-default pt-5">
-          <p class="text-xs text-dimmed">소셜미디어</p>
+        <div
+          v-if="publicProfile.socialLinks.length"
+          class="flex flex-col gap-2 border-t border-default pt-5"
+        >
+          <p class="text-xs text-dimmed">
+            소셜미디어
+          </p>
           <div class="flex flex-wrap gap-2">
-            <a v-for="link in socialLinks" :key="link.id" :href="link.url" target="_blank" rel="noopener noreferrer"
-          class="inline-flex min-w-0 items-center gap-2 bg-muted px-3 py-2 text-sm font-medium text-default transition-colors hover:bg-elevated">
-              <UIcon v-if="link.icon" :name="link.icon" class="size-4 shrink-0" />
+            <a
+              v-for="link in socialLinks"
+              :key="link.id"
+              :href="link.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex min-w-0 items-center gap-2 bg-muted px-3 py-2 text-sm font-medium text-default transition-colors hover:bg-elevated"
+            >
+              <UIcon
+                v-if="link.icon"
+                :name="link.icon"
+                class="size-4 shrink-0"
+              />
               <span class="max-w-48 truncate">{{ link.label }}</span>
-              <UIcon name="i-tabler-external-link" class="size-4 shrink-0 text-muted" />
+              <UIcon
+                name="i-tabler-external-link"
+                class="size-4 shrink-0 text-muted"
+              />
             </a>
           </div>
         </div>

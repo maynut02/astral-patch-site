@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
 import type { EditableUserProfile, UserSocialLink } from '#shared/types/profile'
+import type { UserRole } from '#shared/types/user'
 import { HANDLE_PATTERN, getTextLength } from './validation'
 import { getDatabase } from './database'
-import type { AppRole } from './auth-user'
 
 const GAME_VALUE_MAX_LENGTH = 64
 const SOCIAL_LINK_LABEL_MAX_LENGTH = 30
@@ -14,7 +14,7 @@ interface ProfileRow {
   googleSub: string
   email: string
   handle: string | null
-  role: AppRole
+  role: UserRole
   gameUid: string | null
   gameInviteCode: string | null
 }
@@ -28,7 +28,7 @@ interface SocialLinkRow {
 export interface SavedUserProfile extends EditableUserProfile {
   googleSub: string
   email: string
-  role: AppRole
+  role: UserRole
 }
 
 export type UserProfileUpdateInput = Record<string, unknown> & {

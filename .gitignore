@@ -1,4 +1,4 @@
-# Nuxt dev/build outputs
+# Nuxt 빌드 산출물
 .output
 .data
 .nuxt
@@ -6,25 +6,25 @@
 .cache
 dist
 
-# Node dependencies
+# 의존성
 node_modules
 .pnpm-store
 
-# Logs
+# 로그
 logs
 *.log
 
-# Misc
+# 로컬 도구
 .DS_Store
 .fleet
 .idea
 
-# Local env files
+# 로컬 환경변수
 .env
 .env.*
 !.env.example
 
-# Credentials / local database and backup artifacts
+# 자격 증명·DB·백업 파일
 .ssh/
 *.pem
 *.key
