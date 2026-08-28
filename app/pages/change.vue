@@ -6,9 +6,12 @@ import type {
   EditorSourceRevision,
   EditorSourceRevisionsResponse,
   EditorTranslationLogEntry,
-  EditorTranslationLogResponse
+  EditorTranslationLogResponse,
+  EditorTranslationLogSummary
 } from '#shared/types/editor'
+import type { EditorOverviewResponse } from '#shared/types/editor-overview'
 import {
+  formatEditorCount,
   formatEditorDate as formatDate,
   getEditorQueryString as getQueryString,
   normalizeEditorHandle as normalizeHandle
@@ -27,6 +30,16 @@ interface LogDiffValue {
   parts: EditorDiffPart[]
 }
 
+interface TranslationStatusMeta {
+  icon: string
+  containerClass: string
+  borderClass: string
+  resultIcon: string
+  resultIconClass: string
+  resultLabel: string
+  resultLabelClass: string
+}
+
 const ALL_STATUS_VALUE = '__all_status__'
 const LOG_PAGE_SIZE = 50
 const BOT_HANDLE = 'Bot'
@@ -40,6 +53,27 @@ const defaultTranslationData: EditorTranslationLogResponse = {
   page: 1,
   pageSize: LOG_PAGE_SIZE,
   totalPages: 1
+}
+
+const defaultTranslationSummaryData: EditorTranslationLogSummary = {
+  pending: 0,
+  approved: 0,
+  rejected: 0,
+  superseded: 0
+}
+
+function createDefaultOverview(): EditorOverviewResponse {
+  return {
+    overall: {
+      total: 0,
+      success: 0,
+      info: 0,
+      warning: 0,
+      untranslated: 0
+    },
+    categories: [],
+    versions: []
+  }
 }
 
 const defaultSourceRevisionsData: EditorSourceRevisionsResponse = {
@@ -81,6 +115,15 @@ const statusLabels: Record<EditorChangeStatus, string> = {
   superseded: '자동 종료'
 }
 
+const translationStatuses: EditorChangeStatus[] = ['pending', 'approved', 'rejected', 'superseded']
+
+const translationStatusTextColors: Record<EditorChangeStatus, string> = {
+  pending: 'text-warning',
+  approved: 'text-success',
+  rejected: 'text-error',
+  superseded: 'text-muted'
+}
+
 const sourceChangeLabels = {
   added: '원문 추가',
   modified: '원문 변경',
@@ -96,12 +139,7 @@ function getReviewerHandle(entry: EditorTranslationLogEntry): string {
 }
 
 function getReviewActionLabel(status: EditorChangeStatus): string {
-  return {
-    pending: '승인 대기',
-    approved: '승인',
-    rejected: '반려',
-    superseded: '종료'
-  }[status]
+  return getTranslationStatusMeta(status).resultLabel
 }
 
 function getPage(value: unknown): number {
@@ -140,6 +178,7 @@ const translationStatusFilter = ref(getInitialStatus(route.query.status))
 const translationPage = ref(activeTab.value === 'translations' ? initialPage : 1)
 const sourcePage = ref(activeTab.value === 'source' ? initialPage : 1)
 const sourceRevisionId = ref('')
+const pendingListScroll = ref<LogTab | null>(null)
 let applyingRouteQuery = false
 let pendingRouteQueryKey = ''
 
@@ -156,6 +195,27 @@ const { data: translationData, status: translationStatus, error: translationErro
     server: false,
     lazy: true
   })
+
+const {
+  data: translationSummaryData,
+  status: translationSummaryStatus,
+  error: translationSummaryError,
+  refresh: refreshTranslationSummary
+} = useFetch<EditorTranslationLogSummary>('/api/editor/log/summary', {
+  default: () => defaultTranslationSummaryData,
+  server: false,
+  lazy: true
+})
+
+const {
+  data: overviewData,
+  status: overviewStatus,
+  refresh: refreshOverview
+} = useFetch<EditorOverviewResponse>('/api/editor/overview', {
+  default: createDefaultOverview,
+  server: false,
+  lazy: true
+})
 
 const { data: sourceRevisionData, status: sourceRevisionStatus, error: sourceRevisionError, refresh: refreshSourceRevisions }
   = useFetch<EditorSourceRevisionsResponse>('/api/editor/log/source-revisions', {
@@ -228,6 +288,7 @@ watch(sourcePage, (page, previousPage) => {
     return
   }
 
+  pendingListScroll.value = 'source'
   syncLogRouteQuery()
   void refreshSourceChanges()
 })
@@ -235,15 +296,27 @@ watch(sourcePage, (page, previousPage) => {
 const translationEntries = computed(() => translationData.value?.entries ?? [])
 const translationTotal = computed(() => translationData.value?.total ?? 0)
 const translationTotalPages = computed(() => translationData.value?.totalPages ?? 1)
+const translationSummary = computed(() => translationSummaryData.value ?? defaultTranslationSummaryData)
+const overview = computed(() => overviewData.value ?? createDefaultOverview())
+const latestVersion = computed(() => overview.value.versions[0] ?? null)
 const sourceEntries = computed(() => sourceChangesData.value?.entries ?? [])
 const sourceTotal = computed(() => sourceChangesData.value?.total ?? 0)
 const sourceTotalPages = computed(() => sourceChangesData.value?.totalPages ?? 1)
+const isLoading = computed(() => overviewStatus.value === 'idle' || overviewStatus.value === 'pending')
 const translationLoading = computed(() => translationStatus.value === 'idle' || translationStatus.value === 'pending')
+const translationSummaryLoading = computed(() => translationSummaryStatus.value === 'idle' || translationSummaryStatus.value === 'pending')
 const sourceLoading = computed(() =>
   sourceRevisionStatus.value === 'idle'
   || sourceRevisionStatus.value === 'pending'
   || (Boolean(sourceRevisionId.value) && (sourceChangesStatus.value === 'idle' || sourceChangesStatus.value === 'pending'))
 )
+
+function getVersionLabel(version: string, revision: string): string {
+  const normalizedVersion = version.replace(/^v/i, '')
+  const normalizedRevision = revision.replace(/^r/i, '')
+
+  return `v${normalizedVersion} · r${normalizedRevision}`
+}
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -274,8 +347,57 @@ watch(translationStatusFilter, () => {
   syncLogRouteQuery()
 })
 
-watch(translationPage, () => {
+watch(translationPage, (page, previousPage) => {
+  if (page !== previousPage) {
+    pendingListScroll.value = 'translations'
+  }
+
   syncLogRouteQuery()
+})
+
+async function scrollPageToTopAfterLoad(tab: LogTab): Promise<void> {
+  if (pendingListScroll.value !== tab) {
+    return
+  }
+
+  pendingListScroll.value = null
+
+  if (activeTab.value !== tab) {
+    return
+  }
+
+  await nextTick()
+
+  if (!import.meta.client) {
+    return
+  }
+
+  window.scrollTo({
+    top: 0,
+    behavior: 'auto'
+  })
+}
+
+function clearPendingListScroll(tab: LogTab): void {
+  if (pendingListScroll.value === tab) {
+    pendingListScroll.value = null
+  }
+}
+
+watch(translationStatus, (status) => {
+  if (status === 'success') {
+    void scrollPageToTopAfterLoad('translations')
+  } else if (status === 'error') {
+    clearPendingListScroll('translations')
+  }
+})
+
+watch(sourceChangesStatus, (status) => {
+  if (status === 'success') {
+    void scrollPageToTopAfterLoad('source')
+  } else if (status === 'error') {
+    clearPendingListScroll('source')
+  }
 })
 
 watch(translationTotalPages, (value) => {
@@ -517,26 +639,43 @@ function getSourceDiffValues(entry: EditorSourceChangeEntry): LogDiffValue[] {
     })
 }
 
-function getTranslationStatusMeta(status: EditorChangeStatus): {
-  icon: string
-  containerClass: string
-} {
+function getTranslationStatusMeta(status: EditorChangeStatus): TranslationStatusMeta {
   return {
     pending: {
       icon: 'i-tabler-clock-hour-4',
-      containerClass: 'bg-warning/15 text-warning'
+      containerClass: 'bg-warning/15 text-warning',
+      borderClass: 'border-warning',
+      resultIcon: 'i-tabler-hourglass-empty',
+      resultIconClass: 'text-warning',
+      resultLabel: '승인 대기',
+      resultLabelClass: 'text-warning'
     },
     approved: {
       icon: 'i-tabler-check',
-      containerClass: 'bg-success/15 text-success'
+      containerClass: 'bg-success/15 text-success',
+      borderClass: 'border-success',
+      resultIcon: 'i-tabler-check',
+      resultIconClass: 'text-success',
+      resultLabel: '승인',
+      resultLabelClass: 'text-success'
     },
     rejected: {
       icon: 'i-tabler-x',
-      containerClass: 'bg-error/15 text-error'
+      containerClass: 'bg-error/15 text-error',
+      borderClass: 'border-error',
+      resultIcon: 'i-tabler-x',
+      resultIconClass: 'text-error',
+      resultLabel: '반려',
+      resultLabelClass: 'text-error'
     },
     superseded: {
       icon: 'i-tabler-replace',
-      containerClass: 'bg-elevated text-muted'
+      containerClass: 'bg-elevated text-muted',
+      borderClass: 'border-muted',
+      resultIcon: 'i-tabler-minus',
+      resultIconClass: 'text-muted',
+      resultLabel: '종료',
+      resultLabelClass: 'text-muted'
     }
   }[status]
 }
@@ -546,6 +685,14 @@ function getSourceToneClass(changeType: EditorSourceChangeEntry['changeType']): 
     added: 'bg-success/15 text-success',
     modified: 'bg-warning/15 text-warning',
     removed: 'bg-error/15 text-error'
+  }[changeType]
+}
+
+function getSourceBorderClass(changeType: EditorSourceChangeEntry['changeType']): string {
+  return {
+    added: 'border-success',
+    modified: 'border-warning',
+    removed: 'border-error'
   }[changeType]
 }
 
@@ -575,7 +722,11 @@ function getSourceRevisionLabel(): string {
 
 async function retryActiveLog() {
   if (activeTab.value === 'translations') {
-    await refreshTranslations()
+    await Promise.all([
+      refreshTranslations(),
+      refreshTranslationSummary(),
+      refreshOverview()
+    ])
     return
   }
 
@@ -584,31 +735,104 @@ async function retryActiveLog() {
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-400 flex-col gap-3 px-3 py-5 md:px-5">
-    <div class="flex items-center justify-between gap-5">
-      <h1 class="text-xl font-semibold md:text-2xl">
-        변경 기록
-      </h1>
-    </div>
+  <div class="flex flex-col h-full">
+    <header class="flex flex-col gap-5">
+      <div class="flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
+        <div class="flex items-center gap-2">
+          <UIcon name="i-tabler-history-toggle" class="size-5" />
+          <h1 class="text-xl font-semibold -mt-0.75">변경 기록</h1>
+        </div>
 
-    <div class="flex flex-col md:flex-row gap-3">
-      <UTabs :model-value="activeTab" :items="tabItems" :content="false" size="xs" color="neutral" class="w-fit"
-        :ui="{ trigger: 'px-3', list: 'bg-muted' }" @update:model-value="updateActiveTab" />
-
-      <div v-if="activeTab === 'translations'" class="flex gap-3 items-center">
-        <UInput v-model="translationSearchInput" icon="i-tabler-search" color="neutral" variant="soft" placeholder="검색"
-          class="w-full sm:flex-1" />
-        <USelect v-model="translationStatusFilter" :items="statusItems" color="neutral" variant="soft" class="w-28" />
+        <div class="flex items-center gap-2">
+          <UButton to="/translate/editor" icon="i-tabler-arrow-right" color="info" variant="soft" size="md"
+            class="px-3 shrink-0 flex-row-reverse self-start">
+            번역하러 가기
+          </UButton>
+        </div>
       </div>
 
-      <div v-else class="flex gap-3 items-center">
-        <USelect :model-value="sourceRevisionId" :items="sourceRevisionItems" color="neutral" variant="soft"
-          class="w-full sm:w-48" :disabled="!sourceRevisionItems.length" @update:model-value="selectSourceRevision" />
+      <!-- 상태 대시보드 -->
+      <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+        <div class="flex flex-1 flex-col gap-2 p-4 bg-elevated/50 border border-default max-md:col-span-2">
+          <span class="text-xs text-muted">최신 버전</span>
+          <ClientOnly>
+            <div v-if="isLoading" class="flex flex-col gap-1">
+              <USkeleton class="h-7 w-20" />
+              <USkeleton class="h-4 w-28" />
+            </div>
+            <div v-else class="flex flex-col gap-1">
+              <span class="truncate text-xl font-semibold"
+                :title="latestVersion ? getVersionLabel(latestVersion.version, latestVersion.revision) : undefined">
+                {{ latestVersion ? getVersionLabel(latestVersion.version, latestVersion.revision) : '—' }}
+              </span>
+              <time v-if="latestVersion" class="text-xs text-muted" :datetime="latestVersion.detectedAt">
+                {{ formatEditorDate(latestVersion.detectedAt) }}
+              </time>
+              <span v-else class="text-xs text-muted">—</span>
+            </div>
+            <template #fallback>
+              <div class="flex flex-col gap-1">
+                <USkeleton class="h-7 w-20" />
+                <USkeleton class="h-4 w-28" />
+              </div>
+            </template>
+          </ClientOnly>
+        </div>
+
+        <div v-for="status in translationStatuses" :key="status"
+          class="flex flex-col gap-2 p-4 bg-elevated/50 border border-default">
+          <span class="text-xs" :class="translationStatusTextColors[status]">
+            {{ statusLabels[status] }}
+          </span>
+          <ClientOnly>
+            <USkeleton v-if="translationSummaryLoading" class="h-7 w-20" />
+            <span v-else-if="translationSummaryError" class="text-xl font-semibold text-muted">—</span>
+            <span v-else class="text-xl font-semibold">
+              {{ formatEditorCount(translationSummary[status]) }}개
+            </span>
+            <template #fallback>
+              <USkeleton class="h-7 w-20" />
+            </template>
+          </ClientOnly>
+        </div>
       </div>
-    </div>
+
+      <!-- 페이지 컨트롤러 -->
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- 목록 타입 -->
+        <UTabs :model-value="activeTab" :items="tabItems" :content="false" size="sm" color="neutral" class="w-fit"
+          :ui="{ trigger: 'h-7 leading-4 px-3', list: 'h-9 bg-elevated/50 p-1' }"
+          @update:model-value="updateActiveTab" />
+
+        <div v-if="activeTab === 'translations'" class="flex gap-3 items-center">
+          <!-- 검색 -->
+          <UInput v-model="translationSearchInput" icon="i-tabler-search" color="neutral" variant="soft" size="lg"
+            placeholder="검색" class="h-9 w-full sm:flex-1" :ui="{ base: 'h-9 leading-5' }" />
+          <!-- 항목 상태 -->
+          <USelect v-model="translationStatusFilter" :items="statusItems" color="neutral" variant="soft" size="lg"
+            class="h-9 w-32" :ui="{ base: 'h-9 leading-5' }" />
+        </div>
+
+        <div v-else class="flex gap-3 items-center">
+          <!-- 버전 선택 -->
+          <USelect :model-value="sourceRevisionId" :items="sourceRevisionItems" color="neutral" variant="soft" size="lg"
+            class="h-9 w-48" :ui="{ base: 'h-9 leading-5' }" :disabled="!sourceRevisionItems.length"
+            @update:model-value="selectSourceRevision" />
+        </div>
+      </div>
+    </header>
 
     <ClientOnly>
       <section v-if="activeTab === 'translations'" class="flex flex-col">
+        <div v-if="translationLoading && translationEntries.length"
+          class="pointer-events-none sticky top-16 z-30 flex justify-center md:top-4" role="status" aria-live="polite">
+          <div
+            class="absolute flex items-center gap-2 bg-elevated/80 px-3 py-2 text-sm text-muted shadow-sm backdrop-blur-lg">
+            <UIcon name="i-tabler-loader-2" class="size-4 animate-spin" />
+            <span>불러오는 중</span>
+          </div>
+        </div>
+
         <UAlert v-if="translationError" class="my-4" color="error" variant="soft" title="번역 변경 기록을 불러오지 못했습니다."
           description="잠시 후 다시 시도해 주세요.">
           <template #actions>
@@ -627,76 +851,65 @@ async function retryActiveLog() {
           icon="i-tabler-history-off" title="번역 수정 기록이 없습니다."
           description="검색어나 상태 조건을 바꿔 보거나, 아직 저장된 번역 수정이 없는지 확인해 주세요." />
 
-        <div v-else-if="translationEntries.length" class="relative flex flex-col">
-          <div v-if="translationLoading" class="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center">
-            <div
-              class="flex items-center gap-2 rounded-lg bg-elevated/80 px-3 py-2 text-xs text-muted shadow-sm backdrop-blur-lg">
-              <UIcon name="i-tabler-loader-2" class="size-4 animate-spin" />
-              <span>불러오는 중</span>
-            </div>
-          </div>
-          <span class="shrink-0 text-xs text-muted pb-3">
+        <div v-else-if="translationEntries.length" class="relative flex flex-col gap-5 pt-5">
+          <span class="shrink-0 text-xs text-muted">
             총 {{ translationTotal.toLocaleString() }}건
           </span>
 
-          <article v-for="(entry, index) in translationEntries" :key="entry.id"
-            class="flex flex-col pt-1 transition-colors rounded-lg">
-            <div class="flex items-center gap-2">
-              <div class="flex size-6 shrink-0 items-center justify-center rounded-full"
-                :class="getTranslationStatusMeta(entry.status).containerClass" :title="statusLabels[entry.status]"
-                :aria-label="statusLabels[entry.status]">
-                <UIcon :name="getTranslationStatusMeta(entry.status).icon" class="size-4" />
+          <!-- 항목 카드 -->
+          <article v-for="entry in translationEntries" :key="entry.id"
+            class="flex flex-col border-l-2 border-r border-r-default max-md:-ml-0.5"
+            :class="getTranslationStatusMeta(entry.status).borderClass">
+            <!-- diff -->
+            <p
+              class="min-h-5 whitespace-pre-wrap wrap-break-word p-3 md:px-5 md:py-4 text-sm leading-6 bg-muted border-y border-default">
+              <template v-for="(part, partIndex) in getTranslationDiffParts(entry)" :key="`${part.type}-${partIndex}`">
+                <span :class="part.type === 'removed'
+                  ? 'bg-error/10 text-error'
+                  : part.type === 'added'
+                    ? 'bg-success/10 text-success'
+                    : 'text-toned'">{{ part.text }}</span>
+              </template>
+            </p>
+
+            <!-- 항목 정보 -->
+            <div class="flex flex-col gap-2 p-3 md:px-5 md:py-4 border-b border-default text-xs">
+              <!-- 파일명 -->
+              <div class="flex items-center gap-1.5">
+                <UIcon name="i-tabler-file-filled" class="size-3.5 text-muted" />
+                <NuxtLink :to="{
+                  path: '/translate/editor',
+                  query: {
+                    file: entry.category,
+                    search: `${entry.category}_${entry.unitKey}`,
+                    searchType: 'key',
+                    match: 'exact',
+                    page: '1'
+                  }
+                }" class="min-w-0 truncate hover:underline underline-offset-2"
+                  :title="`${entry.category}_${entry.unitKey}`">
+                  {{ entry.category }}_{{ entry.unitKey }}
+                </NuxtLink>
               </div>
 
-              <NuxtLink :to="{
-                path: '/translate/editor',
-                query: {
-                  file: entry.category,
-                  search: `${entry.category}_${entry.unitKey}`,
-                  searchType: 'key',
-                  match: 'exact',
-                  page: '1'
-                }
-              }" class="min-w-0 flex-1 truncate text-sm font-medium text-default hover:underline underline-offset-2"
-                :title="`${entry.category}_${entry.unitKey}`">
-                {{ entry.category }}_{{ entry.unitKey }}
-              </NuxtLink>
-            </div>
-
-            <div class="flex gap-2">
-              <div class="flex w-6 shrink-0 justify-center pt-1">
-                <div v-if="index < translationEntries.length - 1" class="w-0.5 rounded-lg bg-elevated" />
+              <!-- 작성자 -->
+              <div class="flex min-w-0 items-center gap-1.5">
+                <UIcon name="i-tabler-git-pull-request" class="size-3.5 text-muted" />
+                <AppUserIdentity :handle="getTranslationHandle(entry)" :role="entry.actorRole" text-class="text-xs"
+                  icon-class="size-3.5" stop-propagation />
+                <time class="text-muted" :datetime="entry.createdAt">{{ formatDate(entry.createdAt) }}</time>
               </div>
 
-              <div class="flex min-w-0 flex-1 flex-col gap-4 pb-12">
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
-                  <span class="flex min-w-0 items-center gap-1.5">
-                    <span class="text-dimmed">생성</span>
-                    <time :datetime="entry.createdAt">{{ formatDate(entry.createdAt) }}</time>
-                    <span aria-hidden="true">·</span>
-                    <AppUserIdentity :handle="getTranslationHandle(entry)" :role="entry.actorRole"
-                      text-class="text-xs text-muted" icon-class="size-3.5" stop-propagation />
-                  </span>
-
-                  <span v-if="entry.reviewedAt" class="flex min-w-0 items-center gap-1.5">
-                    <span class="text-dimmed">{{ getReviewActionLabel(entry.status) }}</span>
-                    <time :datetime="entry.reviewedAt">{{ formatDate(entry.reviewedAt) }}</time>
-                    <span aria-hidden="true">·</span>
-                    <AppUserIdentity :handle="getReviewerHandle(entry)" :role="entry.reviewerRole" fallback="시스템"
-                      text-class="text-xs text-muted" icon-class="size-3.5" stop-propagation />
-                  </span>
-                </div>
-
-                <p class="min-h-5 whitespace-pre-wrap wrap-break-word px-3 py-2 bg-muted rounded-lg text-sm leading-6">
-                  <template v-for="(part, partIndex) in getTranslationDiffParts(entry)"
-                    :key="`${part.type}-${partIndex}`">
-                    <span :class="part.type === 'removed'
-                      ? 'bg-error/10 text-error'
-                      : part.type === 'added'
-                        ? 'bg-success/10 text-success'
-                        : 'text-toned'">{{ part.text }}</span>
-                  </template>
-                </p>
+              <!-- 처리 결과 -->
+              <div v-if="entry.reviewedAt" class="flex min-w-0 items-center gap-1.5">
+                <UIcon :name="getTranslationStatusMeta(entry.status).resultIcon" class="size-3.5"
+                  :class="getTranslationStatusMeta(entry.status).resultIconClass" />
+                <span :class="getTranslationStatusMeta(entry.status).resultLabelClass">
+                  {{ getReviewActionLabel(entry.status) }}
+                </span>
+                <AppUserIdentity :handle="getReviewerHandle(entry)" :role="entry.reviewerRole" fallback="시스템"
+                  text-class="text-xs" icon-class="size-3.5" stop-propagation />
+                <time class="text-muted" :datetime="entry.reviewedAt">{{ formatDate(entry.reviewedAt) }}</time>
               </div>
             </div>
           </article>
@@ -704,23 +917,29 @@ async function retryActiveLog() {
 
         <div v-if="translationTotal" class="sticky bottom-4 z-20 flex justify-center pt-5 pointer-events-none">
           <EditorPageController v-model:page="translationPage" :total-pages="translationTotalPages"
-            :disabled="translationLoading" class="pointer-events-auto" />
+            :disabled="translationLoading" class="relative pointer-events-auto" />
         </div>
       </section>
 
-      <section v-else class="flex flex-col">
-        <span class="shrink-0 text-xs text-muted pb-3">
-          총 {{ sourceTotal.toLocaleString() }}건
-        </span>
-
+      <!-- 원문 변경 -->
+      <section v-else class="flex flex-col pt-5">
         <div v-if="selectedRevision"
-          class="flex flex-wrap items-center gap-x-3 gap-y-2 bg-muted rounded-md px-4 py-3 text-xs text-muted">
+          class="flex flex-wrap items-center gap-x-3 gap-y-2 bg-muted px-4 py-3 text-xs text-muted border border-default">
           <span class="font-medium text-toned">{{ getSourceRevisionLabel() }}</span>
-          <span>생성: {{ formatDate(selectedRevision.detectedAt) }}</span>
+          <span>{{ formatDate(selectedRevision.detectedAt) }}</span>
           <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
             <span class="text-success">추가 {{ selectedRevision.addedCount }}</span>
             <span class="text-warning">수정 {{ selectedRevision.modifiedCount }}</span>
             <span class="text-error">삭제 {{ selectedRevision.removedCount }}</span>
+          </div>
+        </div>
+
+        <div v-if="sourceLoading && sourceEntries.length"
+          class="pointer-events-none sticky top-16 z-30 flex justify-center md:top-4" role="status" aria-live="polite">
+          <div
+            class="absolute flex items-center gap-2 bg-elevated/80 px-3 py-2 text-sm text-muted shadow-sm backdrop-blur-lg">
+            <UIcon name="i-tabler-loader-2" class="size-4 animate-spin" />
+            <span>불러오는 중</span>
           </div>
         </div>
 
@@ -745,75 +964,71 @@ async function retryActiveLog() {
           color="neutral" variant="soft" icon="i-tabler-file-search" title="선택한 버전에 변경 항목이 없습니다."
           description="다른 버전·리비전을 선택해 보세요." />
 
-        <div v-else-if="sourceEntries.length" class="relative flex flex-col pt-3">
-          <div v-if="sourceLoading" class="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center">
-            <div
-              class="flex items-center gap-2 rounded-lg bg-elevated/80 px-3 py-2 text-xs text-muted shadow-sm backdrop-blur-lg">
-              <UIcon name="i-tabler-loader-2" class="size-4 animate-spin" />
-              <span>불러오는 중</span>
-            </div>
-          </div>
-          <article v-for="(entry, index) in sourceEntries" :key="entry.id" class="flex flex-col pt-1 transition-colors">
-            <div class="flex items-center gap-2">
-              <div class="flex size-6 shrink-0 items-center justify-center rounded-full"
-                :class="getSourceToneClass(entry.changeType)">
-                <UIcon :name="getSourceActionIcon(entry.changeType)" class="size-4" />
-              </div>
+        <div v-else-if="sourceEntries.length" class="relative flex flex-col gap-5 pt-5">
+          <span class="shrink-0 text-xs text-muted">
+            총 {{ sourceTotal.toLocaleString() }}건
+          </span>
 
-              <NuxtLink :to="{
-                path: '/translate/editor',
-                query: {
-                  file: entry.category,
-                  search: `${entry.category}_${entry.unitKey}`,
-                  searchType: 'key',
-                  match: 'exact',
-                  page: '1'
-                }
-              }" class="min-w-0 flex-1 truncate text-sm font-medium text-default hover:underline underline-offset-2"
-                :title="`${entry.category}_${entry.unitKey}`">
-                {{ entry.category }}_{{ entry.unitKey }}
-              </NuxtLink>
+          <article v-for="entry in sourceEntries" :key="entry.id"
+            class="flex flex-col border-l-2 border-r border-r-default max-md:-ml-0.5"
+            :class="getSourceBorderClass(entry.changeType)">
+            <!-- diff -->
+            <div class="flex flex-col gap-3 p-3 md:px-5 md:py-4 bg-muted border-y border-default">
+              <div v-for="value in getSourceDiffValues(entry)" :key="value.key" class="flex min-w-0 flex-col gap-0.5">
+                <span class="block text-[10px] text-dimmed">{{ value.label }}</span>
+                <p class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6">
+                  <template v-for="(part, partIndex) in value.parts" :key="`${part.type}-${partIndex}`">
+                    <span :class="part.type === 'removed'
+                      ? 'bg-error/10 text-error'
+                      : part.type === 'added'
+                        ? 'bg-success/10 text-success'
+                        : 'text-toned'">{{ part.text }}</span>
+                  </template>
+                </p>
+              </div>
             </div>
 
-            <div class="flex gap-2">
-              <div class="flex w-6 shrink-0 justify-center pt-1">
-                <div v-if="index < sourceEntries.length - 1" class="w-0.5 rounded-lg bg-elevated" />
+            <!-- 항목 정보 -->
+            <div class="flex flex-col gap-2 p-3 md:px-5 md:py-4 border-b border-default text-xs">
+              <!-- 파일명 -->
+              <div class="flex items-center gap-1.5">
+                <UIcon name="i-tabler-file-filled" class="size-3.5 text-muted" />
+                <NuxtLink :to="{
+                  path: '/translate/editor',
+                  query: {
+                    file: entry.category,
+                    search: `${entry.category}_${entry.unitKey}`,
+                    searchType: 'key',
+                    match: 'exact',
+                    page: '1'
+                  }
+                }" class="min-w-0 truncate hover:underline underline-offset-2"
+                  :title="`${entry.category}_${entry.unitKey}`">
+                  {{ entry.category }}_{{ entry.unitKey }}
+                </NuxtLink>
               </div>
 
-              <div class="flex min-w-0 flex-1 flex-col gap-4 pb-12">
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
-                  <span class="font-medium" :class="getSourceTextClass(entry.changeType)">
-                    {{ sourceChangeLabels[entry.changeType] }}
-                  </span>
-                  <span class="flex min-w-0 items-center gap-1.5">
-                    <span class="text-dimmed">생성</span>
-                    <time :datetime="entry.createdAt">{{ formatDate(entry.createdAt) }}</time>
-                    <span aria-hidden="true">·</span>
-                    <AppUserIdentity :handle="BOT_HANDLE" role="bot" text-class="text-xs text-muted"
-                      icon-class="size-3.5" stop-propagation />
-                  </span>
-                  <span class="flex items-center gap-1">
-                    <UIcon name="i-tabler-tag" class="size-3" />
-                    {{ getSourceRevisionLabel() }}
-                  </span>
-                </div>
+              <!-- 감지 정보 -->
+              <div class="flex min-w-0 items-center gap-1.5">
+                <UIcon name="i-tabler-git-pull-request" class="size-3.5 text-muted" />
+                <AppUserIdentity :handle="BOT_HANDLE" role="bot" text-class="text-xs" icon-class="size-3.5"
+                  stop-propagation />
+                <time class="text-muted" :datetime="entry.createdAt">{{ formatDate(entry.createdAt) }}</time>
+              </div>
 
-                <div class="flex flex-col gap-4 py-2">
-                  <div v-for="value in getSourceDiffValues(entry)" :key="value.key"
-                    class="flex min-w-0 flex-col gap-0.5">
-                    <span class="block text-[10px] text-dimmed">{{ value.label }}</span>
-                    <p
-                      class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6 px-3 py-2 bg-muted rounded-lg">
-                      <template v-for="(part, partIndex) in value.parts" :key="`${part.type}-${partIndex}`">
-                        <span :class="part.type === 'removed'
-                          ? 'bg-error/10 text-error'
-                          : part.type === 'added'
-                            ? 'bg-success/10 text-success'
-                            : 'text-toned'">{{ part.text }}</span>
-                      </template>
-                    </p>
-                  </div>
-                </div>
+              <!-- 변경 유형 -->
+              <div class="flex items-center gap-1.5">
+                <UIcon :name="getSourceActionIcon(entry.changeType)" class="size-3.5"
+                  :class="getSourceTextClass(entry.changeType)" />
+                <span :class="getSourceTextClass(entry.changeType)">
+                  {{ sourceChangeLabels[entry.changeType] }}
+                </span>
+              </div>
+
+              <!-- 버전 -->
+              <div class="flex items-center gap-1.5 text-muted">
+                <UIcon name="i-tabler-tag" class="size-3.5" />
+                <span>{{ getSourceRevisionLabel() }}</span>
               </div>
             </div>
           </article>
@@ -821,7 +1036,7 @@ async function retryActiveLog() {
 
         <div v-if="sourceTotal" class="sticky bottom-4 z-20 flex justify-center pt-5 pointer-events-none">
           <EditorPageController v-model:page="sourcePage" :total-pages="sourceTotalPages" :disabled="sourceLoading"
-            class="pointer-events-auto" />
+            class="relative pointer-events-auto" />
         </div>
       </section>
 

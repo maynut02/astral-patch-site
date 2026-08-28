@@ -1663,7 +1663,7 @@ watch(items, (nextItems) => {
           class="flex shrink-0 flex-wrap gap-1.5 border-b border-default bg-muted p-1.5 sm:gap-2 sm:p-2 md:flex-nowrap">
           <div class="flex w-full min-w-0 flex-1 gap-1 md:w-auto">
             <UInput v-model="searchInput" size="lg" color="neutral" variant="ghost" placeholder="검색"
-              class="min-w-0 max-md:flex-1" :ui="{ base: 'px-2', trailing: 'pe-1.5' }"
+              class="min-w-0 max-md:flex-1" :ui="{ base: 'h-9 leading-5 px-2', trailing: 'pe-1.5' }"
               @keydown.enter.prevent="applySearch">
               <template #trailing>
                 <UButton icon="i-tabler-search" color="neutral" variant="link" size="md" aria-label="검색"
@@ -1685,7 +1685,7 @@ watch(items, (nextItems) => {
                 <div class="flex min-w-40 flex-col p-1.5">
                   <span class="px-2 py-1 text-xs font-medium text-dimmed">검색 범위</span>
                   <button v-for="option in searchTypeOptions" :key="option.key" type="button"
-                    class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                    class="flex items-center gap-2 px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
                     @click="void selectSearchType(option.key)">
                     <UIcon v-if="searchType === option.key" name="i-tabler-check" class="size-4" />
                     <span v-else class="size-4" />
@@ -1695,7 +1695,7 @@ watch(items, (nextItems) => {
                   <div class="mt-2 border-t border-default pt-2">
                     <span class="px-2 py-1 text-xs font-medium text-dimmed">검색 옵션</span>
                     <button v-for="option in searchMatchOptions" :key="option.key" type="button"
-                      class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                      class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
                       @click="void selectSearchMatch(option.key)">
                       <UIcon v-if="searchMatch === option.key" name="i-tabler-check" class="size-4" />
                       <span v-else class="size-4" />
@@ -1721,7 +1721,7 @@ watch(items, (nextItems) => {
                   <span class="px-2 py-1 text-xs font-medium text-dimmed">보기 설정</span>
                   <button v-for="option in viewFilterOptions" :key="option.key" type="button"
                     :disabled="option.disabled"
-                    class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
+                    class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
                     @click="selectViewFilter(option.key)">
                     <UIcon v-if="viewFilter === option.key" name="i-tabler-check" class="size-4" />
                     <span v-else class="size-4" />
@@ -1756,13 +1756,13 @@ watch(items, (nextItems) => {
               <template #content>
                 <div class="flex min-w-56 flex-col p-1.5">
                   <button type="button"
-                    class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
+                    class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
                     :disabled="!selectedItemId" @click="void copySelectedItemLink()">
                     <UIcon name="i-tabler-link" class="size-4 shrink-0" />
                     <span>선택 항목 링크 복사</span>
                   </button>
                   <button type="button"
-                    class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
+                    class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed! disabled:opacity-50"
                     :disabled="!currentPageDraftCount" @click="revertCurrentPageDrafts">
                     <UIcon name="i-tabler-arrow-back-up" class="size-4 shrink-0" />
                     <span>현재 페이지 변경사항 되돌리기</span>
@@ -1777,7 +1777,7 @@ watch(items, (nextItems) => {
         <div class="relative flex min-h-0 flex-1">
           <div v-if="isLoading" class="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center">
             <div
-              class="flex items-center gap-3 rounded-md bg-elevated/50 backdrop-blur-lg px-3 py-2 text-sm text-muted">
+              class="flex items-center gap-3 bg-elevated/50 backdrop-blur-lg px-3 py-2 text-sm text-muted">
               <UIcon name="i-tabler-loader-2" class="size-4 animate-spin" />
               <span>불러오는 중...</span>
             </div>
@@ -1787,7 +1787,7 @@ watch(items, (nextItems) => {
             <div class="flex flex-col bg-muted/60">
               <div v-if="activeFilterTags.length" class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1">
                 <div v-for="tag in activeFilterTags" :key="tag.key"
-                  class="flex min-w-0 max-w-full items-center gap-1 rounded-md bg-elevated px-2 py-1">
+                  class="flex min-w-0 max-w-full items-center gap-1 bg-elevated px-2 py-1">
                   <span class="truncate text-xs">{{ tag.label }}: {{ tag.value }}</span>
                   <UButton icon="i-tabler-x" color="neutral" variant="link" size="xs"
                     class="size-5 justify-center shrink-0 p-0" :aria-label="`${tag.label} 제거`"
@@ -1872,7 +1872,7 @@ watch(items, (nextItems) => {
           <EditorPageController
             v-model:page="page"
             :total-pages="totalPages"
-            class="absolute bottom-4 left-1/2 -translate-x-1/2 self-end lg:left-auto lg:right-4 lg:translate-x-0"
+            class="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 self-end lg:left-auto lg:right-4 lg:translate-x-0"
           />
         </div>
       </main>
@@ -1897,12 +1897,12 @@ watch(items, (nextItems) => {
               <!-- 목록 옵션 -->
               <UTabs v-model="sidebarListMode" :content="false"
                 :items="[{ label: '파일', value: 'category' }, { label: '버전', value: 'version' }]" color="neutral"
-                size="xs" :ui="{ trigger: 'px-3', list: 'bg-elevated/50' }" class="w-fit" />
+                size="xs" :ui="{ trigger: 'h-6 px-3 leading-4', list: 'bg-elevated/50' }" class="w-fit" />
 
               <!-- 파일/버전 검색 -->
               <UInput v-model="sidebarListSearch" icon="i-tabler-search" color="neutral" variant="soft"
                 class="w-full min-w-0" :placeholder="sidebarListMode === 'category' ? '파일 검색' : '버전 검색'"
-                :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }">
+                :ui="{ base: 'h-8 leading-5', trailing: 'pe-1', leadingIcon: 'size-4' }">
                 <template v-if="sidebarListSearch.length" #trailing>
                   <UButton color="neutral" variant="link" size="sm" icon="i-tabler-x" aria-label="검색어 지우기"
                     @click="sidebarListSearch = ''" />
@@ -1965,13 +1965,14 @@ watch(items, (nextItems) => {
               <div v-if="!dictionarySelection" class="flex min-h-0 flex-1 flex-col">
                 <div class="shrink-0 p-3 pb-0">
                   <UTabs v-model="dictionaryPanelView" :content="false" :items="dictionaryPanelTabs" color="neutral"
-                    size="xs" :ui="{ trigger: 'px-3', list: 'bg-elevated/50' }" class="w-fit" />
+                    size="xs" :ui="{ trigger: 'h-6 px-3 leading-4', list: 'bg-elevated/50' }" class="w-fit" />
                 </div>
 
                 <template v-if="dictionaryPanelView === 'search'">
                   <div class="flex shrink-0 gap-2 border-b border-default p-3">
                     <UInput v-model="dictionarySearchInput" color="neutral" variant="soft" class="w-full"
-                      placeholder="전체 검색" :ui="{ trailing: 'pe-1' }" @keydown.enter.prevent="runDictionarySearch">
+                      placeholder="전체 검색" :ui="{ base: 'h-8 leading-5', trailing: 'pe-1' }"
+                      @keydown.enter.prevent="runDictionarySearch">
                       <template #trailing>
                         <UButton v-if="dictionarySearchInput.length" color="neutral" variant="link" size="sm"
                           icon="i-tabler-x" aria-label="검색어 지우기" @click="dictionarySearchInput = ''" />
@@ -2079,7 +2080,7 @@ watch(items, (nextItems) => {
                     <div class="flex shrink-0 gap-2 border-b border-default p-3">
                       <UInput v-model="dictionaryEntriesSearchInput" icon="i-tabler-search" color="neutral"
                         variant="soft" class="w-full" placeholder="용어 검색"
-                        :ui="{ trailing: 'pe-1', leadingIcon: 'size-4' }"
+                        :ui="{ base: 'h-8 leading-5', trailing: 'pe-1', leadingIcon: 'size-4' }"
                         @keydown.enter.prevent="runDictionaryEntrySearch">
                         <template #trailing>
                           <UButton v-if="dictionaryEntriesSearchInput.length" color="neutral" variant="link" size="sm"
@@ -2194,7 +2195,7 @@ watch(items, (nextItems) => {
                       @submit="createDictionary">
                       <UFormField name="name" label="이름" required>
                         <UInput v-model="dictionaryForm.name" color="neutral" maxlength="100" placeholder="용어집 이름"
-                          class="w-full" />
+                          class="w-full" :ui="{ base: 'h-8 leading-5' }" />
                       </UFormField>
                       <UFormField name="description" label="설명">
                         <UTextarea v-model="dictionaryForm.description" color="neutral" :rows="3" maxlength="500"
@@ -2203,7 +2204,7 @@ watch(items, (nextItems) => {
                       <UFormField name="visibility" label="공개 범위">
                         <USelect v-model="dictionaryForm.visibility" color="neutral"
                           :items="[{ label: '공개', value: 'public' }, { label: '비공개', value: 'private' }]"
-                          class="w-full" />
+                          class="w-full" :ui="{ base: 'h-8 leading-5' }" />
                       </UFormField>
                       <p v-if="dictionaryModalError" class="text-sm text-error">
                         {{ dictionaryModalError }}
@@ -2372,7 +2373,7 @@ watch(items, (nextItems) => {
 
                 <div class="flex flex-col text-sm">
                   <button v-for="language in displayLanguageOptions" :key="language.key" type="button"
-                    class="flex items-center gap-2 rounded-xl py-1 pl-1 transition-colors hover:bg-muted"
+                    class="flex items-center gap-2 py-1 pl-1 transition-colors hover:bg-muted"
                     :class="displayLanguages.includes(language.key) ? 'text-default' : 'text-dimmed hover:text-toned'"
                     :aria-pressed="displayLanguages.includes(language.key)"
                     @click="toggleDisplayLanguage(language.key)">
@@ -2390,7 +2391,7 @@ watch(items, (nextItems) => {
 
                 <div class="flex flex-col text-sm">
                   <button v-for="mode in diffModeOptions" :key="mode.key" type="button"
-                    class="flex items-start gap-2 rounded-xl py-1 pl-1 text-left transition-colors hover:bg-muted"
+                    class="flex items-start gap-2 py-1 pl-1 text-left transition-colors hover:bg-muted"
                     :class="diffMode === mode.key ? 'text-default' : 'text-dimmed hover:text-toned'"
                     :aria-pressed="diffMode === mode.key" @click="diffMode = mode.key">
                     <UIcon v-if="diffMode === mode.key" name="i-tabler-check" class="mt-0.5 size-4 shrink-0" />

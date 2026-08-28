@@ -90,7 +90,7 @@ useHead({ title: displayHandle })
 
 <template>
   <div class="flex min-h-[calc(100dvh-3.5rem)] items-center justify-center p-3 md:p-5">
-    <UCard :ui="{ root: 'w-full max-w-md rounded-xl', body: 'px-5 py-8' }">
+    <UCard :ui="{ root: 'w-full max-w-md', body: 'px-5 py-8' }">
       <div class="flex flex-col items-center text-center">
         <div
           class="flex size-20 items-center justify-center rounded-full bg-inverted text-4xl font-semibold text-inverted">
@@ -102,11 +102,11 @@ useHead({ title: displayHandle })
       </div>
 
       <div class="mt-5 grid grid-cols-2 gap-3">
-        <div class="flex flex-col items-center rounded-lg bg-muted px-3 py-3 text-center">
+        <div class="flex flex-col items-center bg-muted px-3 py-3 text-center">
           <span class="text-xl font-semibold text-default">{{ publicProfile.translationCount.toLocaleString() }}</span>
           <span class="mt-1 text-xs text-muted">번역 횟수</span>
         </div>
-        <div class="flex flex-col items-center rounded-lg bg-muted px-3 py-3 text-center">
+        <div class="flex flex-col items-center bg-muted px-3 py-3 text-center">
           <span class="text-xl font-semibold text-default">{{ publicProfile.approvedTranslationCount.toLocaleString()
           }}</span>
           <span class="mt-1 text-xs text-muted">승인된 번역</span>
@@ -138,7 +138,7 @@ useHead({ title: displayHandle })
           <p class="text-xs text-dimmed">소셜미디어</p>
           <div class="flex flex-wrap gap-2">
             <a v-for="link in socialLinks" :key="link.id" :href="link.url" target="_blank" rel="noopener noreferrer"
-              class="inline-flex min-w-0 items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm font-medium text-default transition-colors hover:bg-elevated">
+          class="inline-flex min-w-0 items-center gap-2 bg-muted px-3 py-2 text-sm font-medium text-default transition-colors hover:bg-elevated">
               <UIcon v-if="link.icon" :name="link.icon" class="size-4 shrink-0" />
               <span class="max-w-48 truncate">{{ link.label }}</span>
               <UIcon name="i-tabler-external-link" class="size-4 shrink-0 text-muted" />

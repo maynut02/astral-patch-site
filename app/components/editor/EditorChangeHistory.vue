@@ -363,7 +363,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
             <div class="w-6 flex justify-center shrink-0 pt-1">
               <div
                 v-if="index < historyViews.length - 1"
-                class="w-0.5 rounded-lg bg-elevated"
+                class="w-0.5 bg-elevated"
               />
             </div>
 
@@ -466,7 +466,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
 
               <div
                 v-if="history.entry.action === 'translation_changed' && history.entry.reviewedAt"
-                class="flex flex-wrap flex-col gap-1 text-xs p-2 rounded-md"
+                class="flex flex-wrap flex-col gap-1 text-xs p-2"
                 :class="getReviewResultMeta(history.entry).containerClass"
               >
                 <div class="flex items-center gap-1">

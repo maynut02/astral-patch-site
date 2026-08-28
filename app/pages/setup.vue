@@ -91,7 +91,7 @@ async function submit(): Promise<void> {
             autocomplete="username"
             color="neutral"
             class="w-full"
-            :ui="{ base: 'px-3 pl-7' }"
+            :ui="{ base: 'h-8 leading-5 px-3 pl-7' }"
           >
             <template #leading>
               <span class="text-muted">@</span>

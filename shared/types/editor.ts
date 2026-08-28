@@ -147,6 +147,13 @@ export interface EditorTranslationLogResponse {
   totalPages: number
 }
 
+export interface EditorTranslationLogSummary {
+  pending: number
+  approved: number
+  rejected: number
+  superseded: number
+}
+
 export interface EditorSourceRevision {
   id: string
   gameVersion: string

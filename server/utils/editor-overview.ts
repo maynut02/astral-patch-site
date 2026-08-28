@@ -23,6 +23,7 @@ interface EditorVersionOverviewRow extends EditorProgressCountRow {
   id: string
   version: string
   revision: string
+  detectedAt: string
 }
 
 function emptyCounts(): EditorProgressCounts {
@@ -114,6 +115,7 @@ export async function getEditorOverview(): Promise<EditorOverviewResponse> {
           sc.revision_id AS id,
           src.game_version AS "version",
           src.revision,
+          src.detected_at AS "detectedAt",
           wb.latest_change_status,
           wb.approved_for_current_source,
           wb.effective_text
@@ -128,6 +130,7 @@ export async function getEditorOverview(): Promise<EditorOverviewResponse> {
         id,
         "version",
         revision,
+        "detectedAt",
         count(*)::int AS total,
         count(*) FILTER (
           WHERE effective_text IS NOT NULL
@@ -145,8 +148,8 @@ export async function getEditorOverview(): Promise<EditorOverviewResponse> {
         )::int AS warning,
         count(*) FILTER (WHERE effective_text IS NULL)::int AS untranslated
       FROM version_items
-      GROUP BY id, "version", revision
-      ORDER BY "version" DESC, revision DESC, id DESC
+      GROUP BY id, "version", revision, "detectedAt"
+      ORDER BY "detectedAt" DESC, "version" DESC, revision DESC, id DESC
     `
   ])
 
@@ -164,6 +167,7 @@ export async function getEditorOverview(): Promise<EditorOverviewResponse> {
     id: row.id,
     version: row.version,
     revision: row.revision,
+    detectedAt: row.detectedAt,
     total: Number(row.total || 0),
     counts: toCounts(row)
   }))

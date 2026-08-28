@@ -256,7 +256,7 @@ async function deleteAccount(): Promise<void> {
     </div>
 
     <UCard
-      :ui="{ root: 'rounded-xl', header: 'px-5 py-4 sm:px-6', body: 'px-5 py-5 sm:px-6', footer: 'px-5 py-4 sm:px-6' }">
+      :ui="{ header: 'px-5 py-4 sm:px-6', body: 'px-5 py-5 sm:px-6', footer: 'px-5 py-4 sm:px-6' }">
       <template #header>
         <div>
           <h2 class="font-semibold text-default">
@@ -280,7 +280,7 @@ async function deleteAccount(): Promise<void> {
         <UFormField name="handle" label="핸들" description="영문과 숫자만 사용할 수 있는 고유 ID입니다." required
           :error="errors.handle || undefined">
           <UInput v-model="state.handle" :maxlength="HANDLE_MAX_LENGTH" autocomplete="username" color="neutral"
-            class="w-full" placeholder="handle" :disabled="profileLoading" :ui="{ base: 'pl-7' }">
+            class="w-full" placeholder="handle" :disabled="profileLoading" :ui="{ base: 'h-8 leading-5 pl-7' }">
             <template #leading>
               <span class="text-muted">@</span>
             </template>
@@ -291,14 +291,16 @@ async function deleteAccount(): Promise<void> {
           <UFormField name="gameUid" label="게임 UID" description="프로필 - UID" :error="errors.gameUid || undefined">
             <UInput :model-value="state.gameUid" :maxlength="GAME_PROFILE_VALUE_MAX_LENGTH" inputmode="numeric"
               pattern="[0-9]*" autocomplete="off" color="neutral" class="w-full" placeholder="UID"
-              :disabled="profileLoading" @update:model-value="state.gameUid = sanitizeGameUid($event)" />
+              :disabled="profileLoading" :ui="{ base: 'h-8 leading-5' }"
+              @update:model-value="state.gameUid = sanitizeGameUid($event)" />
           </UFormField>
 
           <UFormField name="gameInviteCode" label="게임 초대 코드" description="임무 - 초대 보상 - 나의 초대 코드"
             :error="errors.gameInviteCode || undefined">
             <UInput :model-value="state.gameInviteCode" :maxlength="GAME_PROFILE_VALUE_MAX_LENGTH"
               pattern="[A-Za-z0-9]*" autocomplete="off" color="neutral" class="w-full" placeholder="초대 코드"
-              :disabled="profileLoading" @update:model-value="state.gameInviteCode = sanitizeGameInviteCode($event)" />
+              :disabled="profileLoading" :ui="{ base: 'h-8 leading-5' }"
+              @update:model-value="state.gameInviteCode = sanitizeGameInviteCode($event)" />
           </UFormField>
         </div>
 
@@ -319,12 +321,14 @@ async function deleteAccount(): Promise<void> {
               class="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.6fr)_auto]">
               <UFormField :error="errors.socialLinks[index]?.label || undefined">
                 <UInput v-model="link.label" :maxlength="SOCIAL_LINK_LABEL_MAX_LENGTH" color="neutral" class="w-full"
-                  placeholder="예: X, YouTube, GitHub" :disabled="profileLoading" />
+                  placeholder="예: X, YouTube, GitHub" :disabled="profileLoading"
+                  :ui="{ base: 'h-8 leading-5' }" />
               </UFormField>
 
               <UFormField :error="errors.socialLinks[index]?.url || undefined">
                 <UInput v-model="link.url" :maxlength="SOCIAL_LINK_URL_MAX_LENGTH" type="url" color="neutral"
-                  class="w-full" placeholder="https://..." :disabled="profileLoading" />
+                  class="w-full" placeholder="https://..." :disabled="profileLoading"
+                  :ui="{ base: 'h-8 leading-5' }" />
               </UFormField>
 
               <UButton type="button" icon="i-tabler-trash" color="error" variant="ghost" class="self-start"
@@ -350,7 +354,7 @@ async function deleteAccount(): Promise<void> {
       </UForm>
     </UCard>
 
-    <UCard :ui="{ root: 'rounded-xl', header: 'px-5 py-4 sm:px-6', body: 'px-5 py-5 sm:px-6' }">
+    <UCard :ui="{ header: 'px-5 py-4 sm:px-6', body: 'px-5 py-5 sm:px-6' }">
       <template #header>
         <div>
           <h2 class="font-semibold text-error">
@@ -377,7 +381,7 @@ async function deleteAccount(): Promise<void> {
 
           <UFormField label="확인을 위해 ‘탈퇴’를 입력해 주세요.">
             <UInput v-model="deleteConfirmation" color="neutral" class="w-full" autocomplete="off" placeholder="탈퇴"
-              :disabled="deleting" @keydown.enter.prevent="deleteAccount" />
+              :disabled="deleting" :ui="{ base: 'h-8 leading-5' }" @keydown.enter.prevent="deleteAccount" />
           </UFormField>
 
           <p v-if="deleteError" class="text-sm text-error">

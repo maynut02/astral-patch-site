@@ -19,7 +19,7 @@
 }
 
 :root {
-  --ui-radius: 0.25rem;
+  --ui-radius: 0rem;
 }
 
 button:not(:disabled) {
@@ -88,6 +88,15 @@ button:disabled {
 html {
   scrollbar-width: thin;
   scrollbar-color: var(--ui-color-neutral-700) transparent;
+}
+
+.scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
 }
 
 body {

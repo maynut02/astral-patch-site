@@ -18,6 +18,7 @@ export interface EditorVersionProgress {
   id: string
   version: string
   revision: string
+  detectedAt: string
   total: number
   counts: EditorProgressCounts
 }
