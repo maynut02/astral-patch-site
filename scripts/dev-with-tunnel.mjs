@@ -1,4 +1,5 @@
 import net from 'node:net'
+import path from 'node:path'
 import { spawn } from 'node:child_process'
 
 function requiredEnv(name) {
@@ -159,8 +160,8 @@ try {
 }
 
 console.log('[dev] Database tunnel is ready. Starting Nuxt dev server.')
-const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-nuxt = spawn(pnpmCommand, ['exec', 'nuxt', 'dev'], {
+const nuxtCli = path.resolve(process.cwd(), 'node_modules', 'nuxt', 'bin', 'nuxt.mjs')
+nuxt = spawn(process.execPath, [nuxtCli, 'dev'], {
   env: process.env,
   stdio: 'inherit',
 })

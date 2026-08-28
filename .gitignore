@@ -24,4 +24,18 @@ logs
 .env.*
 !.env.example
 
+# Credentials / local database and backup artifacts
+.ssh/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.dump
+*.bak
+*.sqlite
+*.sqlite3
+*.db
+
 .agents

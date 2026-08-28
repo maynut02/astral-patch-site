@@ -23,10 +23,12 @@ DB migration 원본은 항상 `astral-party-korean-patch/database/migrations`입
 
 ## 1. 서버 환경변수
 
+`.env.example`은 로컬/GitHub/서버 설정을 한 파일에 구분해 둔 참조 문서이므로 서버에서는 전체를 그대로 복사하지 않습니다. 서버용 값은 `.env.example`의 `3. 서버 운영 환경` 구역을 기준으로 `.env`를 작성합니다.
+
 ```bash
 cd /home/ubuntu/astral-patch-site
-cp .env.example .env
-chmod 600 .env
+install -m 600 /dev/null .env
+nano .env
 ```
 
 프로덕션 `.env` 예시:
@@ -223,7 +225,7 @@ DATABASE_URL=postgresql://astral_patch:<URL-encoded password>@127.0.0.1:55433/as
 
 ASTRAL_SSH_HOST=<VM public IP or SSH hostname>
 ASTRAL_SSH_USER=ubuntu
-ASTRAL_SSH_KEY_PATH=C:\Users\Home\.ssh\<private-key>
+ASTRAL_SSH_KEY_PATH=C:\Users\<you>\.ssh\<private-key>
 ASTRAL_SSH_PORT=22
 ASTRAL_DEV_DB_LOCAL_PORT=55433
 ASTRAL_DEV_DB_REMOTE_HOST=127.0.0.1
@@ -280,6 +282,7 @@ DB host port 5433을 UFW에 추가로 열 필요는 없습니다.
 SERVER_HOST
 SERVER_USER
 SERVER_SSH_KEY
+SERVER_SSH_FINGERPRINT
 SERVER_SSH_PORT
 SERVER_WORK_DIR
 PATCH_SERVER_WORK_DIR
@@ -293,6 +296,14 @@ SERVER_SSH_PORT=22
 SERVER_WORK_DIR=/home/ubuntu/astral-patch-site
 PATCH_SERVER_WORK_DIR=/home/ubuntu/astral-party-korean-patch
 ```
+
+`SERVER_SSH_FINGERPRINT`는 서버에서 SSH host key를 직접 확인해 등록합니다.
+
+```bash
+sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 | awk '{print $2}'
+```
+
+출력되는 `SHA256:...` 값을 GitHub Actions secret으로 저장합니다.
 
 배포 순서:
 
