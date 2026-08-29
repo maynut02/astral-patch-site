@@ -57,6 +57,42 @@ export default defineAppConfig({
       }
     },
 
+    input: {
+      variants: {
+        size: {
+          xs: { base: 'h-6 leading-4' },
+          sm: { base: 'h-7 leading-4' },
+          md: { base: 'h-8 leading-5' },
+          lg: { base: 'h-9 leading-5' },
+          xl: { base: 'h-10 leading-6' }
+        }
+      }
+    },
+
+    select: {
+      variants: {
+        size: {
+          xs: { base: 'h-6 leading-4' },
+          sm: { base: 'h-7 leading-4' },
+          md: { base: 'h-8 leading-5' },
+          lg: { base: 'h-9 leading-5' },
+          xl: { base: 'h-10 leading-6' }
+        }
+      }
+    },
+
+    tabs: {
+      variants: {
+        size: {
+          xs: { trigger: 'h-6 leading-4' },
+          sm: { trigger: 'h-7 leading-4' },
+          md: { trigger: 'h-8 leading-5' },
+          lg: { trigger: 'h-9 leading-5' },
+          xl: { trigger: 'h-10 leading-6' }
+        }
+      }
+    },
+
     modal: {
       slots: {
         overlay: 'backdrop-blur'

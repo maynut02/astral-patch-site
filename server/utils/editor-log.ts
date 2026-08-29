@@ -5,6 +5,7 @@ import type {
   EditorSourceChangesResponse,
   EditorSourceRevision,
   EditorSourceRevisionsResponse,
+  EditorTranslationLogSummary,
   EditorTranslationLogResponse
 } from '../../shared/types/editor'
 import { containsLikePattern, getFirstQueryValue, parsePage as parseValidatedPage, parseUuid } from './validation'
@@ -76,6 +77,35 @@ function buildTranslationLogWhere(sql: DatabaseClient, filters: EditorTranslatio
 interface TranslationLogPageRow {
   total: number | string
   entry: EditorTranslationLogResponse['entries'][number]
+}
+
+interface TranslationLogSummaryRow {
+  pending: number | string
+  approved: number | string
+  rejected: number | string
+  superseded: number | string
+}
+
+export async function getEditorTranslationLogSummary(): Promise<EditorTranslationLogSummary> {
+  const rows = await withDatabaseRetry<TranslationLogSummaryRow[]>(database => database<TranslationLogSummaryRow[]>`
+    SELECT
+      count(*) FILTER (WHERE tc.status = 'pending')::int AS pending,
+      count(*) FILTER (WHERE tc.status = 'approved')::int AS approved,
+      count(*) FILTER (WHERE tc.status = 'rejected')::int AS rejected,
+      count(*) FILTER (WHERE tc.status = 'superseded')::int AS superseded
+    FROM translation_changes tc
+    JOIN translation_units tu ON tu.id = tc.unit_id
+    WHERE tc.locale = 'ko'
+  `)
+
+  const row = rows[0]
+
+  return {
+    pending: Number(row?.pending || 0),
+    approved: Number(row?.approved || 0),
+    rejected: Number(row?.rejected || 0),
+    superseded: Number(row?.superseded || 0)
+  }
 }
 
 export async function getEditorTranslationLogs(

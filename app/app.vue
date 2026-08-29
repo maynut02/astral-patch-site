@@ -1,7 +1,10 @@
 <script setup>
 useHead({
   meta: [
-    { name: 'viewport', content: 'width=device-width, initial-scale=1' }
+    {
+      name: 'viewport',
+      content: 'width=device-width, initial-scale=1, interactive-widget=resizes-content'
+    }
   ],
   link: [
     { rel: 'icon', href: '/favicon.ico' }
@@ -29,7 +32,10 @@ useSeoMeta({
 
 <template>
   <UApp :toaster="toaster">
-    <NuxtLoadingIndicator color="var(--color-neutral-300)" :height="2" />
+    <NuxtLoadingIndicator
+      color="var(--color-neutral-300)"
+      :height="2"
+    />
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>

@@ -1,3 +1,5 @@
+import type { EditorSearchMatch, EditorSearchType } from '#shared/types/editor'
+
 export function getEditorQueryString(value: unknown): string {
   if (Array.isArray(value)) {
     return typeof value[0] === 'string' ? value[0] : ''
@@ -18,12 +20,12 @@ export function formatEditorHandle(handle: string): string {
   return `@${handle}`
 }
 
-export function normalizeEditorVersion(value: string): string {
-  return value.trim().replace(/^v/i, '')
+export function normalizeEditorVersion(value: unknown): string {
+  return getEditorQueryString(value).trim().replace(/^v/i, '')
 }
 
-export function normalizeEditorRevision(value: string): string {
-  return value.trim().replace(/^r/i, '')
+export function normalizeEditorRevision(value: unknown): string {
+  return getEditorQueryString(value).trim().replace(/^r/i, '')
 }
 
 export function formatEditorVersion(version: string, revision: string): string {
@@ -68,10 +70,10 @@ export function formatEditorDate(value: string | null | undefined): string {
   return editorDateFormatter.format(date)
 }
 
-export function isEditorSearchType(value: unknown): value is 'all' | 'content' | 'key' | 'source' | 'translation' {
+export function isEditorSearchType(value: unknown): value is EditorSearchType {
   return value === 'all' || value === 'content' || value === 'key' || value === 'source' || value === 'translation'
 }
 
-export function isEditorSearchMatch(value: unknown): value is 'contains' | 'exact' {
+export function isEditorSearchMatch(value: unknown): value is EditorSearchMatch {
   return value === 'contains' || value === 'exact'
 }

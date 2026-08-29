@@ -82,13 +82,13 @@ function assertDevelopmentDatabaseUrl(databaseUrl, localPort) {
 
   if (!['127.0.0.1', 'localhost', '::1'].includes(url.hostname)) {
     throw new Error(
-      `[dev] DATABASE_URL must use localhost/127.0.0.1 when pnpm dev manages the SSH tunnel; received ${url.hostname}`,
+      `[dev] DATABASE_URL must use localhost/127.0.0.1 when pnpm dev manages the SSH tunnel; received ${url.hostname}`
     )
   }
 
   if (Number.parseInt(url.port, 10) !== localPort) {
     throw new Error(
-      `[dev] DATABASE_URL must use local tunnel port ${localPort}; received ${url.port || '(none)'}`,
+      `[dev] DATABASE_URL must use local tunnel port ${localPort}; received ${url.port || '(none)'}`
     )
   }
 }
@@ -106,7 +106,7 @@ assertDevelopmentDatabaseUrl(databaseUrl, localPort)
 
 if (await canConnect('127.0.0.1', localPort)) {
   throw new Error(
-    `[dev] Local port ${localPort} is already in use. Stop the existing tunnel/process before running pnpm dev.`,
+    `[dev] Local port ${localPort} is already in use. Stop the existing tunnel/process before running pnpm dev.`
   )
 }
 
@@ -117,7 +117,7 @@ const sshArgs = [
   '-o', 'ExitOnForwardFailure=yes',
   '-o', 'ServerAliveInterval=30',
   '-o', 'ServerAliveCountMax=3',
-  '-p', String(sshPort),
+  '-p', String(sshPort)
 ]
 
 if (sshKeyPath) sshArgs.push('-i', sshKeyPath)
@@ -151,7 +151,7 @@ const sshEarlyExit = new Promise((_, reject) => {
 try {
   await Promise.race([
     waitForPort('127.0.0.1', localPort),
-    sshEarlyExit,
+    sshEarlyExit
   ])
   sshReady = true
 } catch (error) {
@@ -163,7 +163,7 @@ console.log('[dev] Database tunnel is ready. Starting Nuxt dev server.')
 const nuxtCli = path.resolve(process.cwd(), 'node_modules', 'nuxt', 'bin', 'nuxt.mjs')
 nuxt = spawn(process.execPath, [nuxtCli, 'dev'], {
   env: process.env,
-  stdio: 'inherit',
+  stdio: 'inherit'
 })
 
 function shutdown(signal = 'SIGTERM') {

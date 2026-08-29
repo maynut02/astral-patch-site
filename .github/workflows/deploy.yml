@@ -57,7 +57,7 @@ jobs:
             cd "$SITE_DIR"
             docker compose -p astral-patch up -d postgres-db
 
-            # Keep the installed backup service in sync with the repository.
+            # 저장소의 백업 서비스 정의를 서버와 동기화한다.
             sudo -n install -m 0755 deploy/backup-db.sh /usr/local/sbin/astral-patch-backup-db
             sudo -n install -m 0644 deploy/systemd/astral-patch-db-backup.service /etc/systemd/system/astral-patch-db-backup.service
             sudo -n install -m 0644 deploy/systemd/astral-patch-db-backup.timer /etc/systemd/system/astral-patch-db-backup.timer
@@ -78,12 +78,10 @@ jobs:
             sudo -n systemctl daemon-reload
             sudo -n systemctl enable --now astral-patch-db-backup.timer
 
-            # The image is small and rebuilding it ensures uploader changes are deployed too.
+            # 업로더 변경사항을 포함하도록 백업 이미지를 다시 빌드한다.
             docker compose -p astral-patch --profile backup build r2-backup
 
-            # Snapshot the current database before applying any new migration.
-            # Running the systemd service also loads /etc/default/astral-patch,
-            # including the optional R2 backup setting.
+            # 마이그레이션 전에 현재 DB를 백업하고 서버 백업 설정을 함께 적용한다.
             sudo -n systemctl start astral-patch-db-backup.service
 
             docker compose -p astral-patch --profile migration run --rm db-migrate

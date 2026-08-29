@@ -1,4 +1,5 @@
 import type { EditorItem } from '#shared/types/editor'
+import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from '~/utils/browser-storage'
 
 export interface EditorDraft {
   category: string
@@ -10,44 +11,6 @@ export interface EditorDraft {
 
 const DEFAULT_DRAFT_STORAGE_KEY = 'astral-editor-translation-drafts-v1'
 const DRAFT_PERSIST_DELAY = 250
-
-export function readEditorStorageValue(key: string): string | null {
-  if (!import.meta.client) {
-    return null
-  }
-
-  try {
-    return window.localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-export function writeEditorStorageValue(key: string, value: string): boolean {
-  if (!import.meta.client) {
-    return false
-  }
-
-  try {
-    window.localStorage.setItem(key, value)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function removeEditorStorageValue(key: string): boolean {
-  if (!import.meta.client) {
-    return false
-  }
-
-  try {
-    window.localStorage.removeItem(key)
-    return true
-  } catch {
-    return false
-  }
-}
 
 function isEditorDraft(value: unknown): value is EditorDraft {
   if (!value || typeof value !== 'object') {
@@ -63,11 +26,7 @@ function isEditorDraft(value: unknown): value is EditorDraft {
     && (draft.itemId === undefined || typeof draft.itemId === 'string')
 }
 
-/**
- * Draft persistence uses the database item UUID as the internal identity so lang/str
- * rows with the same category and unit key cannot collide. Human-readable category
- * and unitKey values remain stored in each draft for display and recovery.
- */
+// DB 항목 UUID를 임시저장 키로 사용해 같은 category/unitKey 간 충돌을 막는다.
 export function getEditorDraftKey(itemId: string): string {
   return itemId
 }
@@ -87,11 +46,11 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
     }
 
     if (Object.keys(drafts.value).length === 0) {
-      removeEditorStorageValue(storageKey)
+      removeBrowserStorage(storageKey)
       return
     }
 
-    writeEditorStorageValue(storageKey, JSON.stringify(drafts.value))
+    writeBrowserStorage(storageKey, JSON.stringify(drafts.value))
   }
 
   function schedulePersist(): void {
@@ -115,7 +74,7 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
       return
     }
 
-    const storedDrafts = readEditorStorageValue(storageKey)
+    const storedDrafts = readBrowserStorage(storageKey)
 
     if (storedDrafts) {
       try {

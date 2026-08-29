@@ -9,7 +9,8 @@ import type {
   EditorDictionaryVisibility,
   EditorDictionariesResponse
 } from '../../shared/types/editor-dictionary'
-import { resolveEditorRole, type EditorRole } from '../../shared/types/editor'
+import { resolveEditorRole } from '../../shared/types/editor'
+import type { UserRole } from '../../shared/types/user'
 import {
   containsLikePattern,
   getFirstQueryValue,
@@ -23,7 +24,7 @@ export const EDITOR_DICTIONARY_PAGE_SIZE = 50
 
 export interface EditorDictionaryViewer {
   id: string
-  role: EditorRole
+  role: UserRole
 }
 
 export function getEditorDictionaryViewer(user: { id?: unknown, role?: unknown } | null | undefined): EditorDictionaryViewer {
@@ -36,7 +37,7 @@ export function getEditorDictionaryViewer(user: { id?: unknown, role?: unknown }
 interface DictionaryRow {
   id: string
   ownerId: string
-  ownerRole: EditorRole
+  ownerRole: UserRole
   ownerHandle: string | null
   name: string
   description: string
@@ -53,7 +54,7 @@ interface DictionaryEntryRow {
   translation: string
   note: string
   createdBy: string
-  creatorRole: EditorRole
+  creatorRole: UserRole
   creatorHandle: string | null
   createdAt: string
   updatedAt: string

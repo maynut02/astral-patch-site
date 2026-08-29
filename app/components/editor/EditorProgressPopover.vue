@@ -29,7 +29,7 @@ const lastVisibleStatus = computed(() => visibleStatuses.value.at(-1))
   >
     <div class="hidden items-center sm:flex">
       <div
-        class="relative flex h-1.5 w-20 shrink-0 overflow-hidden rounded-xl bg-elevated sm:w-28"
+        class="relative flex h-1.5 w-20 shrink-0 overflow-hidden bg-elevated sm:w-28"
         aria-label="현재 번역 진행률"
         role="img"
       >

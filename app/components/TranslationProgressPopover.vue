@@ -32,7 +32,7 @@ const progressAriaLabel = computed(() => props.ariaLabel || `${props.label} ë²ˆì
     :content="{ side: 'top', align: 'center', sideOffset: 8 }"
   >
     <div
-      class="relative flex h-2.5 shrink-0 overflow-hidden rounded-xl bg-elevated"
+      class="relative flex h-2.5 shrink-0 overflow-hidden bg-elevated"
       :class="progressBarClass"
       role="img"
       tabindex="0"

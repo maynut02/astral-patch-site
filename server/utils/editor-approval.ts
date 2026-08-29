@@ -68,9 +68,7 @@ export async function reviewEditorChange(
       })
     }
 
-    // Saving a proposal and reviewing proposals both lock the unit row. This prevents
-    // two reviewers from approving competing proposals at the same time and prevents
-    // a new pending proposal from slipping in between approval and superseding siblings.
+    // 승인 경합과 중간 pending 삽입을 막기 위해 번역 단위 행을 잠근다.
     await transaction`
       SELECT id
       FROM translation_units

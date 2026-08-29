@@ -1,4 +1,6 @@
-export type UserRole = 'admin' | 'verified' | 'user' | 'bot'
+import type { UserRole } from '#shared/types/user'
+
+export type { UserRole } from '#shared/types/user'
 
 export interface UserRoleMeta {
   icon: string

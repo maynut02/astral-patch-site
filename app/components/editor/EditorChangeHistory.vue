@@ -363,12 +363,11 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
             <div class="w-6 flex justify-center shrink-0 pt-1">
               <div
                 v-if="index < historyViews.length - 1"
-                class="w-0.5 rounded-lg bg-elevated"
+                class="w-0.5 bg-elevated"
               />
             </div>
 
             <div class="flex-1 pb-12 flex flex-col gap-4">
-              <!-- 작성자 -->
               <div class="flex items-center gap-2 text-xs text-muted">
                 <time
                   class="flex-1 shrink-0 text-xs text-muted"
@@ -377,7 +376,6 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                   {{ formatDate(history.entry.createdAt) }}
                 </time>
 
-                <!-- 버전 -->
                 <div
                   v-if="history.entry.action === 'source_changed' && formatSourceRevision(history.entry)"
                   class="flex items-center gap-1 text-xs"
@@ -390,7 +388,6 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                 </div>
               </div>
 
-              <!-- 통합 비교 -->
               <div
                 v-if="diffMode === 'unified'"
                 class="flex flex-col gap-3"
@@ -420,7 +417,6 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                 </div>
               </div>
 
-              <!-- 분할 비교 -->
               <div
                 v-else
                 class="flex flex-col gap-4 py-2"
@@ -466,7 +462,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
 
               <div
                 v-if="history.entry.action === 'translation_changed' && history.entry.reviewedAt"
-                class="flex flex-wrap flex-col gap-1 text-xs p-2 rounded-md"
+                class="flex flex-wrap flex-col gap-1 text-xs p-2"
                 :class="getReviewResultMeta(history.entry).containerClass"
               >
                 <div class="flex items-center gap-1">

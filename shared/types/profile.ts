@@ -1,4 +1,6 @@
-export type ProfileUserRole = 'admin' | 'verified' | 'user' | 'bot'
+import type { UserRole } from './user'
+
+export type ProfileUserRole = UserRole
 
 export interface UserSocialLink {
   id: string
@@ -8,7 +10,7 @@ export interface UserSocialLink {
 
 export interface UserProfileDetails {
   handle: string
-  role: ProfileUserRole
+  role: UserRole
   gameUid: string | null
   gameInviteCode: string | null
   socialLinks: UserSocialLink[]

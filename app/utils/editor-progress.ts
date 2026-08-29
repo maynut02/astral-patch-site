@@ -12,27 +12,32 @@ export interface ProgressSegment {
 
 export { EDITOR_PROGRESS_STATUSES }
 
-export const EDITOR_VISIBLE_STATUSES: EditorProgressStatus[] = ['success', 'info', 'warning']
+export const EDITOR_VISIBLE_STATUSES: EditorProgressStatus[] = ['success', 'info', 'warning', 'untranslated']
 
 export const EDITOR_STATUS_META: Record<EditorProgressStatus, {
   label: string
   color: string
+  textColor: string
 }> = {
   success: {
     label: '번역 완료',
-    color: 'bg-[#81C995]'
+    color: 'bg-[#81C995]',
+    textColor: 'text-[#81C995]'
   },
   info: {
     label: '승인 대기',
-    color: 'bg-[#8AB4F8]'
+    color: 'bg-[#8AB4F8]',
+    textColor: 'text-[#8AB4F8]'
   },
   warning: {
     label: '확인 필요',
-    color: 'bg-[#FDD663]'
+    color: 'bg-[#FDD663]',
+    textColor: 'text-[#FDD663]'
   },
   untranslated: {
     label: '미번역',
-    color: 'bg-[#F28B82]'
+    color: 'bg-[#F28B82]',
+    textColor: 'text-[#F28B82]'
   }
 }
 

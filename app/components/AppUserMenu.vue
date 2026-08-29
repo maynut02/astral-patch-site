@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import {
-  getHandleInitial,
-  getPublicProfilePath
-} from '~/utils/profile'
+import { getHandleInitial } from '~/utils/profile'
 
 const props = withDefaults(defineProps<{
   context?: 'default' | 'editor'
@@ -10,33 +7,15 @@ const props = withDefaults(defineProps<{
   context: 'default'
 })
 
-const { ready, loggedIn, user, clear } = useUserSession()
+const { ready, loggedIn, user } = useUserSession()
 const route = useRoute()
 
 const initial = computed(() => getHandleInitial(user.value?.handle))
-const publicProfilePath = computed(() => getPublicProfilePath(user.value?.handle, '/setting'))
 
 const triggerClass = computed(() => props.context === 'editor'
   ? 'size-9 hover:bg-elevated/75 lg:size-10'
   : 'size-9 hover:bg-elevated/75'
 )
-
-const menuItems = computed(() => [{
-  label: '내 프로필',
-  icon: 'i-tabler-user-circle',
-  to: publicProfilePath.value
-}, {
-  label: '계정 설정',
-  icon: 'i-tabler-settings',
-  to: '/setting'
-}, {
-  label: '로그아웃',
-  icon: 'i-tabler-logout',
-  color: 'error' as const,
-  onSelect: async () => {
-    await clear()
-  }
-}])
 
 function login() {
   const returnTo = encodeURIComponent(route.fullPath)
@@ -46,41 +25,48 @@ function login() {
 </script>
 
 <template>
-  <UDropdownMenu v-if="ready && loggedIn" :items="menuItems" :content="{ align: 'end', sideOffset: 8 }"
-    :ui="{ content: 'w-52' }">
-    <template #default="{ open }">
-      <button type="button" aria-label="사용자 메뉴" :aria-expanded="open" aria-haspopup="menu"
-        class="flex shrink-0 items-center justify-center rounded-md text-sm font-semibold text-default transition-colors"
-        :class="[triggerClass, open ? 'bg-accented/75' : '', 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary']">
+  <AppUserMenuContent
+    v-if="ready && loggedIn"
+    side="bottom"
+  >
+    <template #trigger="{ open }">
+      <button
+        type="button"
+        aria-label="사용자 메뉴"
+        :aria-expanded="open"
+        aria-haspopup="menu"
+        class="flex shrink-0 items-center justify-center text-sm font-semibold text-default transition-colors"
+        :class="[triggerClass, open ? 'bg-accented/75' : '', 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary']"
+      >
         <span class="flex size-6 items-center justify-center rounded-full bg-inverted text-xs text-inverted">
           {{ initial }}
         </span>
       </button>
     </template>
+  </AppUserMenuContent>
 
-    <template #content-top="{ sub }">
-      <div v-if="!sub" class="flex items-center min-w-0 gap-3 px-3 py-3 border-b border-default">
-        <div
-          class="flex size-6 shrink-0 items-center justify-center rounded-full bg-inverted text-sm font-semibold text-inverted">
-          {{ initial }}
-        </div>
-        <div class="min-w-0 flex-1">
-          <AppUserIdentity :handle="user?.handle" :role="user?.role" :to="publicProfilePath"
-            text-class="text-sm font-semibold text-default" class="max-w-full gap-2" />
-        </div>
-      </div>
-    </template>
-  </UDropdownMenu>
-
-  <button v-else-if="ready" type="button" aria-label="Google 로그인" :class="triggerClass"
-    class="flex shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:text-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-    @click="login">
-    <UIcon name="i-tabler-user-key" class="size-5" />
+  <button
+    v-else-if="ready"
+    type="button"
+    aria-label="Google 로그인"
+    :class="triggerClass"
+    class="flex shrink-0 items-center justify-center text-muted transition-colors hover:text-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    @click="login"
+  >
+    <UIcon
+      name="i-tabler-user-key"
+      class="size-5"
+    />
   </button>
 
-  <div v-else :class="triggerClass"
-    class="flex shrink-0 items-center justify-center rounded-md border border-accented/30 bg-elevated/60 text-muted backdrop-blur-lg"
-    aria-label="로그인 상태 확인 중" role="status" aria-live="polite">
+  <div
+    v-else
+    :class="triggerClass"
+    class="flex shrink-0 items-center justify-center border border-accented/30 bg-elevated/60 text-muted backdrop-blur-lg"
+    aria-label="로그인 상태 확인 중"
+    role="status"
+    aria-live="polite"
+  >
     <AppLoadingSpinner />
   </div>
 </template>

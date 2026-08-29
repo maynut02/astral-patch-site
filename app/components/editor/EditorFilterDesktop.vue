@@ -97,7 +97,7 @@ function commitPage() {
       color="neutral"
       variant="soft"
       placeholder="검색..."
-      :ui="{ base: 'rounded-xl' }"
+      :ui="{ base: 'h-9 leading-5' }"
       @update:model-value="updateSearch"
     />
 
@@ -112,7 +112,7 @@ function commitPage() {
         color="neutral"
         variant="soft"
         class="w-full"
-        :ui="{ base: 'rounded-xl' }"
+        :ui="{ base: 'h-8 leading-5' }"
         @update:model-value="updateCategory"
       />
     </div>
@@ -130,7 +130,7 @@ function commitPage() {
         color="neutral"
         variant="soft"
         class="w-full"
-        :ui="{ base: 'rounded-xl' }"
+        :ui="{ base: 'h-8 leading-5' }"
         @update:model-value="updateRevision"
       />
     </div>
@@ -147,7 +147,7 @@ function commitPage() {
           v-for="language in languageItems"
           :key="language.value"
           type="button"
-          class="flex items-center gap-2 py-1 hover:bg-muted transition-colors rounded-xl pl-1"
+          class="flex items-center gap-2 py-1 hover:bg-muted transition-colors pl-1"
           :class="props.selectedLanguages.includes(language.value) ? 'text-default' : 'text-dimmed'"
           @click="toggleLanguage(language.value)"
         >
@@ -177,7 +177,7 @@ function commitPage() {
         :items="[{ label: 'OFF', value: 'off' }, { label: 'ON', value: 'on' }]"
         color="neutral"
         size="xs"
-        :ui="{ list: 'rounded-xl bg-muted', indicator: 'rounded-xl', trigger: 'px-3' }"
+        :ui="{ list: 'bg-muted', trigger: 'h-6 px-3 leading-4' }"
         @update:model-value="updateUntranslated"
       />
     </div>
@@ -202,7 +202,7 @@ function commitPage() {
           v-model="pageInput"
           color="neutral"
           variant="soft"
-          :ui="{ base: 'rounded-xl px-4 text-center' }"
+          :ui="{ base: 'h-8 leading-5 px-4 text-center' }"
           class="flex-1"
           :disabled="props.loading"
           @blur="commitPage"

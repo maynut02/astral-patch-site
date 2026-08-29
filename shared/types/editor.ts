@@ -1,13 +1,10 @@
-export type EditorLanguage = 'cnS' | 'en' | 'jp' | 'cnT'
+import { resolveUserRole, type UserRole } from './user'
 
-export type EditorRole = 'admin' | 'verified' | 'user' | 'bot'
+export type EditorLanguage = 'cnS' | 'en' | 'jp' | 'cnT'
+export type EditorRole = UserRole
 
 export function resolveEditorRole(user: { role?: unknown } | null | undefined): EditorRole {
-  if (user?.role === 'admin' || user?.role === 'verified' || user?.role === 'bot' || user?.role === 'user') {
-    return user.role
-  }
-
-  return 'user'
+  return resolveUserRole(user?.role)
 }
 
 export type EditorSearchType = 'all' | 'content' | 'key' | 'source' | 'translation'
@@ -145,6 +142,13 @@ export interface EditorTranslationLogResponse {
   page: number
   pageSize: number
   totalPages: number
+}
+
+export interface EditorTranslationLogSummary {
+  pending: number
+  approved: number
+  rejected: number
+  superseded: number
 }
 
 export interface EditorSourceRevision {
