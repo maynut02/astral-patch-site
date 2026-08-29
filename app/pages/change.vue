@@ -844,7 +844,6 @@ async function retryActiveLog() {
             :items="statusItems"
             color="neutral"
             variant="soft"
-            size="lg"
             class="h-9 w-32"
             :ui="{ base: 'h-9 leading-5' }"
           />
@@ -880,9 +879,7 @@ async function retryActiveLog() {
           role="status"
           aria-live="polite"
         >
-          <div
-            class="absolute flex items-center gap-2 bg-elevated/80 px-3 py-2 text-sm text-muted shadow-sm backdrop-blur-lg"
-          >
+          <div class="absolute flex items-center gap-2 bg-elevated/80 px-3 py-2 text-sm text-muted shadow-sm backdrop-blur-lg">
             <UIcon
               name="i-tabler-loader-2"
               class="size-4 animate-spin"
@@ -942,9 +939,7 @@ async function retryActiveLog() {
             class="flex flex-col border-l-2 border-r border-r-default max-md:-ml-0.5"
             :class="getTranslationStatusMeta(entry.status).borderClass"
           >
-            <p
-              class="min-h-5 whitespace-pre-wrap wrap-break-word p-3 md:px-5 md:py-4 text-sm leading-6 bg-muted border-y border-default"
-            >
+            <p class="min-h-5 whitespace-pre-wrap wrap-break-word p-3 md:px-5 md:py-4 text-sm leading-6 bg-muted border-y border-default">
               <template
                 v-for="(part, partIndex) in getTranslationDiffParts(entry)"
                 :key="`${part.type}-${partIndex}`"
@@ -1066,9 +1061,7 @@ async function retryActiveLog() {
           role="status"
           aria-live="polite"
         >
-          <div
-            class="absolute flex items-center gap-2 bg-elevated/80 px-3 py-2 text-sm text-muted shadow-sm backdrop-blur-lg"
-          >
+          <div class="absolute flex items-center gap-2 bg-elevated/80 px-3 py-2 text-sm text-muted shadow-sm backdrop-blur-lg">
             <UIcon
               name="i-tabler-loader-2"
               class="size-4 animate-spin"

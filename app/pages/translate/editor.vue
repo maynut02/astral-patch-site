@@ -141,6 +141,9 @@ const dictionarySearchRequestId = ref(0)
 const historyReloadKey = ref(0)
 const selectFirstItemOnNextLoad = ref(false)
 const listContainer = ref<HTMLElement | null>(null)
+const editorToolbar = ref<HTMLElement | null>(null)
+const editorToolbarHeight = ref(96)
+let editorToolbarResizeObserver: ResizeObserver | null = null
 const scrollAfterLoad = ref(false)
 const isSaving = ref(false)
 const isAiTranslating = ref(false)
@@ -287,10 +290,26 @@ function getItemDraftKey(item: Pick<EditorItem, 'id'>): string {
   return getDraftKey(item.id)
 }
 
-// 저장된 임시 번역을 현재 페이지 항목에 복원한다.
+function syncEditorToolbarHeight(): void {
+  if (editorToolbar.value) {
+    editorToolbarHeight.value = Math.round(editorToolbar.value.getBoundingClientRect().height)
+  }
+}
+
+// 저장된 임시 번역을 복원하고 모바일 sticky 툴바 높이를 추적한다.
 onMounted(() => {
   loadDrafts()
   applyDraftsToItems(items.value)
+  syncEditorToolbarHeight()
+
+  if (typeof ResizeObserver !== 'undefined' && editorToolbar.value) {
+    editorToolbarResizeObserver = new ResizeObserver(syncEditorToolbarHeight)
+    editorToolbarResizeObserver.observe(editorToolbar.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  editorToolbarResizeObserver?.disconnect()
 })
 
 const initialSearch = getEditorQueryString(route.query.search).trim()
@@ -765,6 +784,14 @@ function isActiveSidebarRow(row: SidebarListRow): boolean {
 
 function scrollListToTop(): void {
   nextTick(() => {
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      window.scrollTo({
+        top: 0,
+        behavior: 'auto'
+      })
+      return
+    }
+
     listContainer.value?.scrollTo({
       top: 0,
       behavior: 'auto'
@@ -1321,8 +1348,8 @@ watch(items, (nextItems) => {
 </script>
 
 <template>
-  <div class="flex h-dvh flex-col overflow-hidden">
-    <header class="relative z-50 flex h-16 shrink-0 items-center border-b border-default bg-muted px-2 sm:px-3">
+  <div class="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
+    <header class="sticky top-0 z-50 flex h-16 shrink-0 items-center border-b border-default bg-muted px-2 sm:px-3 lg:relative lg:top-auto">
       <UButton
         :to="backPath"
         icon="i-tabler-chevron-left"
@@ -1380,10 +1407,11 @@ watch(items, (nextItems) => {
       </div>
     </header>
 
-    <div class="flex min-h-0 flex-1 overflow-hidden">
-      <main class="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-default">
+    <div class="flex flex-1 lg:min-h-0 lg:overflow-hidden">
+      <main class="flex min-w-0 flex-1 flex-col lg:min-h-0 lg:border-r lg:border-default">
         <div
-          class="flex shrink-0 flex-wrap gap-1.5 border-b border-default bg-muted p-1.5 sm:gap-2 sm:p-2 md:flex-nowrap"
+          ref="editorToolbar"
+          class="sticky top-16 z-40 flex shrink-0 flex-wrap gap-1.5 border-b border-default bg-muted p-1.5 sm:gap-2 sm:p-2 md:flex-nowrap lg:static lg:z-auto"
         >
           <div class="flex w-full min-w-0 flex-1 gap-1 md:w-auto">
             <UInput
@@ -1625,14 +1653,13 @@ watch(items, (nextItems) => {
           </div>
         </div>
 
-        <div class="relative flex min-h-0 flex-1">
+        <div class="relative flex flex-1 lg:min-h-0">
           <div
             v-if="isLoading"
-            class="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center"
+            class="editor-loading-indicator pointer-events-none fixed inset-x-0 z-30 flex justify-center lg:absolute lg:z-10"
+            :style="{ '--editor-toolbar-height': `${editorToolbarHeight}px` }"
           >
-            <div
-              class="flex items-center gap-3 bg-elevated/50 backdrop-blur-lg px-3 py-2 text-sm text-muted"
-            >
+            <div class="flex items-center gap-3 bg-elevated/50 backdrop-blur-lg px-3 py-2 text-sm text-muted">
               <UIcon
                 name="i-tabler-loader-2"
                 class="size-4 animate-spin"
@@ -1643,12 +1670,12 @@ watch(items, (nextItems) => {
 
           <div
             ref="listContainer"
-            class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-24 lg:pb-20"
+            class="flex min-w-0 flex-1 flex-col pb-24 lg:min-h-0 editor-scrollbar lg:overflow-y-auto lg:pb-20"
           >
             <div class="flex flex-col bg-muted/60">
               <div
                 v-if="activeFilterTags.length"
-                class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1"
+                class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-3 md:pb-1"
               >
                 <div
                   v-for="tag in activeFilterTags"
@@ -1778,7 +1805,7 @@ watch(items, (nextItems) => {
           <EditorPageController
             v-model:page="page"
             :total-pages="totalPages"
-            class="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 self-end lg:left-auto lg:right-4 lg:translate-x-0"
+            class="fixed bottom-4 left-1/2 z-30 -translate-x-1/2 lg:absolute lg:left-auto lg:right-4 lg:translate-x-0"
           />
         </div>
       </main>
@@ -1838,7 +1865,7 @@ watch(items, (nextItems) => {
               </UInput>
             </div>
 
-            <div class="relative min-h-0 flex-1 overflow-y-auto">
+            <div class="editor-scrollbar relative min-h-0 flex-1 overflow-y-auto">
               <div
                 v-if="isSidebarListLoading && !sidebarListRows.length"
                 class="flex items-center justify-center p-5 text-muted"
@@ -1968,7 +1995,7 @@ watch(items, (nextItems) => {
                     </UInput>
                   </div>
 
-                  <div class="min-h-0 flex-1 overflow-y-auto">
+                  <div class="editor-scrollbar min-h-0 flex-1 overflow-y-auto">
                     <div
                       v-if="dictionarySearchStatus === 'pending'"
                       class="flex items-center justify-center p-6 text-muted"
@@ -2171,7 +2198,7 @@ watch(items, (nextItems) => {
                       </UInput>
                     </div>
 
-                    <div class="min-h-0 flex-1 overflow-y-auto">
+                    <div class="editor-scrollbar min-h-0 flex-1 overflow-y-auto">
                       <div
                         v-if="dictionaryEntriesStatus === 'pending'"
                         class="flex items-center justify-center p-6 text-muted"
@@ -2266,7 +2293,7 @@ watch(items, (nextItems) => {
                       </UButton>
                     </div>
 
-                    <div class="min-h-0 flex-1 overflow-y-auto">
+                    <div class="editor-scrollbar min-h-0 flex-1 overflow-y-auto">
                       <div
                         v-if="dictionariesStatus === 'pending'"
                         class="flex items-center justify-center p-6 text-muted"
@@ -2623,7 +2650,7 @@ watch(items, (nextItems) => {
                   </UButton>
                 </div>
 
-                <div class="min-h-0 flex-1 overflow-y-auto p-4">
+                <div class="editor-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
                   <div class="mt-1 flex flex-col gap-3 text-sm">
                     <div
                       v-for="source in visibleSourceLanguageItems"
@@ -2666,7 +2693,7 @@ watch(items, (nextItems) => {
           </template>
 
           <template v-else-if="activeSidebarMenu === 'settings'">
-            <div class="flex flex-col gap-4 p-4">
+            <div class="editor-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
               <div class="flex flex-col gap-2">
                 <p class="text-xs font-medium text-muted">
                   원문 표시 언어
@@ -2738,10 +2765,8 @@ watch(items, (nextItems) => {
           </div>
         </section>
 
-        <nav
-          class="absolute inset-x-0 top-0 z-20 flex h-14 shrink-0 gap-2 bg-muted p-2.5 lg:inset-y-0 lg:left-auto lg:right-0 lg:h-auto lg:w-16 lg:flex-col lg:p-3"
-        >
-          <div class="flex min-w-0 flex-1 gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
+        <nav class="absolute inset-x-0 top-0 z-20 flex h-14 min-h-0 shrink-0 gap-2 overflow-hidden bg-muted p-2.5 lg:inset-y-0 lg:left-auto lg:right-0 lg:h-auto lg:w-16 lg:flex-col lg:p-3">
+          <div class="scrollbar-hidden flex min-h-0 min-w-0 flex-1 gap-2 overflow-x-auto lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto">
             <UTooltip
               v-for="menu in sidebarMenuItems"
               :key="menu.key"
@@ -2798,6 +2823,10 @@ watch(items, (nextItems) => {
 </template>
 
 <style scoped>
+.editor-loading-indicator {
+  top: calc(4rem + var(--editor-toolbar-height) + 1rem);
+}
+
 .editor-sidebar {
   position: fixed;
   inset: 0;
@@ -2816,6 +2845,10 @@ watch(items, (nextItems) => {
 }
 
 @media (min-width: 64rem) {
+  .editor-loading-indicator {
+    top: 1rem;
+  }
+
   .editor-sidebar {
     position: relative;
     inset: auto;

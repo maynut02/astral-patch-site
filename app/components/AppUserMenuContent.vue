@@ -27,6 +27,7 @@ const menuItems = computed(() => [{
   color: 'error' as const,
   onSelect: async () => {
     await clear()
+    await navigateTo('/')
   }
 }])
 </script>
