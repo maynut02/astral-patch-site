@@ -87,7 +87,7 @@ jobs:
             docker compose -p astral-patch --profile migration run --rm db-migrate
             docker compose -p astral-patch up -d --build astral-patch-site
 
-            APP_PORT="$(sed -n 's/^ASTRAL_APP_PORT=//p' .env | tail -1)"
+            APP_PORT="$(sed -n 's/^ASTRAL_APP_PORT=//p' .env | tail -1 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             APP_PORT="${APP_PORT:-3001}"
             case "$APP_PORT" in
               *[!0-9]*|'')
@@ -95,6 +95,10 @@ jobs:
                 exit 1
                 ;;
             esac
+            if [ "$APP_PORT" -lt 1 ] || [ "$APP_PORT" -gt 65535 ]; then
+              echo "ASTRAL_APP_PORT must be between 1 and 65535: $APP_PORT" >&2
+              exit 1
+            fi
 
             for attempt in $(seq 1 30); do
               if curl --fail --silent --show-error "http://127.0.0.1:${APP_PORT}/" >/dev/null; then
