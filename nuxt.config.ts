@@ -14,6 +14,13 @@ export default defineNuxtConfig({
     }
   },
 
+  icon: {
+    clientBundle: {
+      scan: true,
+      sizeLimitKb: 128
+    }
+  },
+
   runtimeConfig: {
     databaseUrl: process.env.DATABASE_URL || '',
     aiApiKey: process.env.AI_API_KEY || '',

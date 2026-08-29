@@ -1648,7 +1648,7 @@ watch(items, (nextItems) => {
             <div class="flex flex-col bg-muted/60">
               <div
                 v-if="activeFilterTags.length"
-                class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1"
+                class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-3 md:pb-1"
               >
                 <div
                   v-for="tag in activeFilterTags"

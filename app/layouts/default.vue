@@ -256,7 +256,7 @@ watch(() => route.fullPath, () => {
                   :link="false"
                   :fallback="currentUserHandle"
                   text-class="text-sm font-medium text-default"
-                  class="max-w-full justify-center"
+                  class="max-w-full justify-center flex-nowrap"
                 />
               </span>
             </button>
@@ -302,7 +302,7 @@ watch(() => route.fullPath, () => {
     </aside>
 
     <header
-      class="flex items-center justify-between gap-3 p-3 sticky top-0 z-10 md:hidden bg-default/75 backdrop-blur-lg"
+      class="flex items-center justify-between gap-3 px-3 py-2 sticky top-0 z-10 md:hidden bg-default border-b border-default"
     >
       <NuxtLink
         to="/"
@@ -330,14 +330,14 @@ watch(() => route.fullPath, () => {
       </button>
     </header>
 
-    <main class="relative min-w-0 flex-1 p-3 pb-5 md:p-5">
+    <main class="relative min-w-0 flex-1 px-3 py-5 md:px-5">
       <slot />
     </main>
 
     <UModal
       v-model:open="isMobileNavigationOpen"
       fullscreen
-      :ui="{ overlay: 'opacity-0', content: 'bg-default/75 backdrop-blur-lg', body: 'flex min-h-0 flex-1 flex-col p-3 sm:p-5' }"
+      :ui="{ overlay: 'opacity-0', content: 'bg-default/75 backdrop-blur-lg divide-y-0', body: 'flex min-h-0 flex-1 flex-col p-3 sm:p-5', close: 'p-2' }"
     >
       <template #body>
         <div class="flex min-h-0 flex-1 flex-col gap-3">
@@ -352,7 +352,7 @@ watch(() => route.fullPath, () => {
                 :to="item.link"
                 active-class="bg-elevated/80! text-default!"
                 :aria-label="item.label"
-                class="flex min-h-11 items-center gap-3 px-3 py-2 text-muted transition-colors hover:bg-muted hover:text-toned"
+                class="flex min-h-12 items-center gap-3 px-3 py-2 text-muted transition-colors hover:bg-muted hover:text-toned"
                 @click="closeMobileNavigation"
               >
                 <UIcon
@@ -368,7 +368,7 @@ watch(() => route.fullPath, () => {
             <button
               type="button"
               aria-label="디스코드 가입"
-              class="flex h-10 w-full items-center justify-center gap-2 bg-[#5460E9] text-sm font-medium transition-colors hover:bg-[#5460E9]/75"
+              class="flex h-12 w-full items-center justify-center gap-2 bg-[#5460E9] text-sm font-medium transition-colors hover:bg-[#5460E9]/75"
             >
               <UIcon
                 name="i-tabler-brand-discord-filled"
@@ -392,7 +392,7 @@ watch(() => route.fullPath, () => {
                   :aria-label="authButtonLabel"
                   :aria-expanded="open"
                   aria-haspopup="menu"
-                  class="flex min-h-10 w-full min-w-0 items-center justify-between px-3 text-left text-default transition-colors bg-elevated/75 hover:bg-elevated"
+                  class="flex min-h-12 w-full min-w-0 items-center justify-center px-3 text-left text-default transition-colors bg-elevated/75 hover:bg-elevated"
                   :class="open ? 'bg-elevated/75' : ''"
                 >
                   <AppUserIdentity
