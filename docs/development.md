@@ -2,7 +2,7 @@
 
 ## 요구사항
 
-- Node.js 22 이상
+- Node.js 22.19 이상(22.x) 또는 Nuxt가 지원하는 상위 버전
 - pnpm 11
 - SSH로 접근 가능한 개발 DB 또는 별도 호환 PostgreSQL
 

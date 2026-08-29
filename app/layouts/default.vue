@@ -302,7 +302,7 @@ watch(() => route.fullPath, () => {
     </aside>
 
     <header
-      class="flex items-center justify-between gap-3 px-3 py-2 sticky top-0 z-10 md:hidden bg-default/75 backdrop-blur-lg"
+      class="flex items-center justify-between gap-3 p-3 sticky top-0 z-10 md:hidden bg-default/75 backdrop-blur-lg"
     >
       <NuxtLink
         to="/"

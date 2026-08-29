@@ -21,7 +21,7 @@ Astral Party 한국어 번역을 조회·제안·검토하는 Nuxt 4 웹 애플�
 
 ## 시작하기
 
-Node.js 22 이상과 pnpm 11을 사용합니다.
+Node.js 22.19 이상(22.x) 또는 Nuxt가 지원하는 상위 버전과 pnpm 11을 사용합니다.
 
 ```bash
 pnpm install
