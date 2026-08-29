@@ -114,7 +114,9 @@ Nuxt는 기본 보안 헤더를 응답에 추가하고, 운영 환경에서는 P
 
 ## 배포
 
-GitHub Actions `ci`가 lint → typecheck → build → production dependency audit 순서로 실행됩니다. `master`의 CI 성공 후 production 배포가 실행됩니다.
+브랜치는 `develop → release → master` 순서로 승격합니다. `ci`는 `develop` push와 `release`/`master` 대상 PR에서 lint → typecheck → build → production dependency audit 순서로 실행됩니다.
+
+production 자동 배포는 같은 저장소의 `develop → release` PR이 실제 merge된 경우에만 실행됩니다. 배포 workflow는 `release` 대상 `pull_request`의 `closed` 이벤트에서 merge 여부와 head branch를 검증하고, merge된 `release` commit만 서버에 checkout합니다. 운영 확인이 끝난 뒤 `release → master` PR로 안정 버전을 반영합니다.
 
 운영 구성:
 

@@ -242,10 +242,13 @@ SSH fingerprint 확인:
 sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 | awk '{print $2}'
 ```
 
-`deploy.yml`은 `master`의 `ci`가 성공한 commit만 배포합니다.
+production 자동 배포는 같은 저장소의 `develop → release` PR이 merge된 경우에만 실행됩니다. `release` 또는 `master`에 직접 push해도 자동 배포하지 않습니다.
 
 ```text
-site commit checkout
+develop → release PR
+→ CI 통과
+→ PR merge
+→ release merge commit 검증/checkout
 → patch main 갱신
 → PostgreSQL 확인
 → backup service/timer 갱신
@@ -254,6 +257,8 @@ site commit checkout
 → Nuxt build/restart
 → health check
 ```
+
+GitHub Actions에서 `Deploy production`을 수동 실행하면 PR 이벤트와 무관하게 `origin/release`의 최신 commit을 다시 배포합니다.
 
 Patch 저장소에서 이 DB에 접근할 때도 5433을 외부에 열지 않고 SSH tunnel을 사용합니다. 필요한 Secrets는 `ASTRAL_DATABASE_URL`, `DB_SSH_HOST`, `DB_SSH_USER`, `DB_SSH_PRIVATE_KEY`, `DB_SSH_KNOWN_HOSTS`입니다.
 

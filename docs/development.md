@@ -41,6 +41,35 @@ Nuxt만 실행:
 pnpm dev:nuxt
 ```
 
+## 브랜치와 릴리스 흐름
+
+브랜치는 다음 역할로 고정합니다.
+
+```text
+develop  개발 작업과 일반 커밋
+release  production 배포 대상
+master   배포 검증이 끝난 안정 버전
+```
+
+기본 흐름:
+
+```text
+develop
+  ↓ PR + CI
+release
+  ↓ production 자동 배포
+  ↓ 운영 확인 후 PR + CI
+master
+```
+
+- GitHub 기본 브랜치는 `develop`로 사용합니다.
+- 평소 코드는 `develop`에서 수정합니다.
+- `develop → release` PR이 merge된 경우에만 production 자동 배포가 실행됩니다.
+- 배포 확인 후 `release → master` PR로 안정 버전을 반영합니다.
+- `release`, `master`에는 직접 push하지 않습니다.
+- `release`, `master`는 PR과 `ci` 통과를 필수로 하고 force push와 삭제를 차단합니다.
+- 수동 production 재배포는 GitHub Actions의 `Deploy production`에서 실행하며 항상 `release`의 최신 commit을 사용합니다.
+
 ## 검증
 
 ```bash

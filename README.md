@@ -39,6 +39,14 @@ pnpm check
 
 개별 명령은 `pnpm lint`, `pnpm typecheck`, `pnpm build`입니다.
 
+## 브랜치 운영
+
+```text
+develop → release → master
+```
+
+GitHub 기본 브랜치는 `develop`로 사용하고 평소 개발도 여기서 진행합니다. `develop → release` PR이 merge되면 production에 자동 배포하고, 운영 확인이 끝난 버전은 `release → master` PR로 반영합니다. `release`와 `master`에는 직접 push하지 않습니다.
+
 ## 환경변수
 
 `.env.example`은 다음 세 구역으로 나뉩니다.

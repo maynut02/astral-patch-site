@@ -1,13 +1,11 @@
 name: Deploy production
 
 on:
-  workflow_run:
-    workflows:
-      - ci
+  pull_request:
     branches:
-      - master
+      - release
     types:
-      - completed
+      - closed
   workflow_dispatch:
 
 permissions:
@@ -19,8 +17,15 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.head.ref == 'develop' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     runs-on: ubuntu-latest
+
     steps:
       - name: Deploy through SSH
         uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
@@ -35,19 +40,32 @@ jobs:
 
             SITE_DIR='${{ secrets.SERVER_WORK_DIR }}'
             PATCH_DIR='${{ secrets.PATCH_SERVER_WORK_DIR }}'
-            DEPLOY_SHA='${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}'
+            DEPLOY_SHA='${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || '' }}'
 
             cd "$SITE_DIR"
             CURRENT_SHA="$(git rev-parse HEAD)"
-            git fetch origin master
+            git fetch origin release
+            RELEASE_SHA="$(git rev-parse origin/release)"
+            DEPLOY_SHA="${DEPLOY_SHA:-$RELEASE_SHA}"
+
+            if [ "$DEPLOY_SHA" != "$RELEASE_SHA" ]; then
+              if git merge-base --is-ancestor "$DEPLOY_SHA" "$RELEASE_SHA"; then
+                echo "Skipping outdated deployment $DEPLOY_SHA; release is already at $RELEASE_SHA"
+                exit 0
+              fi
+
+              echo "Deployment target $DEPLOY_SHA is not part of origin/release" >&2
+              exit 1
+            fi
 
             if [ "$CURRENT_SHA" != "$DEPLOY_SHA" ] && git merge-base --is-ancestor "$DEPLOY_SHA" "$CURRENT_SHA"; then
               echo "Skipping outdated deployment $DEPLOY_SHA; server already has newer $CURRENT_SHA"
               exit 0
             fi
 
-            git checkout master
-            git reset --hard "$DEPLOY_SHA"
+            git reset --hard
+            git checkout -B release "$DEPLOY_SHA"
+            git branch --set-upstream-to=origin/release release >/dev/null 2>&1 || true
 
             cd "$PATCH_DIR"
             git fetch origin
