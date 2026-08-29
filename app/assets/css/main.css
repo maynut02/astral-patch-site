@@ -90,6 +90,11 @@ html {
   scrollbar-color: var(--ui-color-neutral-700) transparent;
 }
 
+.editor-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-color-neutral-700) transparent;
+}
+
 .scrollbar-hidden {
   -ms-overflow-style: none;
   scrollbar-width: none;

@@ -1,22 +1,31 @@
 <script setup lang="ts">
 import {
+  GAME_PROFILE_VALUE_MAX_LENGTH,
   HANDLE_MAX_LENGTH,
   getErrorStatus,
+  sanitizeGameInviteCode,
+  sanitizeGameUid,
+  validateGameInviteCode,
+  validateGameUid,
   validateHandle
 } from '~/utils/profile'
 
-definePageMeta({ middleware: 'authenticated' })
+definePageMeta({ middleware: 'setup-required' })
 
 useHead({ title: '초기 설정' })
 
 const { user, fetch: fetchSession } = useUserSession()
 
 const state = reactive({
-  handle: ''
+  handle: '',
+  gameUid: '',
+  gameInviteCode: ''
 })
 
 const errors = reactive({
-  handle: ''
+  handle: '',
+  gameUid: '',
+  gameInviteCode: ''
 })
 
 const submitting = ref(false)
@@ -30,8 +39,10 @@ watch(user, (value) => {
 
 function validate(): boolean {
   errors.handle = validateHandle(state.handle)
+  errors.gameUid = validateGameUid(state.gameUid)
+  errors.gameInviteCode = validateGameInviteCode(state.gameInviteCode)
 
-  return !errors.handle
+  return !errors.handle && !errors.gameUid && !errors.gameInviteCode
 }
 
 async function submit(): Promise<void> {
@@ -47,7 +58,9 @@ async function submit(): Promise<void> {
     await $fetch('/api/profile', {
       method: 'PATCH',
       body: {
-        handle: state.handle.trim()
+        handle: state.handle.trim(),
+        gameUid: state.gameUid.trim(),
+        gameInviteCode: state.gameInviteCode.trim()
       }
     })
 
@@ -66,10 +79,10 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <div class="flex flex-1 items-center justify-center p-3 md:p-5">
+  <div class="flex flex-1 items-center justify-center">
     <UPageCard
       variant="naked"
-      class="w-full max-w-md"
+      class="w-full max-w-lg"
       title="프로필 설정"
     >
       <UForm
@@ -99,6 +112,47 @@ async function submit(): Promise<void> {
           </UInput>
         </UFormField>
 
+        <div class="grid gap-5 sm:grid-cols-2">
+          <UFormField
+            name="gameUid"
+            label="게임 UID(선택)"
+            description="프로필 - UID"
+            :error="errors.gameUid || undefined"
+          >
+            <UInput
+              :model-value="state.gameUid"
+              :maxlength="GAME_PROFILE_VALUE_MAX_LENGTH"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              autocomplete="off"
+              color="neutral"
+              class="w-full"
+              placeholder="UID"
+              :ui="{ base: 'h-8 leading-5' }"
+              @update:model-value="state.gameUid = sanitizeGameUid($event)"
+            />
+          </UFormField>
+
+          <UFormField
+            name="gameInviteCode"
+            label="게임 초대 코드(선택)"
+            description="임무 - 초대 보상 - 나의 초대 코드"
+            :error="errors.gameInviteCode || undefined"
+          >
+            <UInput
+              :model-value="state.gameInviteCode"
+              :maxlength="GAME_PROFILE_VALUE_MAX_LENGTH"
+              pattern="[A-Za-z0-9]*"
+              autocomplete="off"
+              color="neutral"
+              class="w-full"
+              placeholder="초대 코드"
+              :ui="{ base: 'h-8 leading-5' }"
+              @update:model-value="state.gameInviteCode = sanitizeGameInviteCode($event)"
+            />
+          </UFormField>
+        </div>
+
         <UAlert
           v-if="serverError"
           color="error"
@@ -112,7 +166,7 @@ async function submit(): Promise<void> {
           :loading="submitting"
           color="neutral"
           variant="soft"
-          class="py-2"
+          class="py-2.5 md:py-2"
         >
           저장하고 시작하기
         </UButton>

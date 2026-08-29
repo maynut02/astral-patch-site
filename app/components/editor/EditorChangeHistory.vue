@@ -274,7 +274,7 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
       </div>
     </div>
 
-    <div class="min-h-0 flex-1 overflow-y-auto pb-4">
+    <div class="editor-scrollbar min-h-0 flex-1 overflow-y-auto pb-4">
       <div
         v-if="!itemId"
         class="flex h-full items-center justify-center text-center text-sm text-muted"

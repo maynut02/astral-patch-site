@@ -239,7 +239,7 @@ async function deleteAccount(): Promise<void> {
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-3 md:px-5 py-5 pb-15">
+  <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 pb-15">
     <div>
       <h1 class="text-2xl font-semibold text-default">
         설정
@@ -247,9 +247,7 @@ async function deleteAccount(): Promise<void> {
     </div>
 
     <div class="flex min-w-0 items-center gap-3">
-      <div
-        class="flex size-8 shrink-0 items-center justify-center rounded-full bg-inverted text-base font-semibold text-inverted"
-      >
+      <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-inverted text-base font-semibold text-inverted">
         {{ initial }}
       </div>
       <AppUserIdentity
@@ -263,9 +261,7 @@ async function deleteAccount(): Promise<void> {
       />
     </div>
 
-    <UCard
-      :ui="{ header: 'px-5 py-4 sm:px-6', body: 'px-5 py-5 sm:px-6', footer: 'px-5 py-4 sm:px-6' }"
-    >
+    <UCard :ui="{ header: 'px-5 py-4 sm:px-6', body: 'px-5 py-5 sm:px-6', footer: 'px-5 py-4 sm:px-6' }">
       <template #header>
         <div>
           <h2 class="font-semibold text-default">
@@ -382,7 +378,7 @@ async function deleteAccount(): Promise<void> {
               icon="i-tabler-plus"
               color="neutral"
               variant="soft"
-              size="sm"
+              size="md"
               :disabled="profileLoading || state.socialLinks.length >= SOCIAL_LINK_MAX_COUNT"
               @click="addSocialLink"
             >

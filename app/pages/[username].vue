@@ -89,12 +89,10 @@ useHead({ title: displayHandle })
 </script>
 
 <template>
-  <div class="flex min-h-[calc(100dvh-3.5rem)] items-center justify-center p-3 md:p-5">
-    <UCard :ui="{ root: 'w-full max-w-md', body: 'px-5 py-8' }">
+  <div class="flex h-full items-center justify-center">
+    <UCard :ui="{ root: 'w-full max-w-md max-md:ring-0', body: 'p-0 sm:p-0 md:px-5 md:py-8' }">
       <div class="flex flex-col items-center text-center">
-        <div
-          class="flex size-20 items-center justify-center rounded-full bg-inverted text-4xl font-semibold text-inverted"
-        >
+        <div class="flex size-20 items-center justify-center rounded-full bg-inverted text-4xl font-semibold text-inverted">
           {{ initial }}
         </div>
 

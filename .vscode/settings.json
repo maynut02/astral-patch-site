@@ -1,13 +1,17 @@
 {
-  "[vue]": {
-    "editor.formatOnSave": false
-  },
+  "editor.formatOnSave": false,
+  "editor.insertSpaces": true,
+  "editor.tabSize": 2,
+  "editor.detectIndentation": false,
   "editor.codeActionsOnSave": {
-    "source.fixAll.eslint": "explicit"
+    "source.fixAll.eslint": "always"
   },
+  "editor.codeActionsOnSaveTimeout": 3000,
   "eslint.validate": [
     "javascript",
     "typescript",
     "vue"
-  ]
+  ],
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true
 }
