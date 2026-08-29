@@ -14,13 +14,6 @@ export default defineNuxtConfig({
     }
   },
 
-  icon: {
-    clientBundle: {
-      scan: true,
-      sizeLimitKb: 128
-    }
-  },
-
   runtimeConfig: {
     databaseUrl: process.env.DATABASE_URL || '',
     aiApiKey: process.env.AI_API_KEY || '',
@@ -50,6 +43,13 @@ export default defineNuxtConfig({
         commaDangle: 'never',
         braceStyle: '1tbs'
       }
+    }
+  },
+
+  icon: {
+    clientBundle: {
+      scan: true,
+      sizeLimitKb: 128
     }
   }
 })
