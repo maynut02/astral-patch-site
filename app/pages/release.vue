@@ -5,7 +5,7 @@ import type {
   ReleaseNoteEntry
 } from '#shared/types/releases'
 
-useHead({ title: '릴리즈 노트' })
+useAstralPageSeo('릴리즈 노트')
 
 const releaseTabs: Array<{ label: string, value: ReleaseFeedKey, icon: string }> = [
   { label: '한글패치', value: 'patch', icon: 'i-tabler-package' },

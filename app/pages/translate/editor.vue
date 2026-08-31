@@ -378,7 +378,7 @@ const editorPageTitle = computed(() => {
   return '번역 에디터'
 })
 
-useHead({ title: editorPageTitle })
+useAstralPageSeo(editorPageTitle)
 
 const changedItemIds = computed(() => {
   const ids = new Set<string>()
@@ -2487,6 +2487,7 @@ watch(items, (nextItems) => {
                     <UButton
                       color="neutral"
                       variant="ghost"
+                      size="lg"
                       @click="dictionaryModalOpen = false"
                     >
                       취소
@@ -2496,6 +2497,7 @@ watch(items, (nextItems) => {
                       form="editor-dictionary-form"
                       color="info"
                       variant="soft"
+                      size="lg"
                       :loading="dictionaryModalSaving"
                     >
                       만들기

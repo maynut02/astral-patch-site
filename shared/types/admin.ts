@@ -18,3 +18,9 @@ export interface AdminUserRoleUpdateResponse {
   id: string
   role: UserRole
 }
+
+export interface AdminPatchWatcherConfig {
+  gameVersion: string
+  enabled: boolean
+  updatedAt: string
+}

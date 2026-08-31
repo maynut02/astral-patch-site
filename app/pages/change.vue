@@ -28,7 +28,7 @@ import {
 
 type LogTab = 'translations' | 'source'
 
-useHead({ title: '변경 기록' })
+useAstralPageSeo('변경 기록')
 
 interface LogDiffValue {
   key: string

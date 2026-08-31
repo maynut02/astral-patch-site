@@ -3,7 +3,7 @@ import type { ContributorListItem, ContributorListResponse } from '#shared/types
 
 type ContributorSort = 'translations' | 'approved'
 
-useHead({ title: '기여자' })
+useAstralPageSeo('기여자')
 
 const sortMode = ref<ContributorSort>('translations')
 const sortItems = [

@@ -19,7 +19,7 @@ import {
 
 definePageMeta({ middleware: 'authenticated' })
 
-useHead({ title: '계정 설정' })
+useAstralPageSeo('계정 설정')
 
 interface SocialLinkFormRow {
   key: string
