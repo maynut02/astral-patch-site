@@ -28,9 +28,12 @@ import {
 
 type LogTab = 'translations' | 'source'
 
+useHead({ title: '변경 기록' })
+
 interface LogDiffValue {
   key: string
   label: string
+  lang: string
   parts: EditorDiffPart[]
 }
 
@@ -597,10 +600,17 @@ function getSourceValue(
   return values[language]
 }
 
-function makeUnifiedDiffValue(key: string, label: string, before: string | null, after: string | null): LogDiffValue {
+function makeUnifiedDiffValue(
+  key: string,
+  label: string,
+  lang: string,
+  before: string | null,
+  after: string | null
+): LogDiffValue {
   return {
     key,
     label,
+    lang,
     parts: getEditorDiffParts(before ?? '', after ?? '')
   }
 }
@@ -614,6 +624,7 @@ function getSourceDiffValues(entry: EditorSourceChangeEntry): LogDiffValue[] {
     .map(language => makeUnifiedDiffValue(
       language.key,
       language.label,
+      language.lang,
       getSourceValue(entry, 'before', language.key),
       getSourceValue(entry, 'after', language.key)
     ))
@@ -1138,7 +1149,10 @@ async function retryActiveLog() {
                 class="flex min-w-0 flex-col gap-0.5"
               >
                 <span class="block text-[10px] text-dimmed">{{ value.label }}</span>
-                <p class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6">
+                <p
+                  :lang="value.lang"
+                  class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6"
+                >
                   <template
                     v-for="(part, partIndex) in value.parts"
                     :key="`${part.type}-${partIndex}`"

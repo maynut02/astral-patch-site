@@ -22,6 +22,7 @@ type HistoryColor = 'neutral' | 'success' | 'info' | 'warning' | 'error'
 interface HistoryValue {
   key: string
   label: string
+  lang: string
   before: string
   after: string
   unifiedParts: EditorDiffPart[]
@@ -78,11 +79,11 @@ const sourceChangeLabels: Record<EditorSourceChangeType, string> = {
   removed: '원문 삭제'
 }
 
-const sourceLanguageMeta: Record<EditorLanguage, { label: string }> = {
-  cnS: { label: '중국어 간체' },
-  en: { label: '영어' },
-  jp: { label: '일본어' },
-  cnT: { label: '중국어 번체' }
+const sourceLanguageMeta: Record<EditorLanguage, { label: string, lang: string }> = {
+  cnS: { label: '중국어 간체', lang: 'zh-CN' },
+  en: { label: '영어', lang: 'en' },
+  jp: { label: '일본어', lang: 'ja' },
+  cnT: { label: '중국어 번체', lang: 'zh-TW' }
 }
 
 const sourceFields: Record<EditorLanguage, {
@@ -158,6 +159,7 @@ function getHistoryValues(entry: EditorHistoryEntry): Omit<HistoryValue, 'unifie
     return [{
       key: 'ko',
       label: '한국어 번역',
+      lang: 'ko',
       before: entry.previousText ?? '',
       after: entry.proposedText ?? ''
     }]
@@ -170,6 +172,7 @@ function getHistoryValues(entry: EditorHistoryEntry): Omit<HistoryValue, 'unifie
       return {
         key: language,
         label: sourceLanguageMeta[language].label,
+        lang: sourceLanguageMeta[language].lang,
         before: String(entry[fields.before] ?? ''),
         after: String(entry[fields.after] ?? '')
       }
@@ -400,7 +403,10 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                   <span class="block text-[10px] text-dimmed">
                     {{ value.label }}
                   </span>
-                  <p class="whitespace-pre-wrap text-sm leading-6 min-h-5">
+                  <p
+                    :lang="value.lang"
+                    class="whitespace-pre-wrap text-sm leading-6 min-h-5"
+                  >
                     <template
                       v-for="(part, partIndex) in value.unifiedParts"
                       :key="`${part.type}-${partIndex}`"
@@ -432,7 +438,10 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                   <div class="flex flex-col gap-2">
                     <div class="min-w-0 flex flex-col gap-0.5">
                       <span class="block text-[10px] text-error">수정 전</span>
-                      <p class="whitespace-pre-wrap text-sm leading-6 min-h-5">
+                      <p
+                        :lang="value.lang"
+                        class="whitespace-pre-wrap text-sm leading-6 min-h-5"
+                      >
                         <template
                           v-for="(part, partIndex) in value.beforeParts"
                           :key="`before-${part.type}-${partIndex}`"
@@ -445,7 +454,10 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                     </div>
                     <div class="min-w-0 flex flex-col gap-0.5">
                       <span class="block text-[10px] text-success">수정 후</span>
-                      <p class="whitespace-pre-wrap wrap-break-word text-sm leading-6 min-h-5">
+                      <p
+                        :lang="value.lang"
+                        class="whitespace-pre-wrap wrap-break-word text-sm leading-6 min-h-5"
+                      >
                         <template
                           v-for="(part, partIndex) in value.afterParts"
                           :key="`after-${part.type}-${partIndex}`"

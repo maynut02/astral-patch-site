@@ -16,9 +16,12 @@
   "dependencies": {
     "@iconify-json/lucide": "^1.2.126",
     "@iconify-json/tabler": "^1.2.38",
+    "@nuxt/fonts": "0.14.0",
     "@nuxt/ui": "^4.11.0",
+    "@takumi-rs/core": "^2.13.2",
     "nuxt": "^4.5.2",
     "nuxt-auth-utils": "0.5.30",
+    "nuxt-og-image": "^6.7.8",
     "postgres": "^3.4.9",
     "tailwindcss": "^4.3.3"
   },
@@ -26,6 +29,7 @@
     "@nuxt/eslint": "^1.17.0",
     "@types/node": "^26.2.0",
     "eslint": "^10.9.0",
+    "nuxtseo-layer-devtools": "^5.3.14",
     "typescript": "^6.0.3",
     "vue-tsc": "^3.3.11"
   },

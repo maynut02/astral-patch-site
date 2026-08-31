@@ -214,8 +214,8 @@ watch(() => route.fullPath, () => {
           :content="{ side: 'right', sideOffset: 8 }"
           :ui="{ content: sidebarTooltipContentClass }"
         >
-          <button
-            type="button"
+          <NuxtLink
+            to="https://discord.gg/khYThH3gPD"
             aria-label="알림 서버 가입"
             class="flex h-10 w-full min-w-0 items-center gap-2 overflow-hidden bg-[#5460E9] p-2 text-left transition-colors hover:bg-[#5460E9]/75"
           >
@@ -231,7 +231,7 @@ watch(() => route.fullPath, () => {
                 sidebarLabelVisibilityClass
               ]"
             >알림 서버 가입</span>
-          </button>
+          </NuxtLink>
         </UTooltip>
 
         <UTooltip
@@ -398,8 +398,8 @@ watch(() => route.fullPath, () => {
           </nav>
 
           <div class="shrink-0">
-            <button
-              type="button"
+            <NuxtLink
+              to="https://discord.gg/khYThH3gPD"
               aria-label="알림 서버 가입"
               class="flex h-12 w-full items-center gap-3 px-3 bg-[#5460E9] font-medium transition-colors hover:bg-[#5460E9]/75"
             >
@@ -410,7 +410,7 @@ watch(() => route.fullPath, () => {
                 />
               </span>
               <span>알림 서버 가입</span>
-            </button>
+            </NuxtLink>
           </div>
 
           <section

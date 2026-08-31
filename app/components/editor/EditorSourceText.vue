@@ -13,6 +13,7 @@ type Segment
 
 const props = defineProps<{
   text: string | null
+  lang?: string
 }>()
 
 const emit = defineEmits<{
@@ -60,7 +61,7 @@ function selectReference(part: Extract<Segment, { type: 'astral' }>): void {
 </script>
 
 <template>
-  <span>
+  <span :lang="lang">
     <slot
       v-if="!text"
       name="empty"

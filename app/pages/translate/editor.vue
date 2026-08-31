@@ -74,6 +74,7 @@ interface EditorViewFilterOption {
 interface EditorDictionarySearchField {
   label: string
   text: string
+  lang?: string
 }
 
 function getDictionaryOwnerHandle(dictionary: EditorDictionary): string {
@@ -144,6 +145,37 @@ const listContainer = ref<HTMLElement | null>(null)
 const editorToolbar = ref<HTMLElement | null>(null)
 const editorToolbarHeight = ref(96)
 let editorToolbarResizeObserver: ResizeObserver | null = null
+let mobileSidebarMediaQuery: MediaQueryList | null = null
+let previousBodyOverflow: string | null = null
+let previousDocumentOverflow: string | null = null
+
+function syncMobileSidebarScrollLock(): void {
+  if (!import.meta.client) {
+    return
+  }
+
+  const shouldLock = Boolean(isMobileSidebarOpen.value && mobileSidebarMediaQuery?.matches)
+
+  if (shouldLock) {
+    if (previousBodyOverflow === null) {
+      previousBodyOverflow = document.body.style.overflow
+      previousDocumentOverflow = document.documentElement.style.overflow
+    }
+
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
+    return
+  }
+
+  if (previousBodyOverflow !== null) {
+    document.body.style.overflow = previousBodyOverflow
+    document.documentElement.style.overflow = previousDocumentOverflow ?? ''
+    previousBodyOverflow = null
+    previousDocumentOverflow = null
+  }
+}
+
+watch(isMobileSidebarOpen, syncMobileSidebarScrollLock)
 const scrollAfterLoad = ref(false)
 const isSaving = ref(false)
 const isAiTranslating = ref(false)
@@ -302,6 +334,10 @@ onMounted(() => {
   applyDraftsToItems(items.value)
   syncEditorToolbarHeight()
 
+  mobileSidebarMediaQuery = window.matchMedia('(max-width: 1023px)')
+  mobileSidebarMediaQuery.addEventListener('change', syncMobileSidebarScrollLock)
+  syncMobileSidebarScrollLock()
+
   if (typeof ResizeObserver !== 'undefined' && editorToolbar.value) {
     editorToolbarResizeObserver = new ResizeObserver(syncEditorToolbarHeight)
     editorToolbarResizeObserver.observe(editorToolbar.value)
@@ -310,6 +346,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   editorToolbarResizeObserver?.disconnect()
+  mobileSidebarMediaQuery?.removeEventListener('change', syncMobileSidebarScrollLock)
+  mobileSidebarMediaQuery = null
+  isMobileSidebarOpen.value = false
+  syncMobileSidebarScrollLock()
 })
 
 const initialSearch = getEditorQueryString(route.query.search).trim()
@@ -326,6 +366,20 @@ const revision = computed(() => normalizeEditorRevision(getEditorQueryString(rou
 const isFileMode = computed(() => Boolean(category.value))
 const isTagMode = computed(() => Boolean(version.value && revision.value))
 const isAllMode = computed(() => !isFileMode.value && !isTagMode.value)
+const editorPageTitle = computed(() => {
+  if (isFileMode.value) {
+    return `${category.value} - 번역 에디터`
+  }
+
+  if (isTagMode.value) {
+    return `v${version.value} · r${revision.value} - 번역 에디터`
+  }
+
+  return '번역 에디터'
+})
+
+useHead({ title: editorPageTitle })
+
 const changedItemIds = computed(() => {
   const ids = new Set<string>()
 
@@ -426,9 +480,10 @@ function getDictionarySearchFields(item: EditorItem): EditorDictionarySearchFiel
     { label: 'Key', text: `${item.category}_${item.unitKey}` },
     ...sourceLanguageItems.map(language => ({
       label: language.label,
-      text: item[language.key]
+      text: item[language.key],
+      lang: language.lang
     })),
-    { label: '한국어', text: item.ko }
+    { label: '한국어', text: item.ko, lang: 'ko' }
   ]
 
   return fields.filter(field => field.text && field.text.toLocaleLowerCase().includes(query))
@@ -438,9 +493,10 @@ function getDictionaryExpandedFields(item: EditorItem): EditorDictionarySearchFi
   return [
     ...sourceLanguageItems.map(language => ({
       label: language.label,
-      text: item[language.key]
+      text: item[language.key],
+      lang: language.lang
     })),
-    { label: '한국어', text: item.ko }
+    { label: '한국어', text: item.ko, lang: 'ko' }
   ]
 }
 
@@ -1738,6 +1794,7 @@ watch(items, (nextItems) => {
                       <p class="min-w-0 whitespace-pre-wrap">
                         <EditorSourceText
                           :text="item[source.key] || null"
+                          :lang="source.lang"
                           @select="selectDictionaryReference"
                         >
                           <template #empty>
@@ -2079,6 +2136,7 @@ watch(items, (nextItems) => {
                                   <EditorHighlightedText
                                     :text="field.text"
                                     :query="dictionarySearch"
+                                    :lang="field.lang"
                                   />
                                 </span>
                               </div>
@@ -2102,6 +2160,7 @@ watch(items, (nextItems) => {
                               <EditorHighlightedText
                                 :text="field.text"
                                 :query="dictionarySearch"
+                                :lang="field.lang"
                               />
                             </span>
                             <span
@@ -2661,6 +2720,7 @@ watch(items, (nextItems) => {
                       <div class="whitespace-pre-wrap wrap-break-word">
                         <EditorSourceText
                           :text="dictionaryItem[source.key] || null"
+                          :lang="source.lang"
                           @select="selectDictionaryReference"
                         >
                           <template #empty>
@@ -2672,7 +2732,10 @@ watch(items, (nextItems) => {
 
                     <div class="flex flex-col gap-0.5 border-t border-default pt-3">
                       <span class="text-[10px] text-dimmed">한국어 번역</span>
-                      <p class="whitespace-pre-wrap wrap-break-word">
+                      <p
+                        lang="ko"
+                        class="whitespace-pre-wrap wrap-break-word"
+                      >
                         {{ dictionaryItem.ko || '—' }}
                       </p>
                     </div>
@@ -2766,7 +2829,7 @@ watch(items, (nextItems) => {
         </section>
 
         <nav class="absolute inset-x-0 top-0 z-20 flex h-14 min-h-0 shrink-0 gap-2 overflow-hidden bg-muted p-2.5 lg:inset-y-0 lg:left-auto lg:right-0 lg:h-auto lg:w-16 lg:flex-col lg:p-3">
-          <div class="scrollbar-hidden flex min-h-0 min-w-0 flex-1 gap-2 overflow-x-auto lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto">
+          <div class="scrollbar-hidden flex min-h-0 min-w-0 flex-1 gap-2 overflow-x-auto overscroll-contain lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto">
             <UTooltip
               v-for="menu in sidebarMenuItems"
               :key="menu.key"
@@ -2838,6 +2901,10 @@ watch(items, (nextItems) => {
 
 .editor-sidebar--mobile-open {
   transform: translateX(0);
+}
+
+.editor-sidebar :deep(.editor-scrollbar) {
+  overscroll-behavior: contain;
 }
 
 .editor-sidebar-content {

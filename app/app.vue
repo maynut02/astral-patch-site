@@ -1,5 +1,8 @@
 <script setup>
+const siteTitle = '아스트랄 파티 한글패치'
+
 useHead({
+  titleTemplate: title => title ? `${title} | ${siteTitle}` : siteTitle,
   meta: [
     {
       name: 'viewport',
@@ -17,17 +20,25 @@ useHead({
 
 const toaster = { expand: false, position: 'top-center' }
 
-const title = '아스트랄 파티 한글패치'
-const description = ''
+const description = '아스트랄 파티 한글패치의 다운로드, 설치 가이드, 번역 현황과 변경 기록을 제공하는 비공식 한국어 패치 사이트입니다.'
 
 useSeoMeta({
-  title,
   description,
-  ogTitle: title,
+  ogTitle: siteTitle,
   ogDescription: description,
-  ogImage: null,
-  twitterCard: null
+  ogSiteName: siteTitle,
+  ogType: 'website',
+  twitterCard: 'summary_large_image',
+  twitterTitle: siteTitle,
+  twitterDescription: description
 })
+
+defineOgImage('AstralPatch', {
+  title: siteTitle,
+  description
+}, [
+  { key: 'og', width: 1200, height: 630, alt: siteTitle }
+])
 </script>
 
 <template>

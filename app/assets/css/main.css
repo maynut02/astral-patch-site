@@ -2,7 +2,7 @@
 @import "@nuxt/ui";
 
 @theme {
-  --font-sans: 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans TC', 'Noto Sans KR', 'Noto Sans', sans-serif;
+  --font-sans: 'Noto Sans KR', sans-serif;
   --spacing-main: var(--w-main);
 
   --ui-color-neutral-50: oklch(0.99 0.00 0);
@@ -57,8 +57,9 @@ button:disabled {
   --ui-border-inverted: white;
 }
 
-/* 언어별 줄바꿈 설정 */
+/* 언어별 CJK 글리프와 줄바꿈 설정 */
 :lang(ko) {
+  font-family: 'Noto Sans KR', sans-serif;
   word-break: keep-all;
 }
 
@@ -66,11 +67,21 @@ button:disabled {
   word-break: normal;
 }
 
-:lang(zh) {
+:lang(zh),
+:lang(zh-CN),
+:lang(zh-Hans) {
+  font-family: 'Noto Sans SC', sans-serif;
+  word-break: normal;
+}
+
+:lang(zh-TW),
+:lang(zh-Hant) {
+  font-family: 'Noto Sans TC', sans-serif;
   word-break: normal;
 }
 
 :lang(ja) {
+  font-family: 'Noto Sans JP', sans-serif;
   word-break: break-all;
   line-break: strict;
 }

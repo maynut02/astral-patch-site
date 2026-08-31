@@ -14,11 +14,15 @@ export interface EditorDiffModeOption extends EditorOption<EditorDiffMode> {
   description: string
 }
 
-export const EDITOR_SOURCE_LANGUAGE_OPTIONS: EditorOption<EditorLanguage>[] = [
-  { key: 'cnS', label: '중국어 간체' },
-  { key: 'en', label: '영어' },
-  { key: 'jp', label: '일본어' },
-  { key: 'cnT', label: '중국어 번체' }
+export interface EditorLanguageOption extends EditorOption<EditorLanguage> {
+  lang: string
+}
+
+export const EDITOR_SOURCE_LANGUAGE_OPTIONS: EditorLanguageOption[] = [
+  { key: 'cnS', label: '중국어 간체', lang: 'zh-CN' },
+  { key: 'en', label: '영어', lang: 'en' },
+  { key: 'jp', label: '일본어', lang: 'ja' },
+  { key: 'cnT', label: '중국어 번체', lang: 'zh-TW' }
 ]
 
 export const EDITOR_SEARCH_TYPE_OPTIONS: EditorOption<EditorSearchType>[] = [

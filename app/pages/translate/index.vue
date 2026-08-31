@@ -19,6 +19,8 @@ interface EditorListRow {
 
 type EditorListMode = 'category' | 'version'
 
+useHead({ title: '번역 대시보드' })
+
 const items = [
   { label: '파일', value: 'category' },
   { label: '버전', value: 'version' }
