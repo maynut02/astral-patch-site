@@ -12,7 +12,7 @@ import {
 
 definePageMeta({ middleware: 'setup-required' })
 
-useHead({ title: '초기 설정' })
+useAstralPageSeo('초기 설정')
 
 const { user, fetch: fetchSession } = useUserSession()
 

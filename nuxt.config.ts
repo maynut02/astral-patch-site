@@ -7,6 +7,11 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  site: {
+    url: 'https://astral.maynutlab.com',
+    name: '아스트랄 파티 한글패치'
+  },
+
   ui: {
     colorMode: false,
     experimental: {

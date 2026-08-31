@@ -85,7 +85,7 @@ async function copyProfileValue(value: string, label: string): Promise<void> {
   }
 }
 
-useHead({ title: displayHandle })
+useAstralPageSeo(displayHandle)
 </script>
 
 <template>

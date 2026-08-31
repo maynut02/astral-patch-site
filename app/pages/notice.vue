@@ -1,5 +1,5 @@
 <script setup lang="ts">
-useHead({ title: '공지사항' })
+useAstralPageSeo('공지사항')
 </script>
 
 <template>

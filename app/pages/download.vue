@@ -5,7 +5,7 @@ import type {
   ReleaseNoteEntry
 } from '#shared/types/releases'
 
-useHead({ title: '다운로드' })
+useAstralPageSeo('다운로드')
 
 interface ReleaseAssetMatch {
   asset: ReleaseAssetInfo

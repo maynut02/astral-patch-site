@@ -5,7 +5,7 @@ import { formatEditorDate } from '~/utils/editor-helpers'
 import { getUserRoleMeta } from '~/utils/user-role'
 
 definePageMeta({ middleware: 'admin' })
-useHead({ title: '관리자' })
+useAstralPageSeo('관리자')
 
 const roleItems = [
   { label: '관리자', value: 'admin' },

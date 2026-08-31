@@ -1,5 +1,7 @@
 <script setup>
 const siteTitle = '아스트랄 파티 한글패치'
+const route = useRoute()
+const pageUrl = withSiteUrl(computed(() => route.path))
 
 useHead({
   titleTemplate: title => title ? `${title} | ${siteTitle}` : siteTitle,
@@ -28,6 +30,7 @@ useSeoMeta({
   ogDescription: description,
   ogSiteName: siteTitle,
   ogType: 'website',
+  ogUrl: pageUrl,
   twitterCard: 'summary_large_image',
   twitterTitle: siteTitle,
   twitterDescription: description

@@ -472,7 +472,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
         </div>
       </div>
 
-      <div class="absolute left-1 top-1 md:left-3 md:top-3 z-1 flex max-w-[calc(100%-1.5rem)] items-center gap-2 bg-default/40 px-3 py-1.5 text-xs text-default backdrop-blur-lg">
+      <div class="absolute left-1 top-1 md:left-3 md:top-3 z-1 flex max-w-[calc(100%-1.5rem)] items-center gap-2 bg-default/40 px-2 md:px-3 py-1 md:py-1.5 text-xs text-default font-medium backdrop-blur-lg">
         <span
           class="size-2 shrink-0"
           :class="gameServerIndicatorClass"
