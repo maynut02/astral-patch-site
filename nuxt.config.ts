@@ -2,7 +2,7 @@ export default defineNuxtConfig({
   modules: ['@nuxt/eslint', '@nuxt/fonts', '@nuxt/ui', 'nuxt-auth-utils', 'nuxt-og-image'],
 
   devtools: {
-    enabled: true
+    enabled: false
   },
 
   css: ['~/assets/css/main.css'],

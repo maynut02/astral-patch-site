@@ -18,7 +18,7 @@ import { formatEditorCount, formatEditorDate, formatEditorPercent } from '~/util
 import { EDITOR_STATUS_META, EDITOR_VISIBLE_STATUSES } from '~/utils/editor-progress'
 
 type SupportedRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
-type GuideAnswerKey = 'route' | 'resources' | 'gameRemoved' | 'installMethod' | 'usbDebugging' | 'patcher' | 'started' | 'shizuku'
+type GuideAnswerKey = 'route' | 'resources' | 'gameRemoved' | 'installMethod' | 'usbDebugging' | 'usbConnected' | 'patcher' | 'started' | 'shizuku'
 
 interface ReleaseAssetMatch {
   asset: ReleaseAssetInfo
@@ -136,6 +136,7 @@ const answers = reactive<Record<GuideAnswerKey, string | null>>({
   gameRemoved: null,
   installMethod: null,
   usbDebugging: null,
+  usbConnected: null,
   patcher: null,
   started: null,
   shizuku: null
@@ -341,18 +342,21 @@ function resetAnswers(...keys: GuideAnswerKey[]): void {
 }
 
 watch(() => answers.route, () => {
-  resetAnswers('resources', 'gameRemoved', 'installMethod', 'usbDebugging', 'patcher', 'started', 'shizuku')
+  resetAnswers('resources', 'gameRemoved', 'installMethod', 'usbDebugging', 'usbConnected', 'patcher', 'started', 'shizuku')
 })
 watch(() => answers.resources, () => {
   resetAnswers('patcher', 'started')
 })
 watch(() => answers.gameRemoved, () => {
-  resetAnswers('installMethod', 'usbDebugging', 'patcher', 'started', 'shizuku')
+  resetAnswers('installMethod', 'usbDebugging', 'usbConnected', 'patcher', 'started', 'shizuku')
 })
 watch(() => answers.installMethod, () => {
-  resetAnswers('usbDebugging', 'patcher', 'started', 'shizuku')
+  resetAnswers('usbDebugging', 'usbConnected', 'patcher', 'started', 'shizuku')
 })
 watch(() => answers.usbDebugging, () => {
+  resetAnswers('usbConnected', 'patcher', 'started')
+})
+watch(() => answers.usbConnected, () => {
   resetAnswers('patcher', 'started')
 })
 watch(() => answers.patcher, () => {
@@ -774,14 +778,33 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
                 variant="soft"
                 class="bg-muted"
                 title="개발자 옵션과 USB 디버깅을 먼저 활성화해 주세요."
-                description="설정을 완료한 뒤 USB 케이블로 기기를 PC에 연결하고, 기기에 USB 디버깅 허용 창이 표시되면 허용한 다음 '예'를 선택하세요."
+                description="설정을 완료한 뒤 '예'를 선택하세요."
               />
             </HomeGuideStep>
 
             <HomeGuideStep
               v-if="answers.usbDebugging === 'yes'"
-              v-model="answers.patcher"
+              v-model="answers.usbConnected"
               :step="5"
+              title="PC와 모바일 기기를 USB로 연결했나요?"
+              description="USB 케이블로 Android 기기를 PC에 연결하고, 기기에 USB 디버깅 허용 창이 표시되면 허용해 주세요."
+              :options="yesNoOptions"
+              :status="answers.usbConnected === 'no' ? 'warning' : 'info'"
+            >
+              <UAlert
+                v-if="answers.usbConnected === 'no'"
+                color="neutral"
+                variant="soft"
+                class="bg-muted"
+                title="Android 기기를 PC에 연결해 주세요."
+                description="데이터 통신이 가능한 USB 케이블로 연결한 뒤, 기기에 표시되는 'USB 디버깅 허용' 창에서 허용을 선택하세요."
+              />
+            </HomeGuideStep>
+
+            <HomeGuideStep
+              v-if="answers.usbDebugging === 'yes' && answers.usbConnected === 'yes'"
+              v-model="answers.patcher"
+              :step="6"
               title="Windows 패치 프로그램을 설치했나요?"
               description="PC에서 게임 APK를 설치하려면 Windows 패치 프로그램이 필요합니다."
               :options="yesNoOptions"
@@ -815,9 +838,9 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
             </HomeGuideStep>
 
             <HomeGuideStep
-              v-if="answers.usbDebugging === 'yes' && answers.patcher === 'yes'"
+              v-if="answers.usbDebugging === 'yes' && answers.usbConnected === 'yes' && answers.patcher === 'yes'"
               v-model="answers.started"
-              :step="6"
+              :step="7"
               title="Windows 패치 프로그램을 한 번 실행했나요?"
               description="다운로드 후 최소 한번은 실행해야 사이트를 통해 프로그램을 실행시킬 수 있습니다."
               :options="yesNoOptions"
@@ -834,8 +857,8 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
             </HomeGuideStep>
 
             <HomeGuideStep
-              v-if="answers.usbDebugging === 'yes' && answers.patcher === 'yes' && answers.started === 'yes'"
-              :step="7"
+              v-if="answers.usbDebugging === 'yes' && answers.usbConnected === 'yes' && answers.patcher === 'yes' && answers.started === 'yes'"
+              :step="8"
               title="APK 설치 준비가 완료되었습니다."
               description="Windows 패치 프로그램에서 최신 Android 일본 버전 게임 APK 설치를 진행합니다."
               complete
