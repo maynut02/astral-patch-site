@@ -144,6 +144,37 @@ const listContainer = ref<HTMLElement | null>(null)
 const editorToolbar = ref<HTMLElement | null>(null)
 const editorToolbarHeight = ref(96)
 let editorToolbarResizeObserver: ResizeObserver | null = null
+let mobileSidebarMediaQuery: MediaQueryList | null = null
+let previousBodyOverflow: string | null = null
+let previousDocumentOverflow: string | null = null
+
+function syncMobileSidebarScrollLock(): void {
+  if (!import.meta.client) {
+    return
+  }
+
+  const shouldLock = Boolean(isMobileSidebarOpen.value && mobileSidebarMediaQuery?.matches)
+
+  if (shouldLock) {
+    if (previousBodyOverflow === null) {
+      previousBodyOverflow = document.body.style.overflow
+      previousDocumentOverflow = document.documentElement.style.overflow
+    }
+
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
+    return
+  }
+
+  if (previousBodyOverflow !== null) {
+    document.body.style.overflow = previousBodyOverflow
+    document.documentElement.style.overflow = previousDocumentOverflow ?? ''
+    previousBodyOverflow = null
+    previousDocumentOverflow = null
+  }
+}
+
+watch(isMobileSidebarOpen, syncMobileSidebarScrollLock)
 const scrollAfterLoad = ref(false)
 const isSaving = ref(false)
 const isAiTranslating = ref(false)
@@ -302,6 +333,10 @@ onMounted(() => {
   applyDraftsToItems(items.value)
   syncEditorToolbarHeight()
 
+  mobileSidebarMediaQuery = window.matchMedia('(max-width: 1023px)')
+  mobileSidebarMediaQuery.addEventListener('change', syncMobileSidebarScrollLock)
+  syncMobileSidebarScrollLock()
+
   if (typeof ResizeObserver !== 'undefined' && editorToolbar.value) {
     editorToolbarResizeObserver = new ResizeObserver(syncEditorToolbarHeight)
     editorToolbarResizeObserver.observe(editorToolbar.value)
@@ -310,6 +345,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   editorToolbarResizeObserver?.disconnect()
+  mobileSidebarMediaQuery?.removeEventListener('change', syncMobileSidebarScrollLock)
+  mobileSidebarMediaQuery = null
+  isMobileSidebarOpen.value = false
+  syncMobileSidebarScrollLock()
 })
 
 const initialSearch = getEditorQueryString(route.query.search).trim()
@@ -2766,7 +2805,7 @@ watch(items, (nextItems) => {
         </section>
 
         <nav class="absolute inset-x-0 top-0 z-20 flex h-14 min-h-0 shrink-0 gap-2 overflow-hidden bg-muted p-2.5 lg:inset-y-0 lg:left-auto lg:right-0 lg:h-auto lg:w-16 lg:flex-col lg:p-3">
-          <div class="scrollbar-hidden flex min-h-0 min-w-0 flex-1 gap-2 overflow-x-auto lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto">
+          <div class="scrollbar-hidden flex min-h-0 min-w-0 flex-1 gap-2 overflow-x-auto overscroll-contain lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto">
             <UTooltip
               v-for="menu in sidebarMenuItems"
               :key="menu.key"
@@ -2838,6 +2877,10 @@ watch(items, (nextItems) => {
 
 .editor-sidebar--mobile-open {
   transform: translateX(0);
+}
+
+.editor-sidebar :deep(.editor-scrollbar) {
+  overscroll-behavior: contain;
 }
 
 .editor-sidebar-content {

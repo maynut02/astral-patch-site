@@ -150,7 +150,7 @@ function formatFileSize(bytes: number): string {
 
 function launchWindowsPatcher(
   action: 'settings' | 'install' | 'remove',
-  route?: 'INT_STEAM' | 'CN_STEAM'
+  route?: 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
 ): void {
   if (!import.meta.client) {
     return
@@ -158,6 +158,14 @@ function launchWindowsPatcher(
 
   const routeSuffix = route ? `/${route}` : ''
   window.location.href = `astral://${action}${routeSuffix}`
+}
+
+function launchAndroidPatcher(): void {
+  if (!import.meta.client) {
+    return
+  }
+
+  window.location.href = 'astralpatcher://install-latest'
 }
 
 function reloadReleases(): void {
@@ -344,11 +352,31 @@ function reloadReleases(): void {
 
           <div class="flex h-full flex-col bg-default/75 p-2">
             <UButton
+              icon="i-tabler-brand-windows"
+              color="info"
+              variant="ghost"
+              size="md"
+              class="gap-2 py-2.5"
+              @click="launchWindowsPatcher('install', 'INT_ANDROID')"
+            >
+              Windows 패치 프로그램으로 설치
+            </UButton>
+            <UButton
+              icon="i-tabler-brand-android"
+              color="info"
+              variant="ghost"
+              size="md"
+              class="gap-2 py-2.5"
+              @click="launchAndroidPatcher"
+            >
+              Android 패치 앱으로 설치
+            </UButton>
+            <UButton
               :href="androidApk?.index.downloadUrl"
               :disabled="!androidApk"
               external
               icon="i-tabler-download"
-              color="info"
+              color="neutral"
               variant="ghost"
               size="md"
               class="gap-2 py-2.5"
