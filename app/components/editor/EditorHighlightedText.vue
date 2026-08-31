@@ -7,6 +7,7 @@ interface HighlightSegment {
 const props = defineProps<{
   text: string
   query: string
+  lang?: string
 }>()
 
 const segments = computed<HighlightSegment[]>(() => {
@@ -44,7 +45,10 @@ const segments = computed<HighlightSegment[]>(() => {
 </script>
 
 <template>
-  <span class="whitespace-pre-wrap">
+  <span
+    class="whitespace-pre-wrap"
+    :lang="lang"
+  >
     <span
       v-for="(segment, index) in segments"
       :key="index"

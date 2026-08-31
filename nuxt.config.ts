@@ -1,8 +1,8 @@
 export default defineNuxtConfig({
-  modules: ['@nuxt/eslint', '@nuxt/ui', 'nuxt-auth-utils'],
+  modules: ['@nuxt/eslint', '@nuxt/fonts', '@nuxt/ui', 'nuxt-auth-utils', 'nuxt-og-image'],
 
   devtools: {
-    enabled: false
+    enabled: true
   },
 
   css: ['~/assets/css/main.css'],
@@ -44,6 +44,39 @@ export default defineNuxtConfig({
         braceStyle: '1tbs'
       }
     }
+  },
+
+  fonts: {
+    families: [
+      {
+        name: 'Noto Sans KR',
+        provider: 'google',
+        weights: [400, 500, 600, 700],
+        styles: ['normal'],
+        global: true
+      },
+      {
+        name: 'Noto Sans SC',
+        provider: 'google',
+        weights: [400, 500, 600, 700],
+        styles: ['normal'],
+        global: true
+      },
+      {
+        name: 'Noto Sans TC',
+        provider: 'google',
+        weights: [400, 500, 600, 700],
+        styles: ['normal'],
+        global: true
+      },
+      {
+        name: 'Noto Sans JP',
+        provider: 'google',
+        weights: [400, 500, 600, 700],
+        styles: ['normal'],
+        global: true
+      }
+    ]
   },
 
   icon: {

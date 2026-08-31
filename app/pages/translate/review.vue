@@ -8,6 +8,7 @@ import { getEditorDiffParts } from '~/utils/editor-diff'
 import { formatEditorDate } from '~/utils/editor-helpers'
 
 definePageMeta({ middleware: 'reviewer' })
+useHead({ title: '번역 승인' })
 
 const defaultData: EditorTranslationLogResponse = {
   entries: [],

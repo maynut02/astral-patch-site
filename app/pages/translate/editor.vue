@@ -74,6 +74,7 @@ interface EditorViewFilterOption {
 interface EditorDictionarySearchField {
   label: string
   text: string
+  lang?: string
 }
 
 function getDictionaryOwnerHandle(dictionary: EditorDictionary): string {
@@ -365,6 +366,20 @@ const revision = computed(() => normalizeEditorRevision(getEditorQueryString(rou
 const isFileMode = computed(() => Boolean(category.value))
 const isTagMode = computed(() => Boolean(version.value && revision.value))
 const isAllMode = computed(() => !isFileMode.value && !isTagMode.value)
+const editorPageTitle = computed(() => {
+  if (isFileMode.value) {
+    return `${category.value} - 번역 에디터`
+  }
+
+  if (isTagMode.value) {
+    return `v${version.value} · r${revision.value} - 번역 에디터`
+  }
+
+  return '번역 에디터'
+})
+
+useHead({ title: editorPageTitle })
+
 const changedItemIds = computed(() => {
   const ids = new Set<string>()
 
@@ -465,9 +480,10 @@ function getDictionarySearchFields(item: EditorItem): EditorDictionarySearchFiel
     { label: 'Key', text: `${item.category}_${item.unitKey}` },
     ...sourceLanguageItems.map(language => ({
       label: language.label,
-      text: item[language.key]
+      text: item[language.key],
+      lang: language.lang
     })),
-    { label: '한국어', text: item.ko }
+    { label: '한국어', text: item.ko, lang: 'ko' }
   ]
 
   return fields.filter(field => field.text && field.text.toLocaleLowerCase().includes(query))
@@ -477,9 +493,10 @@ function getDictionaryExpandedFields(item: EditorItem): EditorDictionarySearchFi
   return [
     ...sourceLanguageItems.map(language => ({
       label: language.label,
-      text: item[language.key]
+      text: item[language.key],
+      lang: language.lang
     })),
-    { label: '한국어', text: item.ko }
+    { label: '한국어', text: item.ko, lang: 'ko' }
   ]
 }
 
@@ -1777,6 +1794,7 @@ watch(items, (nextItems) => {
                       <p class="min-w-0 whitespace-pre-wrap">
                         <EditorSourceText
                           :text="item[source.key] || null"
+                          :lang="source.lang"
                           @select="selectDictionaryReference"
                         >
                           <template #empty>
@@ -2118,6 +2136,7 @@ watch(items, (nextItems) => {
                                   <EditorHighlightedText
                                     :text="field.text"
                                     :query="dictionarySearch"
+                                    :lang="field.lang"
                                   />
                                 </span>
                               </div>
@@ -2141,6 +2160,7 @@ watch(items, (nextItems) => {
                               <EditorHighlightedText
                                 :text="field.text"
                                 :query="dictionarySearch"
+                                :lang="field.lang"
                               />
                             </span>
                             <span
@@ -2700,6 +2720,7 @@ watch(items, (nextItems) => {
                       <div class="whitespace-pre-wrap wrap-break-word">
                         <EditorSourceText
                           :text="dictionaryItem[source.key] || null"
+                          :lang="source.lang"
                           @select="selectDictionaryReference"
                         >
                           <template #empty>
@@ -2711,7 +2732,10 @@ watch(items, (nextItems) => {
 
                     <div class="flex flex-col gap-0.5 border-t border-default pt-3">
                       <span class="text-[10px] text-dimmed">한국어 번역</span>
-                      <p class="whitespace-pre-wrap wrap-break-word">
+                      <p
+                        lang="ko"
+                        class="whitespace-pre-wrap wrap-break-word"
+                      >
                         {{ dictionaryItem.ko || '—' }}
                       </p>
                     </div>

@@ -393,6 +393,8 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
     <div class="relative -mx-3 -mt-5 overflow-hidden md:-mx-5">
       <video
         v-once
+        width="1920"
+        height="810"
         autoplay
         muted
         loop

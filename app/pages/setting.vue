@@ -19,7 +19,7 @@ import {
 
 definePageMeta({ middleware: 'authenticated' })
 
-useHead({ title: '설정' })
+useHead({ title: '계정 설정' })
 
 interface SocialLinkFormRow {
   key: string
@@ -242,7 +242,7 @@ async function deleteAccount(): Promise<void> {
   <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 pb-15">
     <div>
       <h1 class="text-2xl font-semibold text-default">
-        설정
+        계정 설정
       </h1>
     </div>
 
