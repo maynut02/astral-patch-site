@@ -421,6 +421,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               :delay-duration="0"
             >
               <UButton
+                to="https://store.steampowered.com/app/2622000/Astral_Party/"
                 icon="i-tabler-brand-steam-filled"
                 color="neutral"
                 variant="link"
@@ -433,6 +434,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               :delay-duration="0"
             >
               <UButton
+                to="https://discord.com/invite/9n2dTTqk5C"
                 icon="i-tabler-brand-discord-filled"
                 color="neutral"
                 variant="link"
@@ -445,6 +447,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               :delay-duration="0"
             >
               <UButton
+                to="https://www.youtube.com/@AstralParty_official"
                 icon="i-tabler-brand-youtube-filled"
                 color="neutral"
                 variant="link"
@@ -457,6 +460,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               :delay-duration="0"
             >
               <UButton
+                to="https://x.com/AstralParty_"
                 icon="i-tabler-brand-x"
                 color="neutral"
                 variant="link"
