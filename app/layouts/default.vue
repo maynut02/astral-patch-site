@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { getHandleInitial, getPublicProfilePath } from '~/utils/profile'
 
-const navItems = [
+type NavItem = {
+  link: string
+  icon: string
+  label: string
+  emphasis?: 'info'
+}
+
+const publicNavItems: NavItem[] = [
   { link: '/', icon: 'i-tabler-home', label: '홈' },
   { link: '/download', icon: 'i-tabler-download', label: '다운로드' },
   { link: '/release', icon: 'i-tabler-clipboard-check', label: '릴리즈 노트' },
@@ -28,6 +35,16 @@ const {
   user: currentUser,
   clear: clearSession
 } = useUserSession()
+
+const navItems = computed<NavItem[]>(() => [
+  ...publicNavItems,
+  ...(currentUser.value?.role === 'admin' || currentUser.value?.role === 'verified'
+    ? [{ link: '/translate/review', icon: 'i-tabler-checkup-list', label: '번역 승인', emphasis: 'info' as const }]
+    : []),
+  ...(currentUser.value?.role === 'admin'
+    ? [{ link: '/admin', icon: 'i-tabler-shield-lock', label: '관리자', emphasis: 'info' as const }]
+    : [])
+])
 
 const sidebarLabelVisibilityClass = computed(() => isSidebarCollapsed.value
   ? 'max-w-0 opacity-0'
@@ -165,10 +182,13 @@ watch(() => route.fullPath, () => {
         >
           <NuxtLink
             :to="item.link"
-            active-class="bg-elevated/80! text-default!"
+            :active-class="item.emphasis === 'info' ? 'bg-info/20! text-info!' : 'bg-elevated/80! text-default!'"
             :aria-label="item.label"
             :class="[
-              'p-2 flex items-center gap-2 overflow-hidden hover:bg-muted text-muted hover:text-toned transition-all shrink-0'
+              'p-2 flex items-center gap-2 overflow-hidden transition-all shrink-0',
+              item.emphasis === 'info'
+                ? 'text-info hover:bg-info/10 hover:text-info'
+                : 'text-muted hover:bg-muted hover:text-toned'
             ]"
           >
             <div class="flex justify-center items-center size-6 shrink-0">
@@ -336,7 +356,7 @@ watch(() => route.fullPath, () => {
       </button>
     </header>
 
-    <main class="relative min-w-0 flex-1 px-3 py-5 md:px-5">
+    <main class="relative min-w-0 flex-1 px-3 py-5 md:px-5 pb-20">
       <slot />
     </main>
 
@@ -356,9 +376,14 @@ watch(() => route.fullPath, () => {
                 v-for="item in navItems"
                 :key="item.label"
                 :to="item.link"
-                active-class="bg-elevated/80! text-default!"
+                :active-class="item.emphasis === 'info' ? 'bg-info/20! text-info!' : 'bg-elevated/80! text-default!'"
                 :aria-label="item.label"
-                class="flex min-h-12 items-center gap-3 px-3 py-2 text-muted transition-colors hover:bg-muted hover:text-toned"
+                :class="[
+                  'flex min-h-12 items-center gap-3 px-3 py-2 transition-colors',
+                  item.emphasis === 'info'
+                    ? 'text-info hover:bg-info/10 hover:text-info'
+                    : 'text-muted hover:bg-muted hover:text-toned'
+                ]"
                 @click="closeMobileNavigation"
               >
                 <span class="flex size-6 shrink-0 items-center justify-center">

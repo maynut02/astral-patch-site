@@ -711,7 +711,7 @@ async function retryActiveLog() {
 </script>
 
 <template>
-  <div class="flex flex-col h-full">
+  <div class="flex flex-col h-full max-w-400 mx-auto">
     <header class="flex flex-col gap-5">
       <div class="flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
         <div class="flex items-center gap-2">
