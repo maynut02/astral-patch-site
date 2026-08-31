@@ -1,7 +1,7 @@
 import { getReleaseFeed } from '../utils/github-releases'
 
 export default defineCachedEventHandler(async () => getReleaseFeed(), {
-  maxAge: 30,
+  maxAge: 60,
   swr: false,
-  name: 'github-release-feed-v3'
+  name: 'github-release-feed-v5'
 })

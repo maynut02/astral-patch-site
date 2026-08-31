@@ -175,7 +175,7 @@ function getVersionPath(version: string, revision: string): string {
 </script>
 
 <template>
-  <div class="flex flex-col h-full">
+  <div class="flex flex-col h-full max-w-400 mx-auto">
     <header class="flex flex-col gap-5">
       <div class="flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
         <div class="flex items-center gap-2">
@@ -398,7 +398,7 @@ function getVersionPath(version: string, revision: string): string {
 
       <div
         v-else
-        class="flex flex-col pt-5 pb-20"
+        class="flex flex-col pt-5"
       >
         <div
           v-for="row in visibleRows"
@@ -440,7 +440,7 @@ function getVersionPath(version: string, revision: string): string {
                     class="size-1.5 rounded-full"
                     :class="EDITOR_STATUS_META[status].color"
                   />
-                  <span class="w-10 shrink-0">
+                  <span class="w-11 shrink-0">
                     {{ formatEditorPercent(row.counts[status], row.total) }}
                   </span>
                 </div>

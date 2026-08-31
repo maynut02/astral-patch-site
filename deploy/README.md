@@ -58,6 +58,7 @@ ASTRAL_PATCH_REPO_DIR=/home/ubuntu/astral-party-korean-patch
 
 AI_API_KEY=
 AI_BASE_URL=https://factchat-cloud.mindlogic.ai/v1/gateway
+GITHUB_TOKEN=<optional GitHub token>
 ```
 
 전체 변수 목록은 `.env.example`의 `3. 서버 운영 환경` 구역을 사용합니다.

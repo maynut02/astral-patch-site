@@ -1,32 +1,33 @@
 <script setup lang="ts">
 import type {
   ReleaseFeedKey,
-  ReleaseFeedResponse,
+  ReleaseHistoryPageResponse,
   ReleaseNoteEntry
 } from '#shared/types/releases'
 
 useHead({ title: '릴리즈 노트' })
 
 const releaseTabs: Array<{ label: string, value: ReleaseFeedKey, icon: string }> = [
-  { label: '버전', value: 'version', icon: 'i-tabler-package' },
-  { label: 'AutoPatcher', value: 'autopatcher', icon: 'i-tabler-app-window' },
-  { label: 'APK', value: 'apk', icon: 'i-tabler-brand-android' }
+  { label: '한글패치', value: 'patch', icon: 'i-tabler-package' },
+  { label: 'Windows 패치 프로그램', value: 'windowsPatcher', icon: 'i-tabler-brand-windows' },
+  { label: 'Android 패치 앱', value: 'androidPatcher', icon: 'i-tabler-brand-android' },
+  { label: 'Android 일본 버전 APK', value: 'androidApk', icon: 'i-tabler-device-mobile-down' }
 ]
 
-const activeTab = ref<ReleaseFeedKey>('version')
-const expandedVersionDownloads = ref<Set<string>>(new Set())
+const activeTab = ref<ReleaseFeedKey>('patch')
+const expandedPatchDownloads = ref<Set<string>>(new Set())
 
 function getReleaseKey(release: ReleaseNoteEntry): string {
   return `${release.id}:${release.tagName}`
 }
 
-function isVersionDownloadExpanded(release: ReleaseNoteEntry): boolean {
-  return expandedVersionDownloads.value.has(getReleaseKey(release))
+function isPatchDownloadExpanded(release: ReleaseNoteEntry): boolean {
+  return expandedPatchDownloads.value.has(getReleaseKey(release))
 }
 
-function toggleVersionDownload(release: ReleaseNoteEntry): void {
+function togglePatchDownload(release: ReleaseNoteEntry): void {
   const key = getReleaseKey(release)
-  const next = new Set(expandedVersionDownloads.value)
+  const next = new Set(expandedPatchDownloads.value)
 
   if (next.has(key)) {
     next.delete(key)
@@ -34,38 +35,80 @@ function toggleVersionDownload(release: ReleaseNoteEntry): void {
     next.add(key)
   }
 
-  expandedVersionDownloads.value = next
+  expandedPatchDownloads.value = next
 }
 const {
-  data: releaseFeed,
+  data: initialHistoryPage,
   status,
   error,
   refresh
-} = await useFetch<ReleaseFeedResponse>('/api/releases')
+} = await useFetch<ReleaseHistoryPageResponse>('/api/releases/history', {
+  query: { page: 1 }
+})
+
+function createEmptyReleaseGroups(): Record<ReleaseFeedKey, ReleaseNoteEntry[]> {
+  return {
+    patch: [],
+    windowsPatcher: [],
+    androidPatcher: [],
+    androidApk: []
+  }
+}
+
+const releases = ref<Record<ReleaseFeedKey, ReleaseNoteEntry[]>>(createEmptyReleaseGroups())
+const fetchedAt = ref('')
+const currentPage = ref(1)
+const hasMore = ref(false)
+const isLoadingMore = ref(false)
+const loadMoreFailed = ref(false)
+const loadMoreTrigger = ref<HTMLElement | null>(null)
+let loadMoreObserver: IntersectionObserver | undefined
+
+function sortReleaseEntries(entries: ReleaseNoteEntry[]): ReleaseNoteEntry[] {
+  return entries.sort((left, right) => {
+    const leftTime = new Date(left.publishedAt).getTime()
+    const rightTime = new Date(right.publishedAt).getTime()
+    return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime)
+  })
+}
+
+function mergeReleaseEntries(
+  current: ReleaseNoteEntry[],
+  incoming: ReleaseNoteEntry[]
+): ReleaseNoteEntry[] {
+  const merged = new Map(current.map(release => [getReleaseKey(release), release]))
+
+  for (const release of incoming) {
+    merged.set(getReleaseKey(release), release)
+  }
+
+  return sortReleaseEntries([...merged.values()])
+}
+
+function applyHistoryPage(page: ReleaseHistoryPageResponse, replace = false): void {
+  const next = replace ? createEmptyReleaseGroups() : { ...releases.value }
+
+  for (const key of Object.keys(next) as ReleaseFeedKey[]) {
+    next[key] = replace
+      ? [...page.releases[key]]
+      : mergeReleaseEntries(next[key], page.releases[key])
+  }
+
+  releases.value = next
+  fetchedAt.value = page.fetchedAt
+  currentPage.value = page.page
+  hasMore.value = page.hasMore
+  loadMoreFailed.value = false
+}
+
+watch(initialHistoryPage, (page) => {
+  if (page) {
+    applyHistoryPage(page, true)
+  }
+}, { immediate: true })
 
 const activeReleases = computed<ReleaseNoteEntry[]>(() => {
-  const releases = releaseFeed.value?.releases
-  if (!releases) {
-    return []
-  }
-
-  const current = releases[activeTab.value]
-  if (current) {
-    return current
-  }
-
-  if (activeTab.value !== 'version') {
-    return []
-  }
-
-  const legacyReleases = releases as unknown as Partial<Record<'int_steam' | 'cn_steam' | 'int_android', ReleaseNoteEntry[]>>
-  const merged = [
-    ...(legacyReleases.int_steam ?? []),
-    ...(legacyReleases.cn_steam ?? []),
-    ...(legacyReleases.int_android ?? [])
-  ]
-
-  return [...new Map(merged.map(release => [release.id, release])).values()]
+  return releases.value[activeTab.value] ?? []
 })
 
 const activeTabLabel = computed(() =>
@@ -91,11 +134,39 @@ onMounted(() => {
   relativeTimeTimer = setInterval(() => {
     relativeTimeNow.value = Date.now()
   }, 1000)
+
+  loadMoreObserver = new IntersectionObserver((entries) => {
+    if (entries.some(entry => entry.isIntersecting)) {
+      void loadMoreReleaseHistory()
+    }
+  }, {
+    rootMargin: '400px 0px'
+  })
+
+  if (loadMoreTrigger.value) {
+    loadMoreObserver.observe(loadMoreTrigger.value)
+  }
 })
 
 onBeforeUnmount(() => {
   if (relativeTimeTimer) {
     clearInterval(relativeTimeTimer)
+  }
+
+  loadMoreObserver?.disconnect()
+})
+
+watch(loadMoreTrigger, (element, previousElement) => {
+  if (!loadMoreObserver) {
+    return
+  }
+
+  if (previousElement) {
+    loadMoreObserver.unobserve(previousElement)
+  }
+
+  if (element) {
+    loadMoreObserver.observe(element)
   }
 })
 
@@ -165,6 +236,20 @@ function formatFileSize(bytes: number): string {
   return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
 }
 
+function isManualSteamAsset(name: string): boolean {
+  const lowerName = name.toLowerCase()
+  return lowerName === 'int_steam_manual_patch.zip'
+    || lowerName === 'cn_steam_manual_patch.zip'
+}
+
+function getVisibleAssets(release: ReleaseNoteEntry) {
+  if (activeTab.value !== 'patch' || isPatchDownloadExpanded(release)) {
+    return release.assets
+  }
+
+  return release.assets.filter(asset => isManualSteamAsset(asset.name))
+}
+
 function getAssetIcon(name: string): string {
   const lowerName = name.toLowerCase()
 
@@ -187,13 +272,40 @@ function getAssetIcon(name: string): string {
   return 'i-tabler-file'
 }
 
-function reloadReleases(): void {
-  void refresh()
+async function loadMoreReleaseHistory(): Promise<void> {
+  if (!hasMore.value || isLoadingMore.value) {
+    return
+  }
+
+  isLoadingMore.value = true
+  loadMoreFailed.value = false
+  loadMoreObserver?.disconnect()
+
+  try {
+    const page = await $fetch<ReleaseHistoryPageResponse>('/api/releases/history', {
+      query: { page: currentPage.value + 1 }
+    })
+    applyHistoryPage(page)
+  } catch {
+    loadMoreFailed.value = true
+  } finally {
+    isLoadingMore.value = false
+    await nextTick()
+
+    if (hasMore.value && loadMoreTrigger.value && loadMoreObserver) {
+      loadMoreObserver.observe(loadMoreTrigger.value)
+    }
+  }
+}
+
+async function reloadReleases(): Promise<void> {
+  loadMoreFailed.value = false
+  await refresh()
 }
 </script>
 
 <template>
-  <div class="flex flex-col gap-5 h-full max-w-6xl mx-auto">
+  <div class="flex flex-col gap-5 h-full max-w-7xl mx-auto">
     <header class="flex flex-col gap-1">
       <div class="flex items-center gap-2">
         <UIcon
@@ -215,7 +327,7 @@ function reloadReleases(): void {
       class="w-full md:w-fit"
       :ui="{
         list: 'w-full bg-elevated/50 p-1 md:w-fit',
-        trigger: 'h-8 flex-1 justify-center px-3 leading-4 md:flex-none'
+        trigger: 'h-8 justify-center px-3 leading-4 md:flex-none'
       }"
       @update:model-value="updateActiveTab"
     />
@@ -226,12 +338,12 @@ function reloadReleases(): void {
         <span class="text-muted">{{ formatCount(activeReleases.length) }}개 릴리즈</span>
       </div>
       <UTooltip
-        v-if="releaseFeed?.fetchedAt"
-        :text="formatDate(releaseFeed.fetchedAt)"
+        v-if="fetchedAt"
+        :text="formatDate(fetchedAt)"
         :delay-duration="0"
       >
-        <span class="hidden shrink-0 cursor-help text-xs text-dimmed sm:inline">
-          마지막 갱신: {{ formatFetchedAgo(releaseFeed.fetchedAt) }}
+        <span class="shrink-0 cursor-help text-xs text-dimmed">
+          마지막 갱신: {{ formatFetchedAgo(fetchedAt) }}
         </span>
       </UTooltip>
     </div>
@@ -263,7 +375,7 @@ function reloadReleases(): void {
     </UAlert>
 
     <div
-      v-else-if="!activeReleases.length"
+      v-else-if="!activeReleases.length && !hasMore"
       class="flex min-h-48 flex-col items-center justify-center border border-default p-6 text-center"
     >
       <UIcon
@@ -325,17 +437,17 @@ function reloadReleases(): void {
             class="flex flex-col"
           >
             <button
-              v-if="activeTab === 'version'"
+              v-if="activeTab === 'patch'"
               type="button"
               class="flex w-full items-center justify-between gap-3 border-b border-default p-3 text-left transition-colors hover:bg-elevated/50"
-              :aria-expanded="isVersionDownloadExpanded(release)"
-              @click="toggleVersionDownload(release)"
+              :aria-expanded="isPatchDownloadExpanded(release)"
+              @click="togglePatchDownload(release)"
             >
               <span class="text-xs font-medium text-muted">다운로드</span>
               <UIcon
                 name="i-tabler-chevron-up"
                 class="size-4 shrink-0 text-dimmed transition-transform"
-                :class="isVersionDownloadExpanded(release) ? '' : 'rotate-180'"
+                :class="isPatchDownloadExpanded(release) ? '' : 'rotate-180'"
               />
             </button>
             <div
@@ -345,11 +457,11 @@ function reloadReleases(): void {
               <span class="text-xs font-medium text-muted">다운로드</span>
             </div>
             <div
-              v-if="activeTab !== 'version' || isVersionDownloadExpanded(release)"
+              v-if="getVisibleAssets(release).length"
               class="flex flex-col"
             >
               <a
-                v-for="asset in release.assets"
+                v-for="asset in getVisibleAssets(release)"
                 :key="asset.id || asset.name"
                 :href="asset.downloadUrl"
                 target="_blank"
@@ -383,6 +495,24 @@ function reloadReleases(): void {
           </section>
         </div>
       </article>
+
+      <div
+        v-if="hasMore || isLoadingMore || loadMoreFailed"
+        ref="loadMoreTrigger"
+        class="flex min-h-16 items-center justify-center"
+      >
+        <UButton
+          v-if="loadMoreFailed"
+          color="neutral"
+          variant="soft"
+          size="sm"
+          icon="i-tabler-refresh"
+          @click="loadMoreReleaseHistory"
+        >
+          다음 릴리즈 불러오기
+        </UButton>
+        <AppLoadingSpinner v-else />
+      </div>
     </div>
   </div>
 </template>
