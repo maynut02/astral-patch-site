@@ -1,31 +1,28 @@
 export type PatchWatcherRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
 
 export type PatchWatcherRunStatus
-  =
-  | 'running'
-  | 'success'
-  | 'partial_failure'
-  | 'failed'
-  | 'disabled'
-  | 'skipped_locked'
+  = 'running'
+    | 'success'
+    | 'partial_failure'
+    | 'failed'
+    | 'disabled'
+    | 'skipped_locked'
 
 export type PatchWatcherRouteStatus
-  =
-  | 'checking'
-  | 'unchanged'
-  | 'change_detected'
-  | 'waiting_processing'
-  | 'dispatched'
-  | 'failed'
-  | 'unknown'
+  = 'checking'
+    | 'unchanged'
+    | 'change_detected'
+    | 'waiting_processing'
+    | 'dispatched'
+    | 'failed'
+    | 'unknown'
 
 export type PatchWatcherOverallState
-  =
-  | 'operational'
-  | 'checking'
-  | 'degraded'
-  | 'outage'
-  | 'paused'
+  = 'operational'
+    | 'checking'
+    | 'degraded'
+    | 'outage'
+    | 'paused'
 
 export type PatchWatcherHourState = 'operational' | 'error' | 'paused' | 'no_data'
 
