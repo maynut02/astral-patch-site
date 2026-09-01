@@ -1,6 +1,7 @@
 export type PatchWatcherRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
 
-export type PatchWatcherRunStatus =
+export type PatchWatcherRunStatus
+  =
   | 'running'
   | 'success'
   | 'partial_failure'
@@ -8,7 +9,8 @@ export type PatchWatcherRunStatus =
   | 'disabled'
   | 'skipped_locked'
 
-export type PatchWatcherRouteStatus =
+export type PatchWatcherRouteStatus
+  =
   | 'checking'
   | 'unchanged'
   | 'change_detected'
@@ -17,7 +19,8 @@ export type PatchWatcherRouteStatus =
   | 'failed'
   | 'unknown'
 
-export type PatchWatcherOverallState =
+export type PatchWatcherOverallState
+  =
   | 'operational'
   | 'checking'
   | 'degraded'
