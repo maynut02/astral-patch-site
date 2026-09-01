@@ -3,6 +3,7 @@ import { createError } from 'h3'
 import { BOT_HANDLE } from './auth-user'
 import { getDatabase } from './database'
 import { getTextLength, parseUuid } from './validation'
+import { broadcastWsMessage } from './ws-hub'
 import type { EditorChangeStatus, EditorHistoryResponse, EditorSaveResponse } from '../../shared/types/editor'
 
 const MAX_TRANSLATION_CHARACTERS = 10_000
@@ -63,7 +64,7 @@ export async function saveEditorTranslation(
   const proposedText = parseTranslationText(input.text)
   const database = getDatabase()
 
-  return database.begin(async (transaction) => {
+  const response: EditorSaveResponse = await database.begin(async (transaction) => {
     const [current] = await transaction<CurrentEditorTranslation[]>`
       SELECT
         tu.current_source_version_id AS "sourceVersionId",
@@ -157,12 +158,22 @@ export async function saveEditorTranslation(
       status: 'pending' as const
     }
   })
+
+  if (response.changed && response.changeId) {
+    broadcastWsMessage({
+      type: 'EDITOR_ITEM_CHANGED',
+      itemId: unitId,
+      changeId: response.changeId
+    }, ['editor', 'change:translation'])
+  }
+
+  return response
 }
 
 export async function retainEditorTranslation(unitId: string, userId: string): Promise<EditorSaveResponse> {
   const database = getDatabase()
 
-  return database.begin(async (transaction) => {
+  const response: EditorSaveResponse = await database.begin(async (transaction) => {
     const [current] = await transaction<RetainableEditorTranslation[]>`
       SELECT
         tu.current_source_version_id AS "sourceVersionId",
@@ -266,6 +277,16 @@ export async function retainEditorTranslation(unitId: string, userId: string): P
       status: 'pending'
     }
   })
+
+  if (response.changed && response.changeId) {
+    broadcastWsMessage({
+      type: 'EDITOR_ITEM_CHANGED',
+      itemId: unitId,
+      changeId: response.changeId
+    }, ['editor', 'change:translation'])
+  }
+
+  return response
 }
 
 export async function getEditorHistory(unitId: string): Promise<EditorHistoryResponse> {

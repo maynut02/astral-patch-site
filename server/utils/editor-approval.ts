@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
 import { getDatabase } from './database'
 import { parseUuid } from './validation'
+import { broadcastWsMessage } from './ws-hub'
 import { resolveEditorRole, type EditorReviewAction, type EditorReviewResponse } from '../../shared/types/editor'
 
 interface PendingEditorChange {
@@ -52,7 +53,7 @@ export async function reviewEditorChange(
   const action = parseReviewAction(input.action)
   const database = getDatabase()
 
-  return database.begin(async (transaction) => {
+  const result = await database.begin(async (transaction) => {
     const [identity] = await transaction<EditorChangeIdentity[]>`
       SELECT
         unit_id AS "unitId",
@@ -103,7 +104,8 @@ export async function reviewEditorChange(
       })
     }
 
-    const nextStatus = action === 'approve' ? 'approved' : 'rejected'
+    const nextStatus: EditorReviewResponse['status'] = action === 'approve' ? 'approved' : 'rejected'
+    let supersededChangeIds: string[] = []
 
     await transaction`
       UPDATE translation_changes
@@ -147,7 +149,7 @@ export async function reviewEditorChange(
           updated_at = now()
       `
 
-      await transaction`
+      const supersededChanges = await transaction<{ id: string }[]>`
         UPDATE translation_changes
         SET
           status = 'superseded',
@@ -157,12 +159,28 @@ export async function reviewEditorChange(
           AND locale = ${change.locale}
           AND status = 'pending'
           AND id <> ${change.id}
+        RETURNING id
       `
+      supersededChangeIds = supersededChanges.map(row => row.id)
     }
 
     return {
-      changeId: change.id,
-      status: nextStatus
+      response: {
+        changeId: change.id,
+        status: nextStatus
+      },
+      itemId: change.unitId,
+      supersededChangeIds
     }
   })
+
+  broadcastWsMessage({
+    type: 'EDITOR_ITEM_REVIEWED',
+    itemId: result.itemId,
+    changeId: result.response.changeId,
+    status: result.response.status,
+    supersededChangeIds: result.supersededChangeIds
+  }, ['editor', 'change:translation'])
+
+  return result.response
 }

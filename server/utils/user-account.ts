@@ -71,6 +71,11 @@ export async function deleteUserAccount(googleSub: string): Promise<void> {
       SET created_by = ${deletedUserId}
       WHERE created_by = ${googleSub}
     `
+    await transaction`
+      UPDATE editor_comments
+      SET created_by = ${deletedUserId}
+      WHERE created_by = ${googleSub}
+    `
 
     const [deleted] = await transaction<{ googleSub: string }[]>`
       DELETE FROM app_users

@@ -11,6 +11,7 @@ import type {
 } from '#shared/types/status'
 
 type StatusColor = 'success' | 'warning' | 'error' | 'info' | 'neutral'
+type HistoryFilter = 'all' | 'failed'
 
 interface StatusMeta {
   label: string
@@ -60,6 +61,11 @@ const hourClass: Record<PatchWatcherHourState, string> = {
   no_data: 'bg-muted hover:bg-elevated'
 }
 
+const historyTabs: Array<{ label: string, value: HistoryFilter }> = [
+  { label: '전체', value: 'all' },
+  { label: '실패', value: 'failed' }
+]
+
 const {
   data,
   status,
@@ -68,13 +74,17 @@ const {
 } = await useFetch<PatchWatcherStatusResponse>('/api/status')
 
 const historyPage = ref(1)
+const historyFilter = ref<HistoryFilter>('all')
 const {
   data: history,
   status: historyStatus,
   error: historyError,
   refresh: refreshHistory
 } = await useFetch<PatchWatcherHistoryResponse>('/api/status/history', {
-  query: { page: historyPage }
+  query: {
+    page: historyPage,
+    filter: historyFilter
+  }
 })
 
 const relativeTimeNow = ref<number | null>(null)
@@ -201,6 +211,15 @@ function nextHistoryPage(): void {
   if (history.value?.hasMore) {
     historyPage.value += 1
   }
+}
+
+function updateHistoryFilter(value: string | number): void {
+  if (value !== 'all' && value !== 'failed') {
+    return
+  }
+
+  historyFilter.value = value
+  historyPage.value = 1
 }
 </script>
 
@@ -465,6 +484,20 @@ function nextHistoryPage(): void {
           <span class="text-xs text-dimmed">페이지 {{ historyPage }}</span>
         </div>
 
+        <UTabs
+          :model-value="historyFilter"
+          :items="historyTabs"
+          :content="false"
+          color="neutral"
+          size="sm"
+          class="self-start"
+          :ui="{
+            list: 'w-full bg-elevated/50 p-1 sm:w-fit',
+            trigger: 'h-8 justify-center px-3 leading-4 sm:flex-none'
+          }"
+          @update:model-value="updateHistoryFilter"
+        />
+
         <div
           v-if="isHistoryLoading"
           class="flex flex-col gap-2"
@@ -489,7 +522,7 @@ function nextHistoryPage(): void {
           v-else-if="!history.entries.length"
           class="flex min-h-32 items-center justify-center border border-default bg-elevated/30 p-6 text-sm text-muted"
         >
-          아직 저장된 감지 기록이 없습니다.
+          {{ historyFilter === 'failed' ? '저장된 실패 감지 기록이 없습니다.' : '아직 저장된 감지 기록이 없습니다.' }}
         </div>
 
         <div

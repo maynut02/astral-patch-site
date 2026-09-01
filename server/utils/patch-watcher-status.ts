@@ -377,7 +377,10 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
   }
 }
 
-export async function getPatchWatcherHistory(page: number): Promise<PatchWatcherHistoryResponse> {
+export async function getPatchWatcherHistory(
+  page: number,
+  failuresOnly = false
+): Promise<PatchWatcherHistoryResponse> {
   const offset = (page - 1) * HISTORY_PAGE_SIZE
   const rows = await withDatabaseRetry<HistoryRunRow[]>(database => database<HistoryRunRow[]>`
     SELECT
@@ -406,6 +409,7 @@ export async function getPatchWatcherHistory(page: number): Promise<PatchWatcher
       ) AS routes
     FROM patch_watch_runs AS run
     LEFT JOIN patch_watch_run_routes AS route ON route.run_id = run.id
+    WHERE ${!failuresOnly} OR run.status IN ('partial_failure', 'failed')
     GROUP BY run.id
     ORDER BY run.started_at DESC
     LIMIT ${HISTORY_PAGE_SIZE + 1}
