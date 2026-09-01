@@ -5,6 +5,7 @@ import type {
   EditorSourceChangesResponse,
   EditorSourceRevision,
   EditorSourceRevisionsResponse,
+  EditorTranslationLogEntry,
   EditorTranslationLogSummary,
   EditorTranslationLogResponse
 } from '../../shared/types/editor'
@@ -162,6 +163,41 @@ export async function getEditorTranslationLogs(
     pageSize: EDITOR_LOG_PAGE_SIZE,
     totalPages: Math.max(1, Math.ceil(total / EDITOR_LOG_PAGE_SIZE))
   }
+}
+
+export async function getEditorTranslationLogEntry(changeId: string): Promise<EditorTranslationLogEntry | null> {
+  const rows = await withDatabaseRetry<EditorTranslationLogEntry[]>(database => database<EditorTranslationLogEntry[]>`
+    SELECT
+      tc.id,
+      tc.unit_id AS "unitId",
+      tu.kind,
+      tu.namespace AS category,
+      tu.unit_key AS "unitKey",
+      CASE
+        WHEN au."role" IN ('admin', 'verified', 'user', 'bot') THEN au."role"
+        ELSE 'user'::text
+      END AS "actorRole",
+      NULLIF(BTRIM(au.handle), '') AS handle,
+      CASE
+        WHEN reviewer."role" IN ('admin', 'verified', 'user', 'bot') THEN reviewer."role"
+        ELSE NULL
+      END AS "reviewerRole",
+      NULLIF(BTRIM(reviewer.handle), '') AS "reviewerHandle",
+      tc.previous_text AS "previousText",
+      tc.proposed_text AS "proposedText",
+      tc.status,
+      tc.created_at AS "createdAt",
+      tc.reviewed_at AS "reviewedAt"
+    FROM translation_changes tc
+    JOIN translation_units tu ON tu.id = tc.unit_id
+    LEFT JOIN app_users au ON au.google_sub = tc.created_by
+    LEFT JOIN app_users reviewer ON reviewer.google_sub = tc.reviewed_by
+    WHERE tc.id = ${changeId}
+      AND tc.locale = 'ko'
+    LIMIT 1
+  `)
+
+  return rows[0] ?? null
 }
 
 interface SourceRevisionRow extends Omit<EditorSourceRevision, 'totalChanges' | 'addedCount' | 'modifiedCount' | 'removedCount'> {

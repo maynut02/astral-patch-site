@@ -20,6 +20,7 @@ import type {
   EditorProgressStatus,
   EditorProgressSummary
 } from '#shared/types/editor-overview'
+import type { AstralWebSocketMessage } from '#shared/types/websocket'
 import { useEditorDictionaries } from '~/composables/editor-dictionaries'
 import { useEditorDraftStorage } from '~/composables/editor-drafts'
 import { useEditorPreferences } from '~/composables/editor-preferences'
@@ -148,6 +149,8 @@ let editorToolbarResizeObserver: ResizeObserver | null = null
 let mobileSidebarMediaQuery: MediaQueryList | null = null
 let previousBodyOverflow: string | null = null
 let previousDocumentOverflow: string | null = null
+let editorRealtimeSyncTimer: ReturnType<typeof setTimeout> | undefined
+const pendingRealtimeItemIds = new Set<string>()
 
 function syncMobileSidebarScrollLock(): void {
   if (!import.meta.client) {
@@ -345,6 +348,11 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (editorRealtimeSyncTimer) {
+    clearTimeout(editorRealtimeSyncTimer)
+    editorRealtimeSyncTimer = undefined
+  }
+  pendingRealtimeItemIds.clear()
   editorToolbarResizeObserver?.disconnect()
   mobileSidebarMediaQuery?.removeEventListener('change', syncMobileSidebarScrollLock)
   mobileSidebarMediaQuery = null
@@ -695,6 +703,157 @@ const {
   server: false,
   lazy: true,
   default: () => defaultOverview
+})
+
+const {
+  onMessage: onWsMessage,
+  onReconnect: onWsReconnect
+} = useAstralWebSocket({
+  topics: ['editor']
+})
+
+async function fetchRealtimeEditorItems(itemIds: string[]): Promise<EditorItem[]> {
+  const chunks: string[][] = []
+
+  for (let index = 0; index < itemIds.length; index += 50) {
+    chunks.push(itemIds.slice(index, index + 50))
+  }
+
+  const responses = await Promise.all(chunks.map(chunk => $fetch<EditorItemsResponse>('/api/editor/items', {
+    query: {
+      page: 1,
+      itemIds: chunk.join(',')
+    }
+  })))
+
+  return responses.flatMap(response => response.items)
+}
+
+function patchRealtimeEditorItem(serverItem: EditorItem): void {
+  const visibleItem = items.value.find(item => item.id === serverItem.id)
+  const keepDraftText = visibleItem && hasItemDraft(visibleItem)
+    ? visibleItem.ko
+    : null
+
+  persistedItemStates.value = {
+    ...persistedItemStates.value,
+    [serverItem.id]: {
+      ko: serverItem.ko,
+      pendingStatus: serverItem.pendingStatus,
+      approvedForCurrentSource: serverItem.approvedForCurrentSource
+    }
+  }
+
+  if (!visibleItem) {
+    return
+  }
+
+  Object.assign(visibleItem, serverItem)
+
+  if (keepDraftText !== null) {
+    visibleItem.ko = keepDraftText
+  }
+}
+
+async function syncEditorOverviewSilently(): Promise<void> {
+  overviewData.value = await $fetch<EditorOverviewResponse>('/api/editor/overview')
+}
+
+function realtimeChangeCanAffectListMembership(): boolean {
+  const hasStatusFilter = viewFilter.value === 'untranslated'
+    || viewFilter.value === 'pending'
+    || viewFilter.value === 'warning'
+  const searchesTranslation = Boolean(search.value)
+    && (searchType.value === 'all'
+      || searchType.value === 'content'
+      || searchType.value === 'translation')
+
+  return hasStatusFilter || searchesTranslation
+}
+
+async function syncEditorPageSilently(): Promise<void> {
+  const draftTexts = new Map(
+    items.value
+      .filter(item => hasItemDraft(item))
+      .map(item => [item.id, item.ko] as const)
+  )
+  const nextData = await $fetch<EditorItemsResponse>('/api/editor/items', {
+    query: requestQuery.value
+  })
+
+  const nextPersistedStates = { ...persistedItemStates.value }
+  for (const item of nextData.items) {
+    nextPersistedStates[item.id] = {
+      ko: item.ko,
+      pendingStatus: item.pendingStatus,
+      approvedForCurrentSource: item.approvedForCurrentSource
+    }
+
+    const draftText = draftTexts.get(item.id)
+    if (draftText !== undefined) item.ko = draftText
+  }
+
+  persistedItemStates.value = nextPersistedStates
+  itemsData.value = nextData
+}
+
+async function syncRealtimeEditorItems(itemIds: string[]): Promise<void> {
+  if (realtimeChangeCanAffectListMembership()) {
+    await syncEditorPageSilently()
+    return
+  }
+
+  const serverItems = await fetchRealtimeEditorItems(itemIds)
+
+  for (const serverItem of serverItems) {
+    patchRealtimeEditorItem(serverItem)
+  }
+}
+
+function scheduleEditorRealtimeSync(message: AstralWebSocketMessage): void {
+  if (typeof message.itemId !== 'string') {
+    return
+  }
+
+  pendingRealtimeItemIds.add(message.itemId)
+
+  if (editorRealtimeSyncTimer) {
+    clearTimeout(editorRealtimeSyncTimer)
+  }
+
+  editorRealtimeSyncTimer = setTimeout(() => {
+    editorRealtimeSyncTimer = undefined
+    const itemIds = [...pendingRealtimeItemIds]
+
+    if (selectedItemId.value && pendingRealtimeItemIds.has(selectedItemId.value)) {
+      historyReloadKey.value += 1
+    }
+
+    pendingRealtimeItemIds.clear()
+    void Promise.allSettled([
+      syncRealtimeEditorItems(itemIds),
+      syncEditorOverviewSilently()
+    ])
+  }, 300)
+}
+
+onWsMessage('EDITOR_ITEM_CHANGED', scheduleEditorRealtimeSync)
+onWsMessage('EDITOR_ITEM_REVIEWED', scheduleEditorRealtimeSync)
+onWsReconnect(() => {
+  if (editorRealtimeSyncTimer) {
+    clearTimeout(editorRealtimeSyncTimer)
+    editorRealtimeSyncTimer = undefined
+  }
+  pendingRealtimeItemIds.clear()
+
+  if (selectedItemId.value) {
+    historyReloadKey.value += 1
+  }
+
+  void Promise.allSettled([
+    syncEditorPageSilently(),
+    syncEditorOverviewSilently()
+  ])
 })
 
 const items = computed(() => itemsData.value?.items ?? [])
@@ -1997,6 +2156,13 @@ watch(items, (nextItems) => {
               :item-status-color="selectedItemStatusMeta?.textColor ?? 'text-muted'"
               :diff-mode="diffMode"
               @changed="handleHistoryChanged"
+            />
+          </template>
+
+          <template v-else-if="activeSidebarMenu === 'comments'">
+            <EditorComments
+              :item-id="selectedItemId"
+              :item-key="selectedItemKey"
             />
           </template>
 

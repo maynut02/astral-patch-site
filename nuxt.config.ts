@@ -42,7 +42,10 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-06-30',
 
   nitro: {
-    compressPublicAssets: true
+    compressPublicAssets: true,
+    experimental: {
+      websocket: true
+    }
   },
 
   eslint: {
