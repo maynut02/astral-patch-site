@@ -309,7 +309,7 @@ function reloadReleases(): void {
           <div class="flex flex-col p-2 bg-default/75 h-full">
             <UButton
               :href="androidPatcher?.index.downloadUrl"
-              :disabled="!androidPatcher"
+              disabled
               external
               icon="i-tabler-download"
               color="info"
@@ -367,19 +367,20 @@ function reloadReleases(): void {
               variant="ghost"
               size="md"
               class="gap-2 py-2.5"
+              disabled
               @click="launchAndroidPatcher"
             >
               Android 패치 앱으로 설치
             </UButton>
             <UButton
               :href="androidApk?.index.downloadUrl"
-              :disabled="!androidApk"
               external
               icon="i-tabler-download"
               color="neutral"
               variant="ghost"
               size="md"
               class="gap-2 py-2.5"
+              disabled
             >
               Android 일본 버전 APK 다운로드
             </UButton>

@@ -56,7 +56,7 @@ const changeStatusColors: Record<EditorChangeStatus, 'warning' | 'success' | 'er
 const routeOptions = [
   { label: 'Steam 글로벌', value: 'INT_STEAM', icon: 'i-tabler-brand-steam' },
   { label: 'Steam 중국', value: 'CN_STEAM', icon: 'i-tabler-brand-steam' },
-  { label: 'Android 일본', value: 'INT_ANDROID', icon: 'i-tabler-brand-android' }
+  { label: 'Android 일본', value: 'INT_ANDROID', icon: 'i-tabler-brand-android', disabled: true }
 ]
 const yesNoOptions = [
   { label: '예', value: 'yes' },
