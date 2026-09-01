@@ -69,7 +69,7 @@ const patcherOptions = [
 ]
 const androidInstallOptions = [
   { label: 'Android 앱으로 설치', value: 'app', icon: 'i-tabler-device-mobile' },
-  { label: 'PC 프로그램으로 설치', value: 'pc', icon: 'i-tabler-device-desktop' }
+  { label: 'PC 프로그램으로 설치', value: 'pc', icon: 'i-tabler-device-desktop', disabled: true }
 ]
 
 const {
@@ -869,7 +869,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
                 variant="soft"
                 size="lg"
                 class="px-4 py-2.5 w-fit"
-                @click="launchWindowsPatcher('install', 'INT_ANDROID')"
+                disabled
               >
                 원클릭 게임 APK 설치
               </UButton>

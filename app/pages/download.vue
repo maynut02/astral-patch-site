@@ -357,7 +357,7 @@ function reloadReleases(): void {
               variant="ghost"
               size="md"
               class="gap-2 py-2.5"
-              @click="launchWindowsPatcher('install', 'INT_ANDROID')"
+              disabled
             >
               Windows 패치 프로그램으로 설치
             </UButton>

@@ -3,6 +3,7 @@ interface GuideOption {
   label: string
   value: string
   icon?: string
+  disabled?: boolean
 }
 
 type GuideStepStatus = 'info' | 'warning' | 'success'
@@ -103,6 +104,7 @@ const titleClass = computed(() => ({
           color="neutral"
           :variant="modelValue === option.value ? 'soft' : 'link'"
           :icon="option.icon"
+          :disabled="option.disabled"
           size="lg"
           class="px-4 py-2.5"
           @click="emit('update:modelValue', option.value)"

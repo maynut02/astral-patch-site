@@ -20,6 +20,9 @@ export default defineNuxtConfig({
   },
 
   runtimeConfig: {
+    session: {
+      maxAge: 60 * 60 * 24 * 30
+    },
     databaseUrl: process.env.DATABASE_URL || '',
     aiApiKey: process.env.AI_API_KEY || '',
     aiBaseUrl: process.env.AI_BASE_URL || ''
