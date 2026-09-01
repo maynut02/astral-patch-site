@@ -9,7 +9,7 @@ import { broadcastWsMessage } from './ws-hub'
 export const EDITOR_COMMENT_PAGE_SIZE = 50
 export const EDITOR_COMMENT_MAX_LENGTH = 2_000
 
-interface EditorCommentRow extends EditorComment {}
+type EditorCommentRow = EditorComment
 
 interface EditorCommentCursorRow {
   id: string
