@@ -310,6 +310,17 @@ function reloadReleases(): void {
             >
               Android 패치 앱 다운로드
             </UButton>
+            <UButton
+              href="https://astral.maynutlab.com/android"
+              external
+              icon="i-tabler-external-link"
+              color="neutral"
+              variant="ghost"
+              size="md"
+              class="gap-2 py-2.5"
+            >
+              패치 앱 열기
+            </UButton>
           </div>
         </article>
 
