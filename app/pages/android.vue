@@ -16,6 +16,7 @@ const {
 
 const androidPatcher = computed(() => releaseFeed.value?.distribution.androidPatcher ?? null)
 const isLoading = computed(() => status.value === 'idle' || status.value === 'pending')
+const androidIntentUrl = 'intent://astral.maynutlab.com/android#Intent;scheme=https;package=com.maynutlab.astralpatcher;end'
 
 function formatFileSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -63,6 +64,17 @@ function reloadRelease(): void {
         </div>
 
         <UButton
+          :href="androidIntentUrl"
+          external
+          icon="i-tabler-external-link"
+          color="info"
+          size="xl"
+          class="mt-7 justify-center px-4"
+        >
+          Android 패치 앱 열기
+        </UButton>
+
+        <UButton
           :href="androidPatcher?.index.downloadUrl"
           :disabled="!androidPatcher"
           :loading="isLoading"
@@ -71,7 +83,7 @@ function reloadRelease(): void {
           color="info"
           variant="soft"
           size="xl"
-          class="mt-7 justify-center px-4"
+          class="mt-3 justify-center px-4"
         >
           Android 패치 앱 다운로드
         </UButton>
@@ -80,7 +92,7 @@ function reloadRelease(): void {
           to="/"
           icon="i-tabler-arrow-back-up"
           color="neutral"
-          variant="soft"
+          variant="link"
           size="xl"
           class="mt-7 justify-center px-4"
         >
