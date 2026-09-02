@@ -33,6 +33,21 @@ const dateFormatter = new Intl.DateTimeFormat('ko-KR', {
 const relativeTimeNow = ref<number | null>(null)
 let relativeTimeTimer: ReturnType<typeof setInterval> | undefined
 
+const installationGuideItems = [
+  {
+    label: 'Windows 패치 프로그램 설치 및 사용 방법',
+    icon: 'i-tabler-app-window',
+    value: 'windows-patcher',
+    slot: 'windows-patcher'
+  },
+  {
+    label: 'Android 패치 앱 설치 및 사용 방법',
+    icon: 'i-tabler-brand-android',
+    value: 'android-patcher',
+    slot: 'android-patcher'
+  }
+]
+
 onMounted(() => {
   relativeTimeNow.value = Date.now()
   relativeTimeTimer = setInterval(() => {
@@ -527,5 +542,227 @@ function reloadReleases(): void {
       />
       최신 릴리즈 정보를 확인하고 있습니다.
     </div>
+
+    <section class="mt-3 flex flex-col gap-3">
+      <span class="font-medium">
+        설치 및 사용 방법
+      </span>
+
+      <div class="border border-default bg-muted">
+        <UAccordion
+          :items="installationGuideItems"
+          color="neutral"
+          :ui="{
+            trigger: 'px-3 py-4 sm:px-5',
+            body: 'px-3 pb-5 sm:px-5'
+          }"
+        >
+          <template #windows-patcher-body>
+            <div class="flex flex-col gap-6 pt-1">
+              <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="flex items-center gap-2 bg-elevated px-3 py-2.5 text-sm text-toned">
+                  <UIcon
+                    name="i-tabler-check"
+                    class="size-4 shrink-0 text-success"
+                  />
+                  게임 리소스 다운로드 필요
+                </div>
+              </div>
+
+              <ol class="flex flex-col gap-5">
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">1</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      게임 설치 및 리소스 준비
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      Steam에서 Astral Party를 설치합니다. 게임을 한 번 실행해 최신 리소스 다운로드를 완료한 뒤 게임을 종료해 주세요.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">2</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      Windows 패치 프로그램 실행
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      다운로드한 AstralWindowsPatcher.exe를 실행합니다. 처음 실행하면 최신 프로그램 버전을 확인하고, 웹사이트의 원클릭 버튼과 연동할 수 있도록 프로그램을 등록합니다. 이후에는 다운로드한 파일을 다시 찾지 않아도 웹사이트에서 패처를 열 수 있습니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">3</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      Steam 지역과 경로 확인
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      패처가 Steam 게임 경로와 리소스 경로를 자동으로 찾습니다. 경로를 찾지 못했거나 다른 버전을 사용한다면 ‘Steam 설정’에서 Steam 글로벌·중국 지역을 선택하고 ‘게임 경로 자동 찾기’를 실행해 주세요. 필요한 경우 두 경로를 직접 입력할 수도 있습니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">4</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      한글패치 설치
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      다운로드 페이지에서 사용하는 버전의 ‘원클릭 한글패치 설치’를 누르거나, 프로그램에서 ‘Steam 패치 설치 / 업데이트’를 선택합니다. 호환 패치 확인, 다운로드, 원본 백업, 파일 검증과 적용이 자동으로 진행되므로 완료 메시지가 나올 때까지 프로그램을 종료하지 마세요.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">5</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      업데이트 및 패치 제거
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      게임이나 한글패치가 업데이트되면 업데이트 작업을 다시 실행합니다. 한글패치를 제거하려면 웹사이트의 원클릭 삭제 버튼이나 프로그램의 ‘Steam 패치 제거’를 사용하면 원본 파일을 복원합니다.
+                    </p>
+                  </div>
+                </li>
+              </ol>
+
+              <UAlert
+                icon="i-tabler-help-filled"
+                color="info"
+                variant="soft"
+                title="경로 탐지 또는 패치 제거에 실패한 경우"
+                description="Steam 설정에서 경로를 다시 찾고, 게임 파일이 외부에서 변경되어 제거할 수 없다면 Steam 파일 무결성 검사를 완료한 뒤 다시 시도해 주세요."
+              />
+            </div>
+          </template>
+
+          <template #android-patcher-body>
+            <div class="flex flex-col gap-6 pt-1">
+              <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="flex items-center gap-2 bg-elevated px-3 py-2.5 text-sm text-toned">
+                  <UIcon
+                    name="i-tabler-check"
+                    class="size-4 shrink-0 text-success"
+                  />
+                  WIFI 필요
+                </div>
+                <div class="flex items-center gap-2 bg-elevated px-3 py-2.5 text-sm text-toned">
+                  <UIcon
+                    name="i-tabler-x"
+                    class="size-4 shrink-0 text-error"
+                  />
+                  일본 Google 계정 불필요
+                </div>
+                <div class="flex items-center gap-2 bg-elevated px-3 py-2.5 text-sm text-toned">
+                  <UIcon
+                    name="i-tabler-x"
+                    class="size-4 shrink-0 text-error"
+                  />
+                  VPN 불필요
+                </div>
+                <div class="flex items-center gap-2 bg-elevated px-3 py-2.5 text-sm text-toned">
+                  <UIcon
+                    name="i-tabler-x"
+                    class="size-4 shrink-0 text-error"
+                  />
+                  PC 불필요
+                </div>
+              </div>
+
+              <ol class="flex flex-col gap-5">
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 md:size-8 items-center justify-center bg-elevated text-sm font-semibold">1</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      패치 앱과 Shizuku 설치
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      Android 패치 앱을 설치해 실행한 뒤 Shizuku 설치 버튼을 누릅니다. 출처를 알 수 없는 앱 설치 권한을 요청하면 허용해 주세요. Shizuku 설정을 이미 완료했다면 4단계로 넘어가면 됩니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 md:size-8 items-center justify-center bg-elevated text-sm font-semibold">2</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      개발자 옵션과 디버깅 활성화
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      설정 → 스마트폰·태블릿 정보 → 소프트웨어 정보에서 빌드 번호를 연속으로 눌러 개발자 모드를 활성화합니다. 개발자 옵션에서 USB 디버깅과 무선 디버깅을 켜 주세요.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 md:size-8 items-center justify-center bg-elevated text-sm font-semibold">3</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      Shizuku 페어링 및 시작
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      Shizuku에서 페어링을 누르고 알림을 허용합니다. 개발자 옵션의 ‘페어링 코드로 기기 페어링’을 선택한 뒤, 알림창의 Shizuku 코드 입력란에 표시된 코드를 입력합니다. Shizuku로 돌아와 시작을 누르고 안내 창이 사라질 때까지 기다려 주세요.
+                    </p>
+                    <p class="text-xs leading-5 text-dimmed">
+                      페어링 코드 방식은 Android 11 이상에서 사용할 수 있습니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 md:size-8 items-center justify-center bg-elevated text-sm font-semibold">4</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      패치 앱 권한 허용
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      Android 패치 앱으로 돌아와 권한 허용을 누른 뒤 ‘항상 허용’을 선택합니다. Shizuku 상태가 초록색이면 준비가 끝난 것입니다. 이 설정은 처음 한 번만 하면 되며, 초록색이 아니라면 페어링과 시작 과정을 다시 진행해 주세요.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 md:size-8 items-center justify-center bg-elevated text-sm font-semibold">5</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      게임 준비 및 한글패치 적용
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      패치 앱에서 게임 설치를 누르고, 설치가 끝나면 게임을 한 번 실행해 리소스 다운로드를 완료합니다. 다시 패치 앱으로 돌아와 한글패치 적용을 누르세요. 이미 완료된 항목은 초록색으로 표시되므로 건너뛰면 됩니다.
+                    </p>
+                  </div>
+                </li>
+              </ol>
+
+              <UAlert
+                icon="i-tabler-help-filled"
+                color="info"
+                variant="soft"
+                title="게임 또는 한글패치가 업데이트된 경우"
+                description="패치 앱에서 노란색으로 표시된 항목의 버튼만 누르면 필요한 항목을 자동으로 업데이트합니다."
+              />
+
+              <div class="flex justify-end">
+                <UButton
+                  href="https://arca.live/b/astralparty/181792057"
+                  external
+                  icon="i-tabler-external-link"
+                  color="neutral"
+                  variant="soft"
+                  size="sm"
+                >
+                  이미지가 포함된 가이드 보기
+                </UButton>
+              </div>
+            </div>
+          </template>
+        </UAccordion>
+      </div>
+    </section>
   </div>
 </template>

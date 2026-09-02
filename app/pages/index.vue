@@ -459,9 +459,22 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
     </div>
 
     <section class="mx-auto flex w-full max-w-3xl flex-col gap-5 py-5">
-      <h1 class="text-xl font-semibold">
-        한글패치 설치 도우미
-      </h1>
+      <header class="flex items-center justify-between gap-3">
+        <h1 class="text-xl font-semibold">
+          한글패치 설치 도우미
+        </h1>
+
+        <UButton
+          to="/download"
+          trailing-icon="i-tabler-arrow-right"
+          color="neutral"
+          variant="link"
+          size="md"
+          class="shrink-0"
+        >
+          전체 보기
+        </UButton>
+      </header>
 
       <div class="flex flex-col">
         <HomeGuideStep
