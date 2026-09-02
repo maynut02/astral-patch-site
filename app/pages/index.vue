@@ -18,7 +18,8 @@ import { formatEditorCount, formatEditorDate, formatEditorPercent } from '~/util
 import { EDITOR_STATUS_META, EDITOR_VISIBLE_STATUSES } from '~/utils/editor-progress'
 
 type SupportedRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
-type GuideAnswerKey = 'route' | 'resources' | 'gameRemoved' | 'installMethod' | 'usbDebugging' | 'usbConnected' | 'patcher' | 'started' | 'shizuku'
+type GuideAnswerKey = 'route' | 'resources' | 'patcher' | 'started' | 'shizuku'
+type VisibleReleaseFeedKey = Exclude<ReleaseFeedKey, 'androidApk'>
 
 interface ReleaseAssetMatch {
   asset: ReleaseAssetInfo
@@ -26,17 +27,16 @@ interface ReleaseAssetMatch {
 }
 
 interface RecentReleaseEntry {
-  feed: ReleaseFeedKey
+  feed: VisibleReleaseFeedKey
   release: ReleaseNoteEntry
 }
 
 const RECENT_ITEM_LIMIT = 5
 
-const releaseFeedLabels: Record<ReleaseFeedKey, string> = {
+const releaseFeedLabels: Record<VisibleReleaseFeedKey, string> = {
   patch: '한글패치',
   windowsPatcher: 'Windows 패치 프로그램',
-  androidPatcher: 'Android 패치 앱',
-  androidApk: 'Android 일본 버전 APK'
+  androidPatcher: 'Android 패치 앱'
 }
 
 const changeStatusLabels: Record<EditorChangeStatus, string> = {
@@ -56,7 +56,7 @@ const changeStatusColors: Record<EditorChangeStatus, 'warning' | 'success' | 'er
 const routeOptions = [
   { label: 'Steam 글로벌', value: 'INT_STEAM', icon: 'i-tabler-brand-steam' },
   { label: 'Steam 중국', value: 'CN_STEAM', icon: 'i-tabler-brand-steam' },
-  { label: 'Android 일본', value: 'INT_ANDROID', icon: 'i-tabler-brand-android', disabled: true }
+  { label: 'Android 일본', value: 'INT_ANDROID', icon: 'i-tabler-brand-android' }
 ]
 const yesNoOptions = [
   { label: '예', value: 'yes' },
@@ -67,11 +67,6 @@ const patcherOptions = [
   { label: '아니오', value: 'no' },
   { label: '사용하지 않음', value: 'manual' }
 ]
-const androidInstallOptions = [
-  { label: 'Android 앱으로 설치', value: 'app', icon: 'i-tabler-device-mobile' },
-  { label: 'PC 프로그램으로 설치', value: 'pc', icon: 'i-tabler-device-desktop', disabled: true }
-]
-
 const {
   data: releaseFeed,
   status: releaseStatus,
@@ -133,10 +128,6 @@ const isOverviewLoading = computed(() => overviewStatus.value === 'idle' || over
 const answers = reactive<Record<GuideAnswerKey, string | null>>({
   route: null,
   resources: null,
-  gameRemoved: null,
-  installMethod: null,
-  usbDebugging: null,
-  usbConnected: null,
   patcher: null,
   started: null,
   shizuku: null
@@ -159,7 +150,7 @@ const recentReleases = computed<RecentReleaseEntry[]>(() => {
     return []
   }
 
-  return (Object.keys(releaseFeedLabels) as ReleaseFeedKey[])
+  return (Object.keys(releaseFeedLabels) as VisibleReleaseFeedKey[])
     .flatMap(feed => releases[feed].map(release => ({ feed, release })))
     .sort((left, right) => {
       const leftTime = new Date(left.release.publishedAt).getTime()
@@ -342,21 +333,9 @@ function resetAnswers(...keys: GuideAnswerKey[]): void {
 }
 
 watch(() => answers.route, () => {
-  resetAnswers('resources', 'gameRemoved', 'installMethod', 'usbDebugging', 'usbConnected', 'patcher', 'started', 'shizuku')
+  resetAnswers('resources', 'patcher', 'started', 'shizuku')
 })
 watch(() => answers.resources, () => {
-  resetAnswers('patcher', 'started')
-})
-watch(() => answers.gameRemoved, () => {
-  resetAnswers('installMethod', 'usbDebugging', 'usbConnected', 'patcher', 'started', 'shizuku')
-})
-watch(() => answers.installMethod, () => {
-  resetAnswers('usbDebugging', 'usbConnected', 'patcher', 'started', 'shizuku')
-})
-watch(() => answers.usbDebugging, () => {
-  resetAnswers('usbConnected', 'patcher', 'started')
-})
-watch(() => answers.usbConnected, () => {
   resetAnswers('patcher', 'started')
 })
 watch(() => answers.patcher, () => {
@@ -635,246 +614,91 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
 
         <template v-if="isAndroid">
           <HomeGuideStep
-            v-model="answers.gameRemoved"
+            v-model="answers.patcher"
             :step="2"
-            title="기존 게임 APK를 삭제했나요?"
-            description="기존 APK가 설치된 상태에서는 한글패치용 APK를 설치할 수 없습니다."
+            title="Android 패치 앱을 설치했나요?"
+            description="패치 앱을 통해 게임 앱과 한글패치 리소스를 관리합니다."
             :options="yesNoOptions"
-            :status="answers.gameRemoved === 'no' ? 'warning' : 'info'"
+            :status="answers.patcher === 'no' ? 'warning' : 'info'"
           >
+            <div
+              v-if="answers.patcher === 'no'"
+              class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div>
+                <p class="text-sm font-medium text-default">
+                  Android 패치 앱 설치가 필요합니다.
+                </p>
+                <p class="mt-1 text-sm text-muted">
+                  Android 패치 앱을 다운로드해 설치한 뒤 '예'를 선택하세요.
+                </p>
+              </div>
+              <UButton
+                :href="androidPatcher?.index.downloadUrl"
+                :disabled="!androidPatcher"
+                external
+                icon="i-tabler-download"
+                color="info"
+                variant="soft"
+                size="lg"
+                class="shrink-0 justify-center px-4 py-2.5"
+              >
+                Android 패치 앱 다운로드
+              </UButton>
+            </div>
+          </HomeGuideStep>
+
+          <HomeGuideStep
+            v-if="answers.patcher === 'yes'"
+            v-model="answers.shizuku"
+            :step="3"
+            title="Shizuku를 실행하고 Android 패치 앱 권한을 허용했나요?"
+            description="Android 패치 앱이 게임 APK를 올바른 설치 출처로 설치하려면 Shizuku 권한이 필요합니다."
+            :options="yesNoOptions"
+            :status="answers.shizuku === 'no' ? 'warning' : 'info'"
+          >
+            <template #before-options>
+              <UButton
+                icon="i-tabler-settings-code"
+                color="neutral"
+                variant="soft"
+                size="lg"
+                class="w-fit px-4 py-2.5"
+                @click="openDeveloperModeHelp('shizuku')"
+              >
+                개발자 모드 활성화 방법
+              </UButton>
+            </template>
+
             <UAlert
-              v-if="answers.gameRemoved === 'no'"
+              v-if="answers.shizuku === 'no'"
               color="neutral"
               variant="soft"
               class="bg-muted"
-              title="기존 게임 APK를 먼저 삭제해 주세요."
-              description="기존 APK가 설치된 상태에서는 한글패치용 APK를 설치할 수 없습니다. 삭제한 뒤 '예'를 선택하세요."
+              title="Shizuku 설정을 완료해 주세요."
+              :description="`1. [Shizuku 다운로드 및 설치] 버튼을 탭해 Shizuku를 설치하세요.\n2. [Shizuku 열기] 버튼을 탭해 Shizuku를 실행하세요.\n3. [페어링] 버튼을 탭하고, [알림 옵션] 버튼을 탭해 알림을 허용해 주세요.\n4. '개발자 옵션'으로 이동한 다음 'USB 디버깅'과 '무선 디버깅'을 활성화해 주세요.\n5. '무선 디버깅'의 왼쪽을 탭한 다음 '페어링 코드로 기기 페어링'을 탭하세요.\n6. 알림창의 '페어링 코드 입력'을 탭해 기기 페어링 코드를 입력하세요.\n7. Shizuku로 돌아가 [시작] 버튼을 탭하세요.\n8. 완료된 경우 한글패치 앱으로 돌아가 [Shizuku 권한 허용] 버튼을 탭해 접근을 허용해 주세요.`"
+              :ui="{ description: 'whitespace-pre-line leading-7' }"
             />
           </HomeGuideStep>
 
           <HomeGuideStep
-            v-if="answers.gameRemoved === 'yes'"
-            v-model="answers.installMethod"
-            :step="3"
-            title="어떤 방법으로 게임 APK를 설치할까요?"
-            description="기기에서 패치 앱을 통해 설치하거나 PC의 패치 프로그램을 사용할 수 있습니다."
-            :options="androidInstallOptions"
-          />
-
-          <template v-if="answers.gameRemoved === 'yes' && answers.installMethod === 'app'">
-            <HomeGuideStep
-              v-model="answers.patcher"
-              :step="4"
-              title="Android 패치 앱을 설치했나요?"
-              description="한글패치용 게임 APK는 Android 패치 앱과 Shizuku를 통해 설치합니다."
-              :options="yesNoOptions"
-              :status="answers.patcher === 'no' ? 'warning' : 'info'"
+            v-if="answers.patcher === 'yes' && answers.shizuku === 'yes'"
+            :step="4"
+            title="준비가 완료되었습니다."
+            description="Android 패치 앱에서 최신 게임 및 한글패치 설치를 진행합니다."
+            complete
+          >
+            <UButton
+              icon="i-tabler-device-mobile-down"
+              color="info"
+              variant="soft"
+              size="lg"
+              class="w-fit px-4 py-2.5"
+              @click="launchAndroidPatcher"
             >
-              <div
-                v-if="answers.patcher === 'no'"
-                class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <p class="text-sm font-medium text-default">
-                    Android 패치 앱 설치가 필요합니다.
-                  </p>
-                  <p class="mt-1 text-sm text-muted">
-                    Android 패치 앱을 다운로드해 설치한 뒤 '예'를 선택하세요.
-                  </p>
-                </div>
-                <UButton
-                  :href="androidPatcher?.index.downloadUrl"
-                  :disabled="!androidPatcher"
-                  external
-                  icon="i-tabler-download"
-                  color="info"
-                  variant="soft"
-                  size="lg"
-                  class="shrink-0 justify-center px-4 py-2.5"
-                >
-                  Android 패치 앱 다운로드
-                </UButton>
-              </div>
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.patcher === 'yes'"
-              v-model="answers.shizuku"
-              :step="5"
-              title="Shizuku를 실행하고 Android 패치 앱 권한을 허용했나요?"
-              description="Android 패치 앱이 게임 APK를 올바른 설치 출처로 설치하려면 Shizuku 권한이 필요합니다."
-              :options="yesNoOptions"
-              :status="answers.shizuku === 'no' ? 'warning' : 'info'"
-            >
-              <template #before-options>
-                <UButton
-                  icon="i-tabler-settings-code"
-                  color="neutral"
-                  variant="soft"
-                  size="lg"
-                  class="w-fit px-4 py-2.5"
-                  @click="openDeveloperModeHelp('shizuku')"
-                >
-                  개발자 모드 활성화 방법
-                </UButton>
-              </template>
-
-              <UAlert
-                v-if="answers.shizuku === 'no'"
-                color="neutral"
-                variant="soft"
-                class="bg-muted"
-                title="Shizuku 설정을 완료해 주세요."
-                :description="`1. [Shizuku 다운로드 및 설치] 버튼을 탭해 Shizuku를 설치하세요.\n2. [Shizuku 열기] 버튼을 탭해 Shizuku를 실행하세요.\n3. [페어링] 버튼을 탭하고, [알림 옵션] 버튼을 탭해 알림을 허용해 주세요.\n4. '개발자 옵션'으로 이동한 다음 'USB 디버깅'과 '무선 디버깅'을 활성화해 주세요.\n5. '무선 디버깅'의 왼쪽을 탭한 다음 '페어링 코드로 기기 페어링'을 탭하세요.\n6. 알림창의 '페어링 코드 입력'을 탭해 기기 페어링 코드를 입력하세요.\n7. Shizuku로 돌아가 [시작] 버튼을 탭하세요.\n8. 완료된 경우 한글패치 앱으로 돌아가 [Shizuku 권한 허용] 버튼을 탭해 접근을 허용해 주세요.`"
-                :ui="{ description: 'whitespace-pre-line' }"
-              />
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.patcher === 'yes' && answers.shizuku === 'yes'"
-              :step="6"
-              title="APK 설치 준비가 완료되었습니다."
-              description="Android 패치 앱에서 최신 게임 APK 설치를 진행합니다."
-              complete
-            >
-              <UButton
-                icon="i-tabler-device-mobile-down"
-                color="info"
-                variant="soft"
-                size="lg"
-                class="w-fit px-4 py-2.5"
-                @click="launchAndroidPatcher"
-              >
-                원클릭 게임 APK 설치
-              </UButton>
-            </HomeGuideStep>
-          </template>
-
-          <template v-if="answers.gameRemoved === 'yes' && answers.installMethod === 'pc'">
-            <HomeGuideStep
-              v-model="answers.usbDebugging"
-              :step="4"
-              title="개발자 옵션과 USB 디버깅을 활성화했나요?"
-              description="PC에서 Android 기기에 게임 APK를 설치하려면 USB 디버깅이 활성화되어 있어야 합니다."
-              :options="yesNoOptions"
-              :status="answers.usbDebugging === 'no' ? 'warning' : 'info'"
-            >
-              <template #before-options>
-                <UButton
-                  icon="i-tabler-settings-code"
-                  color="neutral"
-                  variant="soft"
-                  size="lg"
-                  class="w-fit px-4 py-2.5"
-                  @click="openDeveloperModeHelp('pc')"
-                >
-                  USB 디버깅 활성화 방법
-                </UButton>
-              </template>
-
-              <UAlert
-                v-if="answers.usbDebugging === 'no'"
-                color="neutral"
-                variant="soft"
-                class="bg-muted"
-                title="개발자 옵션과 USB 디버깅을 먼저 활성화해 주세요."
-                description="설정을 완료한 뒤 '예'를 선택하세요."
-              />
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.usbDebugging === 'yes'"
-              v-model="answers.usbConnected"
-              :step="5"
-              title="PC와 모바일 기기를 USB로 연결했나요?"
-              description="USB 케이블로 Android 기기를 PC에 연결하고, 기기에 USB 디버깅 허용 창이 표시되면 허용해 주세요."
-              :options="yesNoOptions"
-              :status="answers.usbConnected === 'no' ? 'warning' : 'info'"
-            >
-              <UAlert
-                v-if="answers.usbConnected === 'no'"
-                color="neutral"
-                variant="soft"
-                class="bg-muted"
-                title="Android 기기를 PC에 연결해 주세요."
-                description="데이터 통신이 가능한 USB 케이블로 연결한 뒤, 기기에 표시되는 'USB 디버깅 허용' 창에서 허용을 선택하세요."
-              />
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.usbDebugging === 'yes' && answers.usbConnected === 'yes'"
-              v-model="answers.patcher"
-              :step="6"
-              title="Windows 패치 프로그램을 설치했나요?"
-              description="PC에서 게임 APK를 설치하려면 Windows 패치 프로그램이 필요합니다."
-              :options="yesNoOptions"
-              :status="answers.patcher === 'no' ? 'warning' : 'info'"
-            >
-              <div
-                v-if="answers.patcher === 'no'"
-                class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <p class="text-sm font-medium text-default">
-                    Windows 패치 프로그램 설치가 필요합니다.
-                  </p>
-                  <p class="mt-1 text-sm text-muted">
-                    Windows 패치 프로그램을 다운로드해 설치한 뒤 '예'를 선택하세요.
-                  </p>
-                </div>
-                <UButton
-                  :href="windowsPatcher?.index.downloadUrl"
-                  :disabled="!windowsPatcher"
-                  external
-                  icon="i-tabler-download"
-                  color="info"
-                  variant="soft"
-                  size="lg"
-                  class="shrink-0 justify-center px-4 py-2.5"
-                >
-                  Windows 패치 프로그램 다운로드
-                </UButton>
-              </div>
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.usbDebugging === 'yes' && answers.usbConnected === 'yes' && answers.patcher === 'yes'"
-              v-model="answers.started"
-              :step="7"
-              title="Windows 패치 프로그램을 한 번 실행했나요?"
-              description="다운로드 후 최소 한번은 실행해야 사이트를 통해 프로그램을 실행시킬 수 있습니다."
-              :options="yesNoOptions"
-              :status="answers.started === 'no' ? 'warning' : 'info'"
-            >
-              <UAlert
-                v-if="answers.started === 'no'"
-                color="neutral"
-                variant="soft"
-                class="bg-muted"
-                title="Windows 패치 프로그램을 먼저 한 번 실행해 주세요."
-                description="프로그램 창이 정상적으로 열리는 것을 확인한 뒤 '예'를 선택하세요."
-              />
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.usbDebugging === 'yes' && answers.usbConnected === 'yes' && answers.patcher === 'yes' && answers.started === 'yes'"
-              :step="8"
-              title="APK 설치 준비가 완료되었습니다."
-              description="Windows 패치 프로그램에서 최신 Android 일본 버전 게임 APK 설치를 진행합니다."
-              complete
-            >
-              <UButton
-                icon="i-tabler-device-mobile-down"
-                color="info"
-                variant="soft"
-                size="lg"
-                class="px-4 py-2.5 w-fit"
-                disabled
-              >
-                원클릭 게임 APK 설치
-              </UButton>
-            </HomeGuideStep>
-          </template>
+              원클릭 게임 APK 설치
+            </UButton>
+          </HomeGuideStep>
         </template>
       </div>
     </section>

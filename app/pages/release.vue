@@ -10,8 +10,7 @@ useAstralPageSeo('릴리즈 노트')
 const releaseTabs: Array<{ label: string, value: ReleaseFeedKey, icon: string }> = [
   { label: '한글패치', value: 'patch', icon: 'i-tabler-package' },
   { label: 'Windows 패치 프로그램', value: 'windowsPatcher', icon: 'i-tabler-brand-windows' },
-  { label: 'Android 패치 앱', value: 'androidPatcher', icon: 'i-tabler-brand-android' },
-  { label: 'Android 일본 버전 APK', value: 'androidApk', icon: 'i-tabler-device-mobile-down' }
+  { label: 'Android 패치 앱', value: 'androidPatcher', icon: 'i-tabler-brand-android' }
 ]
 
 const activeTab = ref<ReleaseFeedKey>('patch')
