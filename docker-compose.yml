@@ -76,7 +76,7 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - ./deploy/run-migrations.sh:/usr/local/bin/run-migrations:ro
-      - ${ASTRAL_PATCH_REPO_DIR:-../astral-party-korean-patch}/database/migrations:/migrations:ro
+      - ./database/migrations:/migrations:ro
     entrypoint: ["sh", "/usr/local/bin/run-migrations"]
     command: ["run"]
     depends_on:

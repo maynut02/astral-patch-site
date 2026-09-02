@@ -1193,6 +1193,29 @@ function selectItem(item: EditorItem): void {
   selectedItemId.value = item.id
 }
 
+async function openCommentItem(comment: { unitId: string, itemKey: string }): Promise<void> {
+  const visibleItem = items.value.find(item => item.id === comment.unitId)
+
+  if (visibleItem) {
+    selectItem(visibleItem)
+    isMobileSidebarOpen.value = false
+    return
+  }
+
+  isMobileSidebarOpen.value = false
+  selectFirstItemOnNextLoad.value = true
+  scrollAfterLoad.value = true
+
+  await router.push({
+    query: {
+      search: comment.itemKey,
+      searchType: 'key',
+      match: 'exact',
+      page: '1'
+    }
+  })
+}
+
 function removeDraftByKey(key: string): void {
   removeDraftsByKeys([key])
 }
@@ -2163,6 +2186,7 @@ watch(items, (nextItems) => {
             <EditorComments
               :item-id="selectedItemId"
               :item-key="selectedItemKey"
+              @navigate-item="openCommentItem"
             />
           </template>
 

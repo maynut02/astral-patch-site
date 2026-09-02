@@ -449,7 +449,7 @@ function updateHistoryFilter(value: string | number): void {
               </span>
             </div>
 
-            <div class="grid h-6 w-full min-w-0 items-stretch gap-px" style="grid-template-columns: repeat(168, minmax(0, 1fr));">
+            <div class="grid h-6 w-full min-w-0 items-stretch gap-px md:gap-0.5" style="grid-template-columns: repeat(168, minmax(0, 1fr));">
               <UTooltip
                 v-for="hour in route.hourly"
                 :key="hour.hour"

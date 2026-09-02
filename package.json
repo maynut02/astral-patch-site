@@ -8,10 +8,11 @@
     "dev:nuxt": "nuxt dev",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
+    "db:check": "node scripts/check-migrations.mjs",
     "lint": "eslint .",
     "typecheck": "nuxt typecheck",
     "lint:fix": "eslint . --fix",
-    "check": "pnpm run lint && pnpm run typecheck && pnpm run build"
+    "check": "pnpm run db:check && pnpm run lint && pnpm run typecheck && pnpm run build"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.126",

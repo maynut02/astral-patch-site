@@ -8,11 +8,11 @@ Browser
 Nitro API
   ↓ server/utils
 PostgreSQL
-  ↑ source sync / migrations
-astral-party-korean-patch
+  ↑ schema migrations       ↑ source sync
+astral-patch-site           astral-party-korean-patch
 ```
 
-`astral-patch-site`는 웹 애플리케이션과 사용자 상호작용을 담당합니다. 원문 동기화, 패치 생성, DB migration은 `astral-party-korean-patch`가 담당합니다.
+`astral-patch-site`는 웹 애플리케이션, 사용자 상호작용과 DB migration을 담당합니다. 원문 동기화와 패치 생성은 `astral-party-korean-patch`가 담당합니다.
 
 ## 계층별 책임
 
@@ -87,7 +87,7 @@ translation_units / source_versions
 
 ## 데이터베이스
 
-Schema migration은 `astral-party-korean-patch/database/migrations`에서만 관리합니다.
+Schema migration은 이 저장소의 `database/migrations`에서만 관리합니다.
 
 주요 테이블:
 
@@ -114,7 +114,7 @@ Nuxt는 기본 보안 헤더를 응답에 추가하고, 운영 환경에서는 P
 
 ## 배포
 
-브랜치는 `develop → release → master` 순서로 승격합니다. `ci`는 `develop` push와 `release`/`master` 대상 PR에서 lint → typecheck → build → production dependency audit 순서로 실행됩니다.
+브랜치는 `develop → release → master` 순서로 승격합니다. `ci`는 `develop` push와 `release`/`master` 대상 PR에서 migration 검증 → lint → typecheck → build → production dependency audit 순서로 실행됩니다.
 
 production 자동 배포는 같은 저장소의 `develop → release` PR이 실제 merge된 경우에만 실행됩니다. 배포 workflow는 `release` 대상 `pull_request`의 `closed` 이벤트에서 merge 여부와 head branch를 검증하고, merge된 `release` commit만 서버에 checkout합니다. 운영 확인이 끝난 뒤 `release → master` PR로 안정 버전을 반영합니다.
 

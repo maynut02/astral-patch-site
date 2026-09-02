@@ -25,10 +25,9 @@ pg_dump → /var/backups/astral-patch → optional Cloudflare R2
 
 ```text
 /home/ubuntu/astral-patch-site
-/home/ubuntu/astral-party-korean-patch
 ```
 
-DB migration 원본은 `astral-party-korean-patch/database/migrations`입니다.
+DB migration 원본은 이 저장소의 `database/migrations`입니다.
 
 ## 서버 환경변수
 
@@ -54,11 +53,10 @@ DATABASE_URL=postgresql://astral_patch:<URL-encoded password>@postgres-db:5432/a
 
 ASTRAL_APP_PORT=3001
 ASTRAL_DB_HOST_PORT=5433
-ASTRAL_PATCH_REPO_DIR=/home/ubuntu/astral-party-korean-patch
 
 AI_API_KEY=
 AI_BASE_URL=https://factchat-cloud.mindlogic.ai/v1/gateway
-GITHUB_TOKEN=<optional GitHub token>
+GITHUB_TOKEN=<optional GitHub token for site API requests>
 ```
 
 전체 변수 목록은 `.env.example`의 `3. 서버 운영 환경` 구역을 사용합니다.
@@ -81,7 +79,7 @@ docker compose -p astral-patch --profile migration run --rm db-migrate
 앱 실행:
 
 ```bash
-docker compose -p astral-patch up -d --build astral-patch-site
+docker compose -p astral-patch up -d --build --remove-orphans astral-patch-site
 curl -I http://127.0.0.1:3001/
 ```
 
@@ -93,7 +91,6 @@ sudo env \
   ASTRAL_CERTBOT_EMAIL=admin@example.com \
   ASTRAL_APP_PORT=3001 \
   ASTRAL_APP_DIR=/home/ubuntu/astral-patch-site \
-  ASTRAL_PATCH_REPO_DIR=/home/ubuntu/astral-party-korean-patch \
   bash deploy/bootstrap-server.sh
 ```
 
@@ -225,7 +222,6 @@ SERVER_SSH_KEY
 SERVER_SSH_FINGERPRINT
 SERVER_SSH_PORT
 SERVER_WORK_DIR
-PATCH_SERVER_WORK_DIR
 ```
 
 권장 경로:
@@ -234,7 +230,6 @@ PATCH_SERVER_WORK_DIR
 SERVER_USER=ubuntu
 SERVER_SSH_PORT=22
 SERVER_WORK_DIR=/home/ubuntu/astral-patch-site
-PATCH_SERVER_WORK_DIR=/home/ubuntu/astral-party-korean-patch
 ```
 
 SSH fingerprint 확인:
@@ -250,7 +245,6 @@ develop → release PR
 → CI 통과
 → PR merge
 → release merge commit 검증/checkout
-→ patch main 갱신
 → PostgreSQL 확인
 → backup service/timer 갱신
 → 배포 전 DB backup
