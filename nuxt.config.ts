@@ -25,7 +25,8 @@ export default defineNuxtConfig({
     },
     databaseUrl: process.env.DATABASE_URL || '',
     aiApiKey: process.env.AI_API_KEY || '',
-    aiBaseUrl: process.env.AI_BASE_URL || ''
+    aiBaseUrl: process.env.AI_BASE_URL || '',
+    androidCertificateSha256: ''
   },
 
   routeRules: {

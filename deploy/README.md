@@ -45,6 +45,7 @@ nano .env
 NUXT_SESSION_PASSWORD=<32자 이상의 임의 값>
 NUXT_OAUTH_GOOGLE_CLIENT_ID=<google client id>
 NUXT_OAUTH_GOOGLE_CLIENT_SECRET=<google client secret>
+NUXT_ANDROID_CERTIFICATE_SHA256=<Android 서명 인증서 SHA-256 지문>
 
 POSTGRES_DB=astral_patch
 POSTGRES_USER=astral_patch

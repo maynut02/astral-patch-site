@@ -356,14 +356,6 @@ function launchWindowsPatcher(action: 'install' | 'remove' | 'settings', route?:
   window.location.href = `astral://${action}${routeSuffix}`
 }
 
-function launchAndroidPatcher(): void {
-  if (!import.meta.client) {
-    return
-  }
-
-  window.location.href = 'astralpatcher://install-latest'
-}
-
 function launchSelectedSteam(action: 'install' | 'remove'): void {
   if (selectedRoute.value === 'INT_STEAM' || selectedRoute.value === 'CN_STEAM') {
     launchWindowsPatcher(action, selectedRoute.value)
@@ -652,8 +644,8 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
             v-if="answers.patcher === 'yes'"
             v-model="answers.shizuku"
             :step="3"
-            title="Shizuku를 실행하고 Android 패치 앱 권한을 허용했나요?"
-            description="Android 패치 앱이 게임 APK를 올바른 설치 출처로 설치하려면 Shizuku 권한이 필요합니다."
+            title="Shizuku를 설치하고 설정을 완료하였나요?"
+            description="Android 패치 앱이 게임을 설치하고 한글패치를 적용하기 위해서는 Shizuku 권한이 필요합니다."
             :options="yesNoOptions"
             :status="answers.shizuku === 'no' ? 'warning' : 'info'"
           >
@@ -689,14 +681,15 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
             complete
           >
             <UButton
+              href="https://astral.maynutlab.com/android"
+              external
               icon="i-tabler-device-mobile-down"
               color="info"
               variant="soft"
               size="lg"
               class="w-fit px-4 py-2.5"
-              @click="launchAndroidPatcher"
             >
-              원클릭 게임 APK 설치
+              Android 패치 앱 실행
             </UButton>
           </HomeGuideStep>
         </template>
