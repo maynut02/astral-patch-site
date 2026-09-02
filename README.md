@@ -1,6 +1,6 @@
 # Astral Patch Site
 
-Astral Party 한국어 번역을 조회·제안·검토하는 Nuxt 4 웹 애플리케이션입니다. 번역 원문과 DB migration은 형제 프로젝트 `astral-party-korean-patch`가 관리하고, 이 저장소는 웹 UI와 사용자·번역 제안·검토 기능을 담당합니다.
+Astral Party 한국어 번역을 조회·제안·검토하는 Nuxt 4 웹 애플리케이션입니다. 이 저장소는 웹 UI와 사용자·번역 제안·검토 기능, DB schema migration을 담당합니다. 형제 프로젝트 `astral-party-korean-patch`는 번역 원문 동기화와 패치 생성을 담당합니다.
 
 ## 기술 스택
 
@@ -71,13 +71,14 @@ server/
   utils/                 DB, 인증, 에디터 도메인 로직
 shared/types/            클라이언트·서버 공용 타입
 scripts/                 로컬 개발·백업 스크립트
+database/migrations/     순서대로 적용되는 PostgreSQL schema migration
 deploy/                  Docker/Nginx/systemd 배포 파일
 docs/                    구조와 개발 문서
 ```
 
 ## 핵심 규칙
 
-- DB schema와 migration의 단일 소유자는 `astral-party-korean-patch`입니다.
+- DB schema와 migration의 단일 소유자는 이 저장소입니다.
 - 웹 요청에서는 DDL을 실행하지 않습니다.
 - 승인된 번역은 `translations`, 제안과 검토 이력은 `translation_changes`에 저장합니다.
 - `verified`와 `admin`만 번역을 승인·반려할 수 있습니다.

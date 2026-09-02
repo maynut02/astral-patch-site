@@ -39,7 +39,6 @@ jobs:
             set -Eeuo pipefail
 
             SITE_DIR='${{ secrets.SERVER_WORK_DIR }}'
-            PATCH_DIR='${{ secrets.PATCH_SERVER_WORK_DIR }}'
             DEPLOY_SHA='${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || '' }}'
 
             cd "$SITE_DIR"
@@ -66,13 +65,6 @@ jobs:
             git reset --hard
             git checkout -B release "$DEPLOY_SHA"
             git branch --set-upstream-to=origin/release release >/dev/null 2>&1 || true
-
-            cd "$PATCH_DIR"
-            git fetch origin
-            git checkout main
-            git pull --ff-only origin main
-
-            cd "$SITE_DIR"
             docker compose -p astral-patch up -d postgres-db
 
             # 저장소의 백업 서비스 정의를 서버와 동기화한다.
@@ -103,7 +95,7 @@ jobs:
             sudo -n systemctl start astral-patch-db-backup.service
 
             docker compose -p astral-patch --profile migration run --rm db-migrate
-            docker compose -p astral-patch up -d --build astral-patch-site
+            docker compose -p astral-patch up -d --build --remove-orphans astral-patch-site
 
             APP_PORT="$(sed -n 's/^ASTRAL_APP_PORT=//p' .env | tail -1 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             APP_PORT="${APP_PORT:-3001}"

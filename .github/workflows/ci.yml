@@ -20,6 +20,15 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      POSTGRES_DB: astral_patch_ci
+      POSTGRES_USER: astral_patch
+      POSTGRES_PASSWORD: ci-password
+      DATABASE_URL: postgresql://astral_patch:ci-password@postgres-db:5432/astral_patch_ci
+      NUXT_SESSION_PASSWORD: ci-session-password-with-at-least-32-characters
+      NUXT_OAUTH_GOOGLE_CLIENT_ID: ci-client-id
+      NUXT_OAUTH_GOOGLE_CLIENT_SECRET: ci-client-secret
+      ASTRAL_DB_HOST_PORT: "55434"
 
     steps:
       - name: Checkout
@@ -39,6 +48,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check migration files
+        run: pnpm run db:check
+
+      - name: Apply migrations twice
+        run: |
+          docker compose -p astral-patch-ci up -d --wait postgres-db
+          docker compose -p astral-patch-ci --profile migration run --rm db-migrate
+          docker compose -p astral-patch-ci --profile migration run --rm db-migrate
+
       - name: Lint
         run: pnpm run lint
 
@@ -50,3 +68,7 @@ jobs:
 
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high
+
+      - name: Stop migration database
+        if: always()
+        run: docker compose -p astral-patch-ci down --volumes

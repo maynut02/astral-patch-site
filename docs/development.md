@@ -82,7 +82,7 @@ pnpm check
 pnpm lint:fix
 ```
 
-PR 전 `lint`, `typecheck`, `build`가 모두 통과해야 합니다.
+PR 전 migration 검증, `lint`, `typecheck`, `build`가 모두 통과해야 합니다.
 
 ## 코드 규칙
 
@@ -97,14 +97,12 @@ PR 전 `lint`, `typecheck`, `build`가 모두 통과해야 합니다.
 
 ## DB 변경
 
-이 저장소에서 migration을 추가하지 않습니다.
-
 DB 변경이 필요한 경우:
 
-1. `astral-party-korean-patch/database/migrations`에 migration을 추가합니다.
-2. 새 DB와 기존 DB 양쪽에서 migration을 검증합니다.
-3. 필요한 타입과 쿼리를 이 저장소에 반영합니다.
-4. `pnpm check`를 실행합니다.
+1. `database/migrations`에 다음 번호의 migration을 추가합니다.
+2. 기존 migration을 수정하지 않고 새 DB와 기존 DB 양쪽에서 검증합니다.
+3. 필요한 타입과 쿼리를 함께 반영합니다.
+4. `pnpm check`를 실행합니다. CI에서는 실제 PostgreSQL에 migration을 두 번 적용해 재실행 안전성도 확인합니다.
 
 ## API 변경
 

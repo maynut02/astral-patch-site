@@ -10,6 +10,10 @@ const props = defineProps<{
   itemKey: string
 }>()
 
+const emit = defineEmits<{
+  navigateItem: [comment: EditorComment]
+}>()
+
 const COMMENT_MAX_LENGTH = 2_000
 const COMMENT_BOTTOM_THRESHOLD = 72
 const KEYBOARD_INSET_THRESHOLD = 80
@@ -426,13 +430,6 @@ onBeforeUnmount(() => {
         :ui="{ trigger: 'h-7 px-3 leading-4', list: 'bg-elevated/50' }"
         class="w-fit"
       />
-      <p
-        v-if="itemKey"
-        class="mt-2 truncate text-xs text-dimmed"
-        :title="itemKey"
-      >
-        선택 항목 · {{ itemKey }}
-      </p>
     </div>
 
     <div class="relative min-h-0 flex-1">
@@ -508,12 +505,14 @@ onBeforeUnmount(() => {
             class="px-4 py-2.5 transition-colors hover:bg-elevated/40"
           >
             <div class="flex min-w-0 items-center gap-2 text-xs">
-              <span
-                class="min-w-0 flex-1 truncate font-mono text-dimmed"
+              <button
+                type="button"
+                class="min-w-0 flex-1 truncate text-left font-mono text-dimmed transition-colors hover:text-default hover:underline focus-visible:text-default focus-visible:underline focus-visible:outline-none"
                 :title="comment.itemKey"
+                @click="emit('navigateItem', comment)"
               >
                 {{ comment.itemKey }}
-              </span>
+              </button>
               <AppUserIdentity
                 :handle="comment.authorHandle"
                 :role="comment.authorRole"
