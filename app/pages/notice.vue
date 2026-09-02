@@ -184,33 +184,50 @@ async function submitNotice(): Promise<void> {
       class="flex flex-col gap-5"
       aria-label="공지사항 목록"
     >
-      <article
+      <UCollapsible
         v-for="notice in notices"
         :key="notice.id"
-        class="flex flex-col border border-default bg-muted"
+        as="article"
+        class="border border-default bg-muted"
       >
-        <div class="flex flex-col gap-2 border-b border-default px-4 py-3">
-          <h2 class="text-base font-semibold text-default">
-            {{ notice.title }}
-          </h2>
-          <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-dimmed">
-            <AppUserIdentity
-              :handle="notice.authorHandle"
-              :role="notice.authorRole"
-              text-class="text-xs text-muted"
-              icon-class="size-3.5"
-              stop-propagation
+        <template #default="{ open }">
+          <button
+            type="button"
+            class="group flex w-full items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-elevated/60"
+          >
+            <div class="flex min-w-0 flex-1 flex-col gap-2">
+              <h2 class="wrap-break-word text-base font-semibold text-default">
+                {{ notice.title }}
+              </h2>
+              <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-dimmed">
+                <AppUserIdentity
+                  :handle="notice.authorHandle"
+                  :role="notice.authorRole"
+                  :link="false"
+                  text-class="text-xs text-muted"
+                  icon-class="size-3.5"
+                />
+                <span aria-hidden="true">·</span>
+                <time :datetime="notice.createdAt">
+                  {{ formatNoticeTime(notice.createdAt) }}
+                </time>
+              </div>
+            </div>
+
+            <UIcon
+              name="i-tabler-chevron-down"
+              class="size-5 shrink-0 text-muted transition-transform duration-200 group-hover:text-default"
+              :class="open ? 'rotate-180' : ''"
             />
-            <span aria-hidden="true">·</span>
-            <time :datetime="notice.createdAt">
-              {{ formatNoticeTime(notice.createdAt) }}
-            </time>
-          </div>
-        </div>
-        <p class="whitespace-pre-wrap wrap-break-word bg-default/75 p-4 text-sm leading-6 text-toned">
-          {{ notice.body }}
-        </p>
-      </article>
+          </button>
+        </template>
+
+        <template #content>
+          <p class="whitespace-pre-wrap wrap-break-word border-t border-default bg-default/75 p-4 text-sm leading-6 text-toned">
+            {{ notice.body }}
+          </p>
+        </template>
+      </UCollapsible>
     </section>
   </div>
 </template>

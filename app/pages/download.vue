@@ -58,7 +58,6 @@ function findAssetInRelease(release: ReleaseNoteEntry | null, assetName: string)
 
 const windowsPatcher = computed(() => releaseFeed.value?.distribution.windowsPatcher ?? null)
 const androidPatcher = computed(() => releaseFeed.value?.distribution.androidPatcher ?? null)
-const androidApk = computed(() => releaseFeed.value?.distribution.androidApk ?? null)
 const latestPatchRelease = computed(() =>
   releaseFeed.value?.distribution.stablePatch?.release
   ?? releaseFeed.value?.releases.patch[0]
@@ -158,14 +157,6 @@ function launchWindowsPatcher(
 
   const routeSuffix = route ? `/${route}` : ''
   window.location.href = `astral://${action}${routeSuffix}`
-}
-
-function launchAndroidPatcher(): void {
-  if (!import.meta.client) {
-    return
-  }
-
-  window.location.href = 'astralpatcher://install-latest'
 }
 
 function reloadReleases(): void {
@@ -309,7 +300,7 @@ function reloadReleases(): void {
           <div class="flex flex-col p-2 bg-default/75 h-full">
             <UButton
               :href="androidPatcher?.index.downloadUrl"
-              disabled
+              :disabled="!androidPatcher"
               external
               icon="i-tabler-download"
               color="info"
@@ -322,70 +313,7 @@ function reloadReleases(): void {
           </div>
         </article>
 
-        <article class="flex flex-col gap-1 border border-default bg-muted">
-          <div class="flex flex-col gap-5 p-5">
-            <div class="flex flex-col">
-              <UIcon name="i-tabler-brand-android" class="size-7 md:size-8" />
-              <span class="text-xs text-muted mt-3">AstralPartyKorean.apk</span>
-              <span class="text-xl font-medium mt-1">Android 일본 버전 APK</span>
-            </div>
-
-            <div class="grid grid-cols-2 gap-x-2 gap-y-4">
-              <div class="flex min-w-0 flex-col">
-                <span class="text-xs text-dimmed">게임 버전</span>
-                <span class="truncate text-sm">{{ androidApk ? `v${androidApk.index.gameVersion}` : '확인 중' }}</span>
-              </div>
-              <div class="flex min-w-0 flex-col">
-                <span class="text-xs text-dimmed">릴리즈 시각</span>
-                <span class="truncate text-sm">{{ androidApk?.release ? formatDate(androidApk.release.publishedAt) : '—' }}</span>
-              </div>
-              <div class="flex min-w-0 flex-col">
-                <span class="text-xs text-dimmed">크기</span>
-                <span class="text-sm">{{ androidApk ? formatFileSize(androidApk.index.size) : '—' }}</span>
-              </div>
-              <div class="flex min-w-0 flex-col">
-                <span class="text-xs text-dimmed">다운로드</span>
-                <span class="text-sm">{{ androidApk?.asset ? formatCount(androidApk.asset.downloadCount) : '—' }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex h-full flex-col bg-default/75 p-2">
-            <UButton
-              icon="i-tabler-brand-windows"
-              color="info"
-              variant="ghost"
-              size="md"
-              class="gap-2 py-2.5"
-              disabled
-            >
-              Windows 패치 프로그램으로 설치
-            </UButton>
-            <UButton
-              icon="i-tabler-brand-android"
-              color="info"
-              variant="ghost"
-              size="md"
-              class="gap-2 py-2.5"
-              disabled
-              @click="launchAndroidPatcher"
-            >
-              Android 패치 앱으로 설치
-            </UButton>
-            <UButton
-              :href="androidApk?.index.downloadUrl"
-              external
-              icon="i-tabler-download"
-              color="neutral"
-              variant="ghost"
-              size="md"
-              class="gap-2 py-2.5"
-              disabled
-            >
-              Android 일본 버전 APK 다운로드
-            </UButton>
-          </div>
-        </article>
+        <article />
       </div>
     </section>
 
