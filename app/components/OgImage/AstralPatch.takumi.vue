@@ -23,7 +23,7 @@ const characterImage = `/char_${Math.floor(Math.random() * 6) + 1}.png`
         class="size-16 object-contain"
       >
 
-      <div class="flex flex-col gap-4">
+      <div class="flex flex-col gap-4 pr-60">
         <div
           class="text-[36px] text-muted"
           :style="{ fontFamily: 'Noto Sans KR', fontWeight: 500 }"
