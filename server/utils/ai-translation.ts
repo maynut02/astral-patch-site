@@ -29,7 +29,7 @@ interface GatewayError {
   message?: string
 }
 
-const AI_TRANSLATION_MODEL = 'google/gemma-4-31B-it'
+const AI_TRANSLATION_MODEL = 'gpt-5.6-luna'
 const MAX_SOURCE_CHARACTERS = 40_000
 const MAX_TRANSLATION_CHARACTERS = 10_000
 
