@@ -306,6 +306,67 @@ function getVersionPath(version: string, revision: string): string {
         </div>
       </div>
 
+      <section class="flex flex-col gap-1 border border-default bg-muted p-1">
+        <div class="flex flex-col gap-1 p-3">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h2 class="text-base font-semibold text-default">
+              아스트랄 파티 한글화 가이드라인
+            </h2>
+            <UBadge
+              color="neutral"
+              variant="soft"
+              size="sm"
+            >
+              1.0.0
+            </UBadge>
+          </div>
+          <p class="text-sm text-muted">
+            번역 등록 전 아래 기준을 확인해 주세요.
+          </p>
+        </div>
+
+        <ol class="grid gap-1 md:grid-cols-2 xl:grid-cols-3">
+          <li class="flex flex-col gap-1 bg-default/50 p-3">
+            <span class="text-sm font-semibold text-info">1. 자연스러운 번역</span>
+            <p class="text-sm leading-6 text-toned">
+              원문의 의미와 분위기를 유지하면서 자연스러운 한국어로 번역합니다. 불필요한 직역은 되도록 피합니다.
+            </p>
+          </li>
+          <li class="flex flex-col gap-1 bg-default/50 p-3">
+            <span class="text-sm font-semibold text-info">2. AI 번역</span>
+            <p class="text-sm leading-6 text-toned">
+              내장 기능을 포함한 AI 번역을 허용합니다. 단, 결과물을 그대로 제출하지 말고 원문과 대조하여 직접 검수해야 합니다.
+            </p>
+          </li>
+          <li class="flex flex-col gap-1 bg-default/50 p-3">
+            <span class="text-sm font-semibold text-info">3. 용어 통일</span>
+            <p class="text-sm leading-6 text-toned">
+              번역하기 전에 기존 번역 용어가 있는지 확인합니다. 기존 번역이 있다면 해당 용어를 우선 사용합니다.
+            </p>
+          </li>
+          <li class="flex flex-col gap-1 bg-default/50 p-3">
+            <span class="text-sm font-semibold text-info">4. 말투 통일</span>
+            <p class="text-sm leading-6 text-toned">
+              기본적인 말투는 존댓말로 통일합니다. 단, 캐릭터 대사는 원문에 나타난 성격과 관계를 우선하여 번역합니다.
+            </p>
+          </li>
+          <li class="flex flex-col gap-1 bg-default/50 p-3">
+            <span class="text-sm font-semibold text-info">5. 형식 보존</span>
+            <p class="text-sm leading-6 text-toned">
+              <code class="font-mono text-xs text-default">[Astral]</code>,
+              <code class="font-mono text-xs text-default">[color]</code>,
+              <code class="font-mono text-xs text-default">[size]</code> 등의 변수와 태그는 임의로 수정하지 마십시오. 수정하면 오류가 발생할 수 있습니다.
+            </p>
+          </li>
+          <li class="flex flex-col gap-1 bg-default/50 p-3">
+            <span class="text-sm font-semibold text-info">6. 검수 및 질문</span>
+            <p class="text-sm leading-6 text-toned">
+              최종 등록 전에 오탈자, 의미 오류, 용어 및 말투 불일치를 확인합니다. 의미가 불분명한 문장은 추측하지 말고 먼저 논의한 뒤 등록합니다.
+            </p>
+          </li>
+        </ol>
+      </section>
+
       <div class="flex items-center gap-3">
         <UTabs
           v-model="listMode"
