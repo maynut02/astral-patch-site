@@ -7,7 +7,7 @@ import { readJsonBody } from '../../../utils/request-security'
 
 const MAX_BATCH_ITEMS = 50
 
-interface BatchReviewInput {
+interface BatchReviewInput extends Record<string, unknown> {
   ids?: unknown
   action?: unknown
 }

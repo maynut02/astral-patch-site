@@ -7,7 +7,7 @@ import { readJsonBody } from '../../../utils/request-security'
 
 const MAX_CANDIDATE_UNITS = 50
 
-interface ReviewCandidatesInput {
+interface ReviewCandidatesInput extends Record<string, unknown> {
   unitIds?: unknown
 }
 
