@@ -3,7 +3,13 @@ import { createError } from 'h3'
 import { getDatabase } from './database'
 import { parseUuid } from './validation'
 import { broadcastWsMessage } from './ws-hub'
-import { resolveEditorRole, type EditorReviewAction, type EditorReviewResponse } from '../../shared/types/editor'
+import {
+  resolveEditorRole,
+  type EditorReviewAction,
+  type EditorReviewCandidatesResponse,
+  type EditorReviewResponse,
+  type EditorTranslationLogEntry
+} from '../../shared/types/editor'
 
 interface PendingEditorChange {
   id: string
@@ -43,6 +49,60 @@ export function assertEditorReviewPermission(user: { role?: unknown } | null | u
       statusMessage: 'Verified user permission is required to review translations'
     })
   }
+}
+
+export async function getPendingEditorReviewCandidates(
+  unitIds: string[]
+): Promise<EditorReviewCandidatesResponse> {
+  const database = getDatabase()
+  const unitIdsArray = database.array(unitIds)
+  const candidates = await database<EditorTranslationLogEntry[]>`
+    SELECT
+      tc.id,
+      tc.unit_id AS "unitId",
+      tu.kind,
+      tu.namespace AS category,
+      tu.unit_key AS "unitKey",
+      CASE
+        WHEN au."role" IN ('admin', 'verified', 'user', 'bot') THEN au."role"
+        ELSE 'user'::text
+      END AS "actorRole",
+      NULLIF(BTRIM(au.handle), '') AS handle,
+      NULL::text AS "reviewerRole",
+      NULL::text AS "reviewerHandle",
+      tc.previous_text AS "previousText",
+      tc.proposed_text AS "proposedText",
+      tc.status,
+      tc.created_at AS "createdAt",
+      tc.reviewed_at AS "reviewedAt"
+    FROM translation_changes tc
+    JOIN translation_units tu ON tu.id = tc.unit_id
+    LEFT JOIN app_users au ON au.google_sub = tc.created_by
+    WHERE tc.locale = 'ko'
+      AND tc.status = 'pending'
+      AND tc.unit_id = ANY(${unitIdsArray}::uuid[])
+    ORDER BY tu.namespace ASC, tu.unit_key ASC, tc.created_at DESC, tc.id DESC
+  `
+
+  const groups = new Map<string, EditorReviewCandidatesResponse['groups'][number]>()
+
+  for (const candidate of candidates) {
+    const current = groups.get(candidate.unitId)
+    if (current) {
+      current.candidates.push(candidate)
+      continue
+    }
+
+    groups.set(candidate.unitId, {
+      unitId: candidate.unitId,
+      kind: candidate.kind,
+      category: candidate.category,
+      unitKey: candidate.unitKey,
+      candidates: [candidate]
+    })
+  }
+
+  return { groups: [...groups.values()] }
 }
 
 export async function reviewEditorChange(

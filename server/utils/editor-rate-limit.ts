@@ -31,11 +31,12 @@ export async function assertEditorMutationRateLimit(userId: string, cost = 1): P
   }
 }
 
-export async function assertEditorReviewRateLimit(userId: string): Promise<void> {
+export async function assertEditorReviewRateLimit(userId: string, cost = 1): Promise<void> {
   if (await isRateLimited(
     getDatabase(),
     `editor-review:${userId}`,
-    EDITOR_REVIEW_RATE_LIMITS
+    EDITOR_REVIEW_RATE_LIMITS,
+    cost
   )) {
     throw createError({
       statusCode: 429,

@@ -111,6 +111,29 @@ export interface EditorReviewResponse {
   status: Exclude<EditorChangeStatus, 'pending' | 'superseded'>
 }
 
+export interface EditorBatchReviewResult {
+  changeId: string
+  ok: boolean
+  response: EditorReviewResponse | null
+  error: string | null
+}
+
+export interface EditorBatchReviewResponse {
+  results: EditorBatchReviewResult[]
+}
+
+export interface EditorReviewCandidateGroup {
+  unitId: string
+  kind: 'lang' | 'str'
+  category: string
+  unitKey: string
+  candidates: EditorTranslationLogEntry[]
+}
+
+export interface EditorReviewCandidatesResponse {
+  groups: EditorReviewCandidateGroup[]
+}
+
 export interface EditorItemsResponse {
   items: EditorItem[]
   total: number

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import type {
+  EditorBatchReviewResponse,
   EditorReviewAction,
+  EditorReviewCandidateGroup,
+  EditorReviewCandidatesResponse,
   EditorTranslationLogEntry,
   EditorTranslationLogResponse
 } from '#shared/types/editor'
@@ -20,6 +23,12 @@ const defaultData: EditorTranslationLogResponse = {
 
 const page = ref(1)
 const reviewingId = ref<string | null>(null)
+const batchReviewAction = ref<EditorReviewAction | null>(null)
+const isPreparingApproval = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
+const approvalModalOpen = ref(false)
+const approvalGroups = ref<EditorReviewCandidateGroup[]>([])
+const approvalSelections = ref<Record<string, string>>({})
 const { showToast } = useAppToast()
 
 const {
@@ -33,9 +42,79 @@ const {
 })
 
 const entries = computed(() => data.value?.entries ?? [])
+const isReviewing = computed(() => Boolean(reviewingId.value || batchReviewAction.value || isPreparingApproval.value))
+const selectedEntries = computed(() => entries.value.filter(entry => selectedIds.value.has(entry.id)))
+const selectedCount = computed(() => selectedEntries.value.length)
+const allPageSelected = computed(() => entries.value.length > 0 && selectedCount.value === entries.value.length)
+const somePageSelected = computed(() => selectedCount.value > 0 && !allPageSelected.value)
+const pageSelectionValue = computed<boolean | 'indeterminate'>(() => {
+  if (allPageSelected.value) {
+    return true
+  }
+
+  return somePageSelected.value ? 'indeterminate' : false
+})
+const approvalConflictGroups = computed(() => approvalGroups.value.filter(group => group.candidates.length > 1))
+const approvalSelectionComplete = computed(() => approvalGroups.value.every((group) => {
+  const selectedId = approvalSelections.value[group.unitId]
+  return Boolean(selectedId && group.candidates.some(candidate => candidate.id === selectedId))
+}))
+
+watch(page, () => {
+  selectedIds.value = new Set()
+  resetApprovalDialog()
+})
+
+watch(entries, (currentEntries) => {
+  const currentIds = new Set(currentEntries.map(entry => entry.id))
+  selectedIds.value = new Set([...selectedIds.value].filter(id => currentIds.has(id)))
+})
+
+function updateEntrySelection(entryId: string, value: boolean | 'indeterminate'): void {
+  const next = new Set(selectedIds.value)
+
+  if (value === true) {
+    next.add(entryId)
+  } else {
+    next.delete(entryId)
+  }
+
+  selectedIds.value = next
+}
+
+function updatePageSelection(value: boolean | 'indeterminate'): void {
+  selectedIds.value = value === true
+    ? new Set(entries.value.map(entry => entry.id))
+    : new Set()
+}
+
+function setApprovalSelection(unitId: string, value: unknown): void {
+  if (typeof value !== 'string') {
+    return
+  }
+
+  approvalSelections.value = {
+    ...approvalSelections.value,
+    [unitId]: value
+  }
+}
+
+function resetApprovalDialog(): void {
+  approvalModalOpen.value = false
+  approvalGroups.value = []
+  approvalSelections.value = {}
+}
+
+async function refreshAfterReview(): Promise<void> {
+  await refresh()
+
+  if (!entries.value.length && page.value > 1) {
+    page.value -= 1
+  }
+}
 
 async function review(entry: EditorTranslationLogEntry, action: EditorReviewAction): Promise<void> {
-  if (reviewingId.value) {
+  if (isReviewing.value) {
     return
   }
 
@@ -52,11 +131,7 @@ async function review(entry: EditorTranslationLogEntry, action: EditorReviewActi
       title: action === 'approve' ? '번역을 승인했습니다.' : '번역을 반려했습니다.'
     })
 
-    await refresh()
-
-    if (!entries.value.length && page.value > 1) {
-      page.value -= 1
-    }
+    await refreshAfterReview()
   } catch (reviewError) {
     showToast({
       id: `translation-review-failed-${entry.id}`,
@@ -66,6 +141,136 @@ async function review(entry: EditorTranslationLogEntry, action: EditorReviewActi
   } finally {
     reviewingId.value = null
   }
+}
+
+async function executeBatchReview(ids: string[], action: EditorReviewAction): Promise<void> {
+  if (!ids.length) {
+    return
+  }
+
+  batchReviewAction.value = action
+
+  try {
+    const response = await $fetch<EditorBatchReviewResponse>('/api/editor/changes/batch', {
+      method: 'PATCH',
+      body: { ids, action }
+    })
+    const successCount = response.results.filter(result => result.ok).length
+    const failedCount = response.results.length - successCount
+
+    showToast({
+      id: `translation-batch-review-${action}`,
+      title: action === 'approve'
+        ? `${successCount.toLocaleString()}건의 번역을 승인했습니다.`
+        : `${successCount.toLocaleString()}건의 번역을 반려했습니다.`,
+      description: failedCount > 0
+        ? `${failedCount.toLocaleString()}건은 처리하지 못했습니다.`
+        : undefined
+    })
+
+    await refreshAfterReview()
+  } catch (reviewError) {
+    showToast({
+      id: `translation-batch-review-failed-${action}`,
+      title: '선택한 번역을 처리하지 못했습니다.',
+      description: reviewError instanceof Error ? reviewError.message : undefined
+    })
+  } finally {
+    batchReviewAction.value = null
+  }
+}
+
+async function prepareSelectedApproval(): Promise<void> {
+  const currentSelection = selectedEntries.value
+  if (!currentSelection.length) {
+    return
+  }
+
+  isPreparingApproval.value = true
+
+  try {
+    const unitIds = [...new Set(currentSelection.map(entry => entry.unitId))]
+    const response = await $fetch<EditorReviewCandidatesResponse>('/api/editor/review/candidates', {
+      method: 'POST',
+      body: { unitIds }
+    })
+    const groupsByUnitId = new Map(response.groups.map(group => [group.unitId, group]))
+    const groups = unitIds
+      .map(unitId => groupsByUnitId.get(unitId))
+      .filter((group): group is EditorReviewCandidateGroup => Boolean(group))
+
+    if (groups.length !== unitIds.length) {
+      showToast({
+        id: 'translation-batch-review-stale',
+        title: '승인 대기 목록이 변경되었습니다.',
+        description: '목록을 새로 불러온 뒤 다시 선택해 주세요.'
+      })
+      await refreshAfterReview()
+      return
+    }
+
+    const selections: Record<string, string> = {}
+
+    for (const group of groups) {
+      const selectedCandidates = group.candidates.filter(candidate => selectedIds.value.has(candidate.id))
+      if (!selectedCandidates.length) {
+        showToast({
+          id: 'translation-batch-review-stale',
+          title: '승인 대기 목록이 변경되었습니다.',
+          description: '목록을 새로 불러온 뒤 다시 선택해 주세요.'
+        })
+        await refreshAfterReview()
+        return
+      }
+
+      if (group.candidates.length === 1) {
+        selections[group.unitId] = group.candidates[0]!.id
+      } else if (selectedCandidates.length === 1) {
+        selections[group.unitId] = selectedCandidates[0]!.id
+      }
+    }
+
+    if (groups.every(group => group.candidates.length === 1)) {
+      await executeBatchReview(groups.map(group => group.candidates[0]!.id), 'approve')
+      return
+    }
+
+    approvalGroups.value = groups
+    approvalSelections.value = selections
+    approvalModalOpen.value = true
+  } catch (reviewError) {
+    showToast({
+      id: 'translation-batch-review-candidates-failed',
+      title: '승인 후보를 불러오지 못했습니다.',
+      description: reviewError instanceof Error ? reviewError.message : undefined
+    })
+  } finally {
+    isPreparingApproval.value = false
+  }
+}
+
+async function reviewSelected(action: EditorReviewAction): Promise<void> {
+  if (isReviewing.value || !selectedCount.value) {
+    return
+  }
+
+  if (action === 'approve') {
+    await prepareSelectedApproval()
+    return
+  }
+
+  await executeBatchReview(selectedEntries.value.map(entry => entry.id), 'reject')
+}
+
+async function confirmApprovalSelection(): Promise<void> {
+  if (!approvalSelectionComplete.value || isReviewing.value) {
+    return
+  }
+
+  const ids = approvalGroups.value.map(group => approvalSelections.value[group.unitId]!)
+  approvalModalOpen.value = false
+  await executeBatchReview(ids, 'approve')
+  resetApprovalDialog()
 }
 </script>
 
@@ -141,12 +346,62 @@ async function review(entry: EditorTranslationLogEntry, action: EditorReviewActi
       v-else-if="!error"
       class="flex flex-col gap-4"
     >
+      <div class="flex flex-col gap-3 border border-default bg-elevated/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex items-center gap-2">
+          <UCheckbox
+            :model-value="pageSelectionValue"
+            color="neutral"
+            :disabled="isReviewing"
+            aria-label="현재 페이지의 모든 번역 선택"
+            @update:model-value="updatePageSelection"
+          />
+          <span class="text-sm text-toned">현재 페이지 전체 선택</span>
+          <span class="text-xs text-muted">
+            {{ selectedCount.toLocaleString() }} / {{ entries.length.toLocaleString() }}
+          </span>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <UButton
+            icon="i-tabler-x"
+            color="error"
+            variant="soft"
+            size="md"
+            :loading="batchReviewAction === 'reject'"
+            :disabled="!selectedCount || isReviewing"
+            @click="reviewSelected('reject')"
+          >
+            선택 반려
+          </UButton>
+          <UButton
+            icon="i-tabler-check"
+            color="success"
+            variant="soft"
+            size="md"
+            :loading="batchReviewAction === 'approve' || isPreparingApproval"
+            :disabled="!selectedCount || isReviewing"
+            @click="reviewSelected('approve')"
+          >
+            선택 승인
+          </UButton>
+        </div>
+      </div>
+
       <article
         v-for="entry in entries"
         :key="entry.id"
-        class="flex flex-col border border-default bg-muted"
+        class="flex flex-col border border-default"
+        :class="selectedIds.has(entry.id) ? 'bg-elevated' : 'bg-muted'"
       >
         <header class="flex flex-wrap items-center gap-2 border-b border-default px-4 py-3">
+          <UCheckbox
+            :model-value="selectedIds.has(entry.id)"
+            color="neutral"
+            :disabled="isReviewing"
+            :aria-label="`${entry.category}_${entry.unitKey} 선택`"
+            class="mr-1 shrink-0"
+            @update:model-value="updateEntrySelection(entry.id, $event)"
+          />
           <UBadge
             color="warning"
             variant="soft"
@@ -154,21 +409,23 @@ async function review(entry: EditorTranslationLogEntry, action: EditorReviewActi
           >
             승인 대기
           </UBadge>
-          <NuxtLink
-            :to="{
-              path: '/translate/editor',
-              query: {
-                file: entry.category,
-                search: `${entry.category}_${entry.unitKey}`,
-                searchType: 'key',
-                match: 'exact',
-                page: '1'
-              }
-            }"
-            class="min-w-0 flex-1 truncate text-sm font-medium text-default hover:underline underline-offset-2"
-          >
-            {{ entry.category }}_{{ entry.unitKey }}
-          </NuxtLink>
+          <div class="flex flex-1">
+            <NuxtLink
+              :to="{
+                path: '/translate/editor',
+                query: {
+                  file: entry.category,
+                  search: `${entry.category}_${entry.unitKey}`,
+                  searchType: 'key',
+                  match: 'exact',
+                  page: '1'
+                }
+              }"
+              class="min-w-0 truncate text-sm font-medium text-default hover:underline underline-offset-2"
+            >
+              {{ entry.category }}_{{ entry.unitKey }}
+            </NuxtLink>
+          </div>
           <time
             class="shrink-0 text-xs text-muted"
             :datetime="entry.createdAt"
@@ -236,7 +493,7 @@ async function review(entry: EditorTranslationLogEntry, action: EditorReviewActi
                 variant="soft"
                 size="md"
                 :loading="reviewingId === entry.id"
-                :disabled="Boolean(reviewingId)"
+                :disabled="isReviewing"
                 @click="review(entry, 'reject')"
               >
                 반려
@@ -247,7 +504,7 @@ async function review(entry: EditorTranslationLogEntry, action: EditorReviewActi
                 variant="soft"
                 size="md"
                 :loading="reviewingId === entry.id"
-                :disabled="Boolean(reviewingId)"
+                :disabled="isReviewing"
                 @click="review(entry, 'approve')"
               >
                 승인
@@ -269,5 +526,109 @@ async function review(entry: EditorTranslationLogEntry, action: EditorReviewActi
         color="neutral"
       />
     </div>
+
+    <UModal
+      v-model:open="approvalModalOpen"
+      title="승인할 번역 선택"
+      description="같은 번역 항목에 여러 승인 대기 요청이 있습니다. 항목마다 최종 승인할 요청을 하나씩 선택해 주세요."
+      :ui="{
+        content: 'sm:max-w-240',
+        footer: 'justify-end'
+      }"
+    >
+      <template #body>
+        <div class="flex max-h-[65vh] flex-col gap-5 overflow-y-auto pr-1">
+          <UAlert
+            color="warning"
+            variant="soft"
+            icon="i-tabler-git-merge"
+            title="현재 페이지 밖의 요청도 함께 표시됩니다."
+            description="승인한 요청을 제외한 같은 항목의 다른 승인 대기 요청은 자동 종료됩니다."
+          />
+
+          <section
+            v-for="group in approvalConflictGroups"
+            :key="group.unitId"
+            class="flex flex-col gap-3"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-default pb-2">
+              <span class="min-w-0 truncate text-sm font-semibold text-default">
+                {{ group.category }}_{{ group.unitKey }}
+              </span>
+              <UBadge
+                color="neutral"
+                variant="soft"
+                size="sm"
+              >
+                {{ group.candidates.length }}개 요청
+              </UBadge>
+            </div>
+
+            <URadioGroup
+              :model-value="approvalSelections[group.unitId]"
+              :items="group.candidates"
+              value-key="id"
+              color="neutral"
+              variant="card"
+              :ui="{
+                fieldset: 'gap-y-2',
+                item: 'rounded-none p-3',
+                wrapper: 'min-w-0',
+                description: 'mt-2 whitespace-pre-wrap wrap-break-word leading-6'
+              }"
+              @update:model-value="setApprovalSelection(group.unitId, $event)"
+            >
+              <template #label="{ item }">
+                <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                  <span class="font-medium text-default">{{ item.handle ? `@${item.handle}` : '익명' }}</span>
+                  <time
+                    class="text-xs font-normal text-muted"
+                    :datetime="item.createdAt"
+                  >
+                    {{ formatEditorDate(item.createdAt) }}
+                  </time>
+                </span>
+              </template>
+
+              <template #description="{ item }">
+                <template
+                  v-for="(part, partIndex) in getEditorDiffParts(item.previousText ?? '', item.proposedText)"
+                  :key="`${item.id}-${part.type}-${partIndex}`"
+                >
+                  <span
+                    :class="part.type === 'removed'
+                      ? 'bg-error/10 text-error'
+                      : part.type === 'added'
+                        ? 'bg-success/10 text-success'
+                        : 'text-toned'"
+                  >{{ part.text }}</span>
+                </template>
+                <span v-if="!item.previousText && !item.proposedText">빈 문자열</span>
+              </template>
+            </URadioGroup>
+          </section>
+        </div>
+      </template>
+
+      <template #footer="{ close }">
+        <UButton
+          color="neutral"
+          variant="outline"
+          :disabled="isReviewing"
+          @click="close"
+        >
+          취소
+        </UButton>
+        <UButton
+          color="success"
+          icon="i-tabler-check"
+          :loading="batchReviewAction === 'approve'"
+          :disabled="!approvalSelectionComplete || isReviewing"
+          @click="confirmApprovalSelection"
+        >
+          선택한 번역 승인
+        </UButton>
+      </template>
+    </UModal>
   </section>
 </template>
