@@ -19,7 +19,7 @@ interface StatusMeta {
   icon: string
 }
 
-useAstralPageSeo('상태')
+useAstralPageSeo('서비스 상태')
 
 const routeMeta: Record<PatchWatcherRoute, { label: string, icon: string }> = {
   INT_STEAM: { label: 'Steam 글로벌', icon: 'i-tabler-brand-steam' },
@@ -28,7 +28,7 @@ const routeMeta: Record<PatchWatcherRoute, { label: string, icon: string }> = {
 }
 
 const overallMeta: Record<PatchWatcherOverallState, StatusMeta> = {
-  operational: { label: '정상 운영 중', color: 'success', icon: 'i-tabler-circle-check-filled' },
+  operational: { label: '정상', color: 'success', icon: 'i-tabler-circle-check-filled' },
   checking: { label: '감지 중', color: 'info', icon: 'i-tabler-loader-2' },
   degraded: { label: '일부 문제', color: 'warning', icon: 'i-tabler-alert-triangle-filled' },
   outage: { label: '감지 시스템 문제', color: 'error', icon: 'i-tabler-circle-x-filled' },
@@ -233,7 +233,7 @@ function updateHistoryFilter(value: string | number): void {
             class="size-5"
           />
           <h1 class="-mt-0.75 text-xl font-semibold">
-            패치 감지 상태
+            서비스 상태
           </h1>
         </div>
       </div>
