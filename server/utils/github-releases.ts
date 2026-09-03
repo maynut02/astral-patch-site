@@ -1,6 +1,5 @@
 import { createError } from 'h3'
 import type {
-  AndroidApkIndex,
   AndroidPatcherIndex,
   IndexedReleaseArtifact,
   PatchDistributionEntry,
@@ -12,13 +11,16 @@ import type {
   WindowsPatcherIndex
 } from '#shared/types/releases'
 
-const GITHUB_REPOSITORY = 'maynut02/astral-party-korean-patch'
-const GITHUB_RELEASES_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases`
-const GITHUB_CONTENTS_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/contents`
+const PATCH_REPOSITORY = 'maynut02/astral-party-korean-patch'
+const PATCHER_REPOSITORY = 'maynut02/astral-party-auto-patcher'
 const GITHUB_PAGE_SIZE = 100
 const GITHUB_MAX_PAGES = 10
-const RECENT_RELEASE_MINIMUM = 5
 const PATCH_RELEASE_TAG_PATTERN = /^v[^_]+_r\d+(?:_p\d+)?$/
+
+const RELEASE_REPOSITORIES = {
+  patch: PATCH_REPOSITORY,
+  patcher: PATCHER_REPOSITORY
+} as const
 
 function getGitHubHeaders(accept: string): Record<string, string> {
   const token = String(process.env.GITHUB_TOKEN || '').trim()
@@ -163,6 +165,12 @@ function normalizeRelease(value: unknown): ReleaseNoteEntry | null {
   }
 }
 
+function normalizeReleases(rows: GitHubRelease[]): ReleaseNoteEntry[] {
+  return rows
+    .map(normalizeRelease)
+    .filter((release): release is ReleaseNoteEntry => Boolean(release))
+}
+
 function hasAsset(release: ReleaseNoteEntry, predicate: (asset: ReleaseAssetInfo) => boolean): boolean {
   return release.assets.some(predicate)
 }
@@ -177,54 +185,32 @@ function isAndroidPatcherRelease(release: ReleaseNoteEntry): boolean {
     || hasAsset(release, asset => asset.name.toLowerCase() === 'astralandroidpatcher.apk')
 }
 
-function isAndroidApkRelease(release: ReleaseNoteEntry): boolean {
-  return release.tagName.startsWith('int-apk-v')
-    || hasAsset(release, asset => asset.name.toLowerCase() === 'astralpartykorean.apk')
-}
-
 function isPatchRelease(release: ReleaseNoteEntry): boolean {
   return !release.prerelease && PATCH_RELEASE_TAG_PATTERN.test(release.tagName)
 }
 
-function classifyReleases(source: ReleaseNoteEntry[]): ReleaseFeedResponse['releases'] {
-  const releases: ReleaseFeedResponse['releases'] = {
-    patch: [],
-    windowsPatcher: [],
-    androidPatcher: [],
-    androidApk: []
-  }
-
-  for (const release of source) {
-    if (isWindowsPatcherRelease(release)) {
-      releases.windowsPatcher.push(release)
-      continue
-    }
-
-    if (isAndroidPatcherRelease(release)) {
-      releases.androidPatcher.push(release)
-      continue
-    }
-
-    if (isAndroidApkRelease(release)) {
-      releases.androidApk.push(release)
-      continue
-    }
-
-    if (isPatchRelease(release)) {
-      releases.patch.push(release)
-    }
-  }
-
-  for (const key of Object.keys(releases) as Array<keyof typeof releases>) {
-    sortReleases(releases[key])
-  }
-
-  return releases
+function sortReleases(releases: ReleaseNoteEntry[]): ReleaseNoteEntry[] {
+  return releases.sort((left, right) => {
+    const leftTime = new Date(left.publishedAt).getTime()
+    const rightTime = new Date(right.publishedAt).getTime()
+    return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime)
+  })
 }
 
-async function fetchReleasePage(page: number): Promise<GitHubRelease[]> {
+function classifyReleases(
+  patchSource: ReleaseNoteEntry[],
+  patcherSource: ReleaseNoteEntry[]
+): ReleaseFeedResponse['releases'] {
+  return {
+    patch: sortReleases(patchSource.filter(isPatchRelease)),
+    windowsPatcher: sortReleases(patcherSource.filter(isWindowsPatcherRelease)),
+    androidPatcher: sortReleases(patcherSource.filter(isAndroidPatcherRelease))
+  }
+}
+
+async function fetchReleasePage(repository: string, page: number): Promise<GitHubRelease[]> {
   try {
-    return await $fetch<GitHubRelease[]>(GITHUB_RELEASES_API, {
+    return await $fetch<GitHubRelease[]>(`https://api.github.com/repos/${repository}/releases`, {
       query: {
         per_page: GITHUB_PAGE_SIZE,
         page
@@ -235,7 +221,7 @@ async function fetchReleasePage(page: number): Promise<GitHubRelease[]> {
     })
   } catch (error) {
     console.error('[github-releases] GitHub releases request failed', {
-      repository: GITHUB_REPOSITORY,
+      repository,
       page,
       ...getGitHubErrorDetails(error)
     })
@@ -247,13 +233,6 @@ async function fetchReleasePage(page: number): Promise<GitHubRelease[]> {
   }
 }
 
-interface ReleaseFetchRequirements {
-  stablePatchVersions: Set<string>
-  windowsPatcherDownloadUrl: string
-  androidPatcherDownloadUrl: string
-  androidApkDownloadUrl: string
-}
-
 function hasIndexedAsset(releases: ReleaseNoteEntry[], downloadUrl: string): boolean {
   if (!downloadUrl) {
     return releases.length > 0
@@ -262,59 +241,42 @@ function hasIndexedAsset(releases: ReleaseNoteEntry[], downloadUrl: string): boo
   return releases.some(release => hasAsset(release, asset => asset.downloadUrl === downloadUrl))
 }
 
-function hasRequiredReleases(
-  source: ReleaseNoteEntry[],
-  requirements: ReleaseFetchRequirements
-): boolean {
-  const patchReleases: ReleaseNoteEntry[] = []
-  const windowsPatcherReleases: ReleaseNoteEntry[] = []
-  const androidPatcherReleases: ReleaseNoteEntry[] = []
-  const androidApkReleases: ReleaseNoteEntry[] = []
-
-  for (const release of source) {
-    if (isWindowsPatcherRelease(release)) {
-      windowsPatcherReleases.push(release)
-      continue
-    }
-
-    if (isAndroidPatcherRelease(release)) {
-      androidPatcherReleases.push(release)
-      continue
-    }
-
-    if (isAndroidApkRelease(release)) {
-      androidApkReleases.push(release)
-      continue
-    }
-
-    if (isPatchRelease(release)) {
-      patchReleases.push(release)
-    }
-  }
-
-  const recentReleaseCount = patchReleases.length
-    + windowsPatcherReleases.length
-    + androidPatcherReleases.length
-    + androidApkReleases.length
-  const hasStablePatch = requirements.stablePatchVersions.size > 0
-    ? patchReleases.some(release => requirements.stablePatchVersions.has(release.tagName))
-    : patchReleases.length > 0
-
-  return recentReleaseCount >= RECENT_RELEASE_MINIMUM
-    && hasStablePatch
-    && hasIndexedAsset(windowsPatcherReleases, requirements.windowsPatcherDownloadUrl)
-    && hasIndexedAsset(androidPatcherReleases, requirements.androidPatcherDownloadUrl)
-    && hasIndexedAsset(androidApkReleases, requirements.androidApkDownloadUrl)
-}
-
-async function fetchRequiredGitHubReleases(requirements: ReleaseFetchRequirements): Promise<ReleaseNoteEntry[]> {
+async function fetchRequiredPatchReleases(stablePatchVersions: Set<string>): Promise<ReleaseNoteEntry[]> {
   const releases: ReleaseNoteEntry[] = []
 
   for (let page = 1; page <= GITHUB_MAX_PAGES; page += 1) {
-    const rows = await fetchReleasePage(page)
-    releases.push(...rows.map(normalizeRelease).filter((release): release is ReleaseNoteEntry => Boolean(release)))
+    const rows = await fetchReleasePage(PATCH_REPOSITORY, page)
+    releases.push(...normalizeReleases(rows))
 
-    if (rows.length < GITHUB_PAGE_SIZE || hasRequiredReleases(releases, requirements)) {
+    const patchReleases = releases.filter(isPatchRelease)
+    const hasStablePatch = stablePatchVersions.size > 0
+      ? patchReleases.some(release => stablePatchVersions.has(release.tagName))
+      : patchReleases.length > 0
+
+    if (rows.length < GITHUB_PAGE_SIZE || hasStablePatch) {
+      break
+    }
+  }
+
+  return releases
+}
+
+async function fetchRequiredPatcherReleases(
+  windowsPatcherDownloadUrl: string,
+  androidPatcherDownloadUrl: string
+): Promise<ReleaseNoteEntry[]> {
+  const releases: ReleaseNoteEntry[] = []
+
+  for (let page = 1; page <= GITHUB_MAX_PAGES; page += 1) {
+    const rows = await fetchReleasePage(PATCHER_REPOSITORY, page)
+    releases.push(...normalizeReleases(rows))
+
+    const windowsReleases = releases.filter(isWindowsPatcherRelease)
+    const androidReleases = releases.filter(isAndroidPatcherRelease)
+    const hasRequiredPatchers = hasIndexedAsset(windowsReleases, windowsPatcherDownloadUrl)
+      && hasIndexedAsset(androidReleases, androidPatcherDownloadUrl)
+
+    if (rows.length < GITHUB_PAGE_SIZE || hasRequiredPatchers) {
       break
     }
   }
@@ -324,24 +286,24 @@ async function fetchRequiredGitHubReleases(requirements: ReleaseFetchRequirement
 
 export async function getReleaseHistoryPage(page: number): Promise<ReleaseHistoryPageResponse> {
   const normalizedPage = Math.max(1, Math.floor(page))
-  const rows = await fetchReleasePage(normalizedPage)
-  const source = rows
-    .map(normalizeRelease)
-    .filter((release): release is ReleaseNoteEntry => Boolean(release))
+  const [patchRows, patcherRows] = await Promise.all([
+    fetchReleasePage(PATCH_REPOSITORY, normalizedPage),
+    fetchReleasePage(PATCHER_REPOSITORY, normalizedPage)
+  ])
 
   return {
-    repository: GITHUB_REPOSITORY,
+    repositories: RELEASE_REPOSITORIES,
     fetchedAt: new Date().toISOString(),
     page: normalizedPage,
-    perPage: GITHUB_PAGE_SIZE,
-    hasMore: rows.length === GITHUB_PAGE_SIZE,
-    releases: classifyReleases(source)
+    perPage: GITHUB_PAGE_SIZE * 2,
+    hasMore: patchRows.length === GITHUB_PAGE_SIZE || patcherRows.length === GITHUB_PAGE_SIZE,
+    releases: classifyReleases(normalizeReleases(patchRows), normalizeReleases(patcherRows))
   }
 }
 
-async function fetchDistributionJson(filename: string): Promise<unknown | null> {
+async function fetchDistributionJson(repository: string, filename: string): Promise<unknown | null> {
   try {
-    return await $fetch(`${GITHUB_CONTENTS_API}/${filename}`, {
+    return await $fetch(`https://api.github.com/repos/${repository}/contents/${filename}`, {
       query: {
         ref: 'distribution'
       },
@@ -351,7 +313,7 @@ async function fetchDistributionJson(filename: string): Promise<unknown | null> 
     })
   } catch (error) {
     console.warn('[github-releases] GitHub distribution file request failed', {
-      repository: GITHUB_REPOSITORY,
+      repository,
       filename,
       ...getGitHubErrorDetails(error)
     })
@@ -470,41 +432,6 @@ function normalizeAndroidPatcherIndex(value: unknown): AndroidPatcherIndex | nul
   }
 }
 
-function normalizeAndroidApkIndex(value: unknown): AndroidApkIndex | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  const packageName = asString(value.packageName)
-  const gameVersion = asString(value.gameVersion)
-  const downloadUrl = asString(value.downloadUrl)
-  const sha256 = asString(value.sha256)
-  const size = asNumber(value.size)
-  const installerPackageName = asString(value.installerPackageName)
-
-  if (!packageName || !gameVersion || !downloadUrl || !sha256 || size <= 0 || !installerPackageName) {
-    return null
-  }
-
-  return {
-    schemaVersion: asNumber(value.schemaVersion),
-    packageName,
-    gameVersion,
-    downloadUrl,
-    sha256,
-    size,
-    installerPackageName
-  }
-}
-
-function sortReleases(releases: ReleaseNoteEntry[]): ReleaseNoteEntry[] {
-  return releases.sort((left, right) => {
-    const leftTime = new Date(left.publishedAt).getTime()
-    const rightTime = new Date(right.publishedAt).getTime()
-    return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime)
-  })
-}
-
 function matchIndexedArtifact<T>(
   index: T | null,
   downloadUrl: string | undefined,
@@ -596,59 +523,31 @@ function resolveAndroidPatcher(
   }
 }
 
-function resolveAndroidApk(
-  index: AndroidApkIndex | null,
-  releases: ReleaseNoteEntry[]
-): IndexedReleaseArtifact<AndroidApkIndex> | null {
-  const indexed = matchIndexedArtifact(index, index?.downloadUrl, releases)
-  if (indexed) {
-    return indexed
-  }
-
-  const fallback = findLatestReleaseAsset(releases, 'AstralPartyKorean.apk')
-  if (!fallback) {
-    return null
-  }
-
-  return {
-    index: {
-      schemaVersion: 0,
-      packageName: 'com.feimo.astralpartyjpn',
-      gameVersion: versionFromTag(fallback.release.tagName, 'int-apk-v'),
-      downloadUrl: fallback.asset.downloadUrl,
-      sha256: '',
-      size: fallback.asset.size,
-      installerPackageName: 'com.android.vending'
-    },
-    ...fallback
-  }
-}
-
 export async function getReleaseFeed(): Promise<ReleaseFeedResponse> {
-  const [patchIndexRaw, windowsPatcherRaw, androidPatcherRaw, androidApkRaw] = await Promise.all([
-    fetchDistributionJson('release-index.json'),
-    fetchDistributionJson('patcher-index.json'),
-    fetchDistributionJson('mobile-patcher-index.json'),
-    fetchDistributionJson('android-apk-index.json')
+  const [patchIndexRaw, windowsPatcherRaw, androidPatcherRaw] = await Promise.all([
+    fetchDistributionJson(PATCH_REPOSITORY, 'release-index.json'),
+    fetchDistributionJson(PATCHER_REPOSITORY, 'patcher-index.json'),
+    fetchDistributionJson(PATCHER_REPOSITORY, 'mobile-patcher-index.json')
   ])
 
   const patchIndex = normalizePatchDistributionIndex(patchIndexRaw)
   const windowsPatcherIndex = normalizeWindowsPatcherIndex(windowsPatcherRaw)
   const androidPatcherIndex = normalizeAndroidPatcherIndex(androidPatcherRaw)
-  const androidApkIndex = normalizeAndroidApkIndex(androidApkRaw)
   const stablePatchVersions = new Set(
     patchIndex?.releases
       .filter(entry => entry.channel === 'release')
       .map(entry => entry.patchVersion)
       ?? []
   )
-  const source = await fetchRequiredGitHubReleases({
-    stablePatchVersions,
-    windowsPatcherDownloadUrl: windowsPatcherIndex?.downloadUrl ?? '',
-    androidPatcherDownloadUrl: androidPatcherIndex?.downloadUrl ?? '',
-    androidApkDownloadUrl: androidApkIndex?.downloadUrl ?? ''
-  })
-  const releases = classifyReleases(source)
+
+  const [patchSource, patcherSource] = await Promise.all([
+    fetchRequiredPatchReleases(stablePatchVersions),
+    fetchRequiredPatcherReleases(
+      windowsPatcherIndex?.downloadUrl ?? '',
+      androidPatcherIndex?.downloadUrl ?? ''
+    )
+  ])
+  const releases = classifyReleases(patchSource, patcherSource)
 
   const stablePatchRelease = stablePatchVersions.size
     ? releases.patch.find(release => stablePatchVersions.has(release.tagName)) ?? null
@@ -656,7 +555,7 @@ export async function getReleaseFeed(): Promise<ReleaseFeedResponse> {
   const stablePatchVersion = stablePatchRelease?.tagName ?? null
 
   return {
-    repository: GITHUB_REPOSITORY,
+    repositories: RELEASE_REPOSITORIES,
     fetchedAt: new Date().toISOString(),
     releases,
     distribution: {
@@ -668,8 +567,7 @@ export async function getReleaseFeed(): Promise<ReleaseFeedResponse> {
           }
         : null,
       windowsPatcher: resolveWindowsPatcher(windowsPatcherIndex, releases.windowsPatcher),
-      androidPatcher: resolveAndroidPatcher(androidPatcherIndex, releases.androidPatcher),
-      androidApk: resolveAndroidApk(androidApkIndex, releases.androidApk)
+      androidPatcher: resolveAndroidPatcher(androidPatcherIndex, releases.androidPatcher)
     }
   }
 }
