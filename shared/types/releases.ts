@@ -1,4 +1,4 @@
-export type ReleaseFeedKey = 'patch' | 'windowsPatcher' | 'androidPatcher' | 'androidApk'
+export type ReleaseFeedKey = 'patch' | 'windowsPatcher' | 'androidPatcher'
 
 export type PatchRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
 export type PatchChannel = 'develop' | 'release'
@@ -59,16 +59,6 @@ export interface AndroidPatcherIndex {
   size: number
 }
 
-export interface AndroidApkIndex {
-  schemaVersion: number
-  packageName: string
-  gameVersion: string
-  downloadUrl: string
-  sha256: string
-  size: number
-  installerPackageName: string
-}
-
 export interface IndexedReleaseArtifact<T> {
   index: T
   release: ReleaseNoteEntry | null
@@ -85,18 +75,22 @@ export interface ReleaseDistribution {
   stablePatch: StablePatchDistribution | null
   windowsPatcher: IndexedReleaseArtifact<WindowsPatcherIndex> | null
   androidPatcher: IndexedReleaseArtifact<AndroidPatcherIndex> | null
-  androidApk: IndexedReleaseArtifact<AndroidApkIndex> | null
+}
+
+export interface ReleaseRepositories {
+  patch: string
+  patcher: string
 }
 
 export interface ReleaseFeedResponse {
-  repository: string
+  repositories: ReleaseRepositories
   fetchedAt: string
   releases: Record<ReleaseFeedKey, ReleaseNoteEntry[]>
   distribution: ReleaseDistribution
 }
 
 export interface ReleaseHistoryPageResponse {
-  repository: string
+  repositories: ReleaseRepositories
   fetchedAt: string
   page: number
   perPage: number

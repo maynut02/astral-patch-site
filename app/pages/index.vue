@@ -19,7 +19,6 @@ import { EDITOR_STATUS_META, EDITOR_VISIBLE_STATUSES } from '~/utils/editor-prog
 
 type SupportedRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
 type GuideAnswerKey = 'route' | 'resources' | 'patcher' | 'started' | 'shizuku'
-type VisibleReleaseFeedKey = Exclude<ReleaseFeedKey, 'androidApk'>
 
 interface ReleaseAssetMatch {
   asset: ReleaseAssetInfo
@@ -27,13 +26,13 @@ interface ReleaseAssetMatch {
 }
 
 interface RecentReleaseEntry {
-  feed: VisibleReleaseFeedKey
+  feed: ReleaseFeedKey
   release: ReleaseNoteEntry
 }
 
 const RECENT_ITEM_LIMIT = 5
 
-const releaseFeedLabels: Record<VisibleReleaseFeedKey, string> = {
+const releaseFeedLabels: Record<ReleaseFeedKey, string> = {
   patch: '한글패치',
   windowsPatcher: 'Windows 패치 프로그램',
   androidPatcher: 'Android 패치 앱'
@@ -150,7 +149,7 @@ const recentReleases = computed<RecentReleaseEntry[]>(() => {
     return []
   }
 
-  return (Object.keys(releaseFeedLabels) as VisibleReleaseFeedKey[])
+  return (Object.keys(releaseFeedLabels) as ReleaseFeedKey[])
     .flatMap(feed => releases[feed].map(release => ({ feed, release })))
     .sort((left, right) => {
       const leftTime = new Date(left.release.publishedAt).getTime()
@@ -1056,7 +1055,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
                     {{ changeStatusLabels[entry.status] }}
                   </UBadge>
                   <span
-                    class="min-w-0 flex-1 truncate text-sm font-medium text-default"
+                    class="min-w-0 flex-1 truncate text-xs font-medium text-default"
                     :title="`${entry.category}_${entry.unitKey}`"
                   >
                     {{ entry.category }}_{{ entry.unitKey }}

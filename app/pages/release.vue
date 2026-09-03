@@ -49,8 +49,7 @@ function createEmptyReleaseGroups(): Record<ReleaseFeedKey, ReleaseNoteEntry[]> 
   return {
     patch: [],
     windowsPatcher: [],
-    androidPatcher: [],
-    androidApk: []
+    androidPatcher: []
   }
 }
 

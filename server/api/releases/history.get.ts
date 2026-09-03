@@ -17,5 +17,5 @@ export default defineCachedEventHandler(async (event) => {
 }, {
   maxAge: 60,
   swr: false,
-  name: 'github-release-history-v1'
+  name: 'github-release-history-v2'
 })
