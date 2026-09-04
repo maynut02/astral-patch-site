@@ -58,6 +58,7 @@ export interface EditorHistoryEntry {
   actorRole: EditorRole
   handle: string | null
   status: EditorChangeStatus | null
+  changeKind: EditorChangeKind | null
   reviewerRole: EditorRole | null
   reviewerHandle: string | null
   reviewedAt: string | null

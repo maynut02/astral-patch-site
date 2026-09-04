@@ -1124,6 +1124,19 @@ async function retryActiveLog() {
             </p>
 
             <div class="flex flex-col gap-2 p-3 md:px-5 md:py-4 border-b border-default text-xs">
+              <div
+                v-if="entry.changeKind === 'retain_confirmation'"
+                class="flex"
+              >
+                <UBadge
+                  color="warning"
+                  variant="soft"
+                  size="sm"
+                >
+                  유지 확인
+                </UBadge>
+              </div>
+
               <div class="flex items-center gap-1.5">
                 <UIcon
                   name="i-tabler-file-filled"
