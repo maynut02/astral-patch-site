@@ -506,10 +506,6 @@ async function confirmApprovalSelection(): Promise<void> {
             v-if="entry.changeKind === 'retain_confirmation'"
             class="flex flex-col gap-2 bg-default/75 p-4"
           >
-            <div class="flex items-center gap-2 text-xs font-medium text-muted">
-              <UIcon name="i-tabler-equal" class="size-4" />
-              기존 승인 번역을 현재 원문에도 그대로 유지
-            </div>
             <p class="whitespace-pre-wrap wrap-break-word text-sm leading-6 text-toned">
               {{ entry.proposedText }}
             </p>

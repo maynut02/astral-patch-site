@@ -379,6 +379,15 @@ watch([() => props.itemId, () => props.reloadKey], loadHistory, { immediate: tru
                   {{ formatDate(history.entry.createdAt) }}
                 </time>
 
+                <UBadge
+                  v-if="history.entry.changeKind === 'retain_confirmation'"
+                  color="warning"
+                  variant="soft"
+                  size="sm"
+                >
+                  유지 확인
+                </UBadge>
+
                 <div
                   v-if="history.entry.action === 'source_changed' && formatSourceRevision(history.entry)"
                   class="flex items-center gap-1 text-xs"
