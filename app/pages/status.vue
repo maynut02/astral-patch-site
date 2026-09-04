@@ -530,11 +530,8 @@ function updateHistoryFilter(value: string | number): void {
           :content="false"
           color="neutral"
           size="sm"
-          class="self-start"
-          :ui="{
-            list: 'w-full bg-elevated/50 p-1 sm:w-fit',
-            trigger: 'h-8 justify-center px-3 leading-4 sm:flex-none'
-          }"
+          :ui="{ trigger: 'h-7 leading-4 px-3', list: 'h-9 bg-elevated/50 p-1' }"
+          class="w-fit"
           @update:model-value="updateHistoryFilter"
         />
 

@@ -1,6 +1,7 @@
 import { createError } from 'h3'
 import { withDatabaseRetry, type DatabaseClient } from './database'
 import type {
+  EditorChangeKind,
   EditorChangeStatus,
   EditorSourceChangesResponse,
   EditorSourceRevision,
@@ -14,16 +15,19 @@ import { containsLikePattern, getFirstQueryValue, parsePage as parseValidatedPag
 export const EDITOR_LOG_PAGE_SIZE = 50
 
 const CHANGE_STATUSES: EditorChangeStatus[] = ['pending', 'approved', 'rejected', 'superseded']
+const CHANGE_KINDS: EditorChangeKind[] = ['translation_edit', 'retain_confirmation']
 
 export interface EditorTranslationLogFilters {
   page: number
   search: string
   status: EditorChangeStatus | ''
+  changeKind: EditorChangeKind | ''
 }
 
 export function parseEditorLogQuery(query: Record<string, unknown>): EditorTranslationLogFilters {
   const search = getFirstQueryValue(query.search).trim()
   const rawStatus = getFirstQueryValue(query.status).trim().toLowerCase()
+  const rawChangeKind = getFirstQueryValue(query.changeKind).trim().toLowerCase()
 
   if (search.length > 200) {
     throw createError({
@@ -39,10 +43,18 @@ export function parseEditorLogQuery(query: Record<string, unknown>): EditorTrans
     })
   }
 
+  if (rawChangeKind && rawChangeKind !== 'all' && !CHANGE_KINDS.includes(rawChangeKind as EditorChangeKind)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid log change kind'
+    })
+  }
+
   return {
     page: parseValidatedPage(query.page, 'Invalid log page'),
     search,
-    status: rawStatus === 'all' ? '' : rawStatus as EditorChangeStatus | ''
+    status: rawStatus === 'all' ? '' : rawStatus as EditorChangeStatus | '',
+    changeKind: rawChangeKind === 'all' ? '' : rawChangeKind as EditorChangeKind | ''
   }
 }
 
@@ -55,6 +67,7 @@ export function parseEditorLogRevisionId(value: unknown): string {
 function buildTranslationLogWhere(sql: DatabaseClient, filters: EditorTranslationLogFilters) {
   const hasSearch = Boolean(filters.search)
   const hasStatus = Boolean(filters.status)
+  const hasChangeKind = Boolean(filters.changeKind)
   const searchPattern = containsLikePattern(filters.search)
 
   return sql`
@@ -71,6 +84,10 @@ function buildTranslationLogWhere(sql: DatabaseClient, filters: EditorTranslatio
     AND (
       NOT ${hasStatus}
       OR tc.status = ${filters.status || null}
+    )
+    AND (
+      NOT ${hasChangeKind}
+      OR tc.change_kind = ${filters.changeKind || null}
     )
   `
 }
@@ -138,6 +155,14 @@ export async function getEditorTranslationLogs(
           'reviewerHandle', NULLIF(BTRIM(reviewer.handle), ''),
           'previousText', tc.previous_text,
           'proposedText', tc.proposed_text,
+          'changeKind', tc.change_kind,
+          'pendingCandidateCount', (
+            SELECT count(*)::int
+            FROM translation_changes pending
+            WHERE pending.unit_id = tc.unit_id
+              AND pending.locale = tc.locale
+              AND pending.status = 'pending'
+          ),
           'status', tc.status,
           'createdAt', tc.created_at,
           'reviewedAt', tc.reviewed_at
@@ -185,6 +210,7 @@ export async function getEditorTranslationLogEntry(changeId: string): Promise<Ed
       NULLIF(BTRIM(reviewer.handle), '') AS "reviewerHandle",
       tc.previous_text AS "previousText",
       tc.proposed_text AS "proposedText",
+      tc.change_kind AS "changeKind",
       tc.status,
       tc.created_at AS "createdAt",
       tc.reviewed_at AS "reviewedAt"

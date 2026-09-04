@@ -426,8 +426,8 @@ onBeforeUnmount(() => {
         :items="scopeTabs"
         :content="false"
         color="neutral"
-        size="xs"
-        :ui="{ trigger: 'h-7 px-3 leading-4', list: 'bg-elevated/50' }"
+        size="sm"
+        :ui="{ trigger: 'h-7 leading-4 px-3', list: 'h-9 bg-elevated/50 p-1' }"
         class="w-fit"
       />
     </div>
