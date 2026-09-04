@@ -1,6 +1,6 @@
 export type ReleaseFeedKey = 'patch' | 'windowsPatcher' | 'androidPatcher'
 
-export type PatchRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
+export type PatchRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID' | 'CN_ANDROID'
 export type PatchChannel = 'develop' | 'release'
 
 export interface ReleaseAssetInfo {

@@ -110,6 +110,17 @@ jobs:
               exit 1
             fi
 
+            # WebSocket 프록시를 포함한 Nginx 설정을 저장소 템플릿과 동기화한다.
+            NGINX_CONFIG="$(mktemp)"
+            sed \
+              -e 's|__ASTRAL_DOMAIN__|astral.maynutlab.com|g' \
+              -e "s|__ASTRAL_APP_PORT__|${APP_PORT}|g" \
+              deploy/nginx/astral-patch-site.conf.template > "$NGINX_CONFIG"
+            sudo -n install -m 0644 "$NGINX_CONFIG" /etc/nginx/conf.d/astral-patch-site.conf
+            rm -f "$NGINX_CONFIG"
+            sudo -n nginx -t
+            sudo -n systemctl reload nginx
+
             for attempt in $(seq 1 30); do
               if curl --fail --silent --show-error "http://127.0.0.1:${APP_PORT}/" >/dev/null; then
                 echo "Astral Patch site is healthy on 127.0.0.1:${APP_PORT}"

@@ -234,10 +234,12 @@ function formatFileSize(bytes: number): string {
   return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
 }
 
-function isManualSteamAsset(name: string): boolean {
+function isDefaultPatchAsset(name: string): boolean {
   const lowerName = name.toLowerCase()
   return lowerName === 'int_steam_manual_patch.zip'
     || lowerName === 'cn_steam_manual_patch.zip'
+    || lowerName === 'int_android_manual_patch.zip'
+    || lowerName === 'cn_android_manual_patch.zip'
 }
 
 function getVisibleAssets(release: ReleaseNoteEntry) {
@@ -245,7 +247,7 @@ function getVisibleAssets(release: ReleaseNoteEntry) {
     return release.assets
   }
 
-  return release.assets.filter(asset => isManualSteamAsset(asset.name))
+  return release.assets.filter(asset => isDefaultPatchAsset(asset.name))
 }
 
 function getAssetIcon(name: string): string {

@@ -87,7 +87,10 @@ const intSteamManual = computed(() => findAssetInRelease(latestPatchRelease.valu
 const cnSteamManual = computed(() => findAssetInRelease(latestPatchRelease.value, 'CN_STEAM_manual_patch.zip'))
 const intSteamManifest = computed(() => findAssetInRelease(latestPatchRelease.value, 'INT_STEAM_manifest.json'))
 const cnSteamManifest = computed(() => findAssetInRelease(latestPatchRelease.value, 'CN_STEAM_manifest.json'))
+const intAndroidManual = computed(() => findAssetInRelease(latestPatchRelease.value, 'INT_ANDROID_manual_patch.zip'))
+const cnAndroidManual = computed(() => findAssetInRelease(latestPatchRelease.value, 'CN_ANDROID_manual_patch.zip'))
 const intAndroidManifest = computed(() => findAssetInRelease(latestPatchRelease.value, 'INT_ANDROID_manifest.json'))
+const cnAndroidManifest = computed(() => findAssetInRelease(latestPatchRelease.value, 'CN_ANDROID_manifest.json'))
 
 const intSteamDownloadCount = computed(() => {
   if (!intSteamManual.value && !intSteamManifest.value) {
@@ -105,7 +108,22 @@ const cnSteamDownloadCount = computed(() => {
   return (cnSteamManual.value?.asset.downloadCount ?? 0)
     + (cnSteamManifest.value?.asset.downloadCount ?? 0)
 })
-const intAndroidDownloadCount = computed(() => intAndroidManifest.value?.asset.downloadCount ?? null)
+const intAndroidDownloadCount = computed(() => {
+  if (!intAndroidManual.value && !intAndroidManifest.value) {
+    return null
+  }
+
+  return (intAndroidManual.value?.asset.downloadCount ?? 0)
+    + (intAndroidManifest.value?.asset.downloadCount ?? 0)
+})
+const cnAndroidDownloadCount = computed(() => {
+  if (!cnAndroidManual.value && !cnAndroidManifest.value) {
+    return null
+  }
+
+  return (cnAndroidManual.value?.asset.downloadCount ?? 0)
+    + (cnAndroidManifest.value?.asset.downloadCount ?? 0)
+})
 function formatCount(value: number): string {
   return numberFormatter.format(value)
 }
@@ -164,7 +182,7 @@ function formatFileSize(bytes: number): string {
 
 function launchWindowsPatcher(
   action: 'settings' | 'install' | 'remove',
-  route?: 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
+  route?: 'INT_STEAM' | 'CN_STEAM'
 ): void {
   if (!import.meta.client) {
     return
@@ -505,7 +523,7 @@ function reloadReleases(): void {
               </div>
               <div class="flex min-w-0 flex-col">
                 <span class="text-xs text-dimmed">크기</span>
-                <span class="text-sm">-</span>
+                <span class="text-sm">{{ intAndroidManual ? formatFileSize(intAndroidManual.asset.size) : '—' }}</span>
               </div>
               <div class="flex min-w-0 flex-col">
                 <span class="text-xs text-dimmed">다운로드</span>
@@ -516,16 +534,63 @@ function reloadReleases(): void {
 
           <div class="flex h-full flex-col bg-default/75 p-2">
             <UButton
-              :href="intAndroidManifest?.asset.downloadUrl"
-              :disabled="!intAndroidManifest"
+              :href="intAndroidManual?.asset.downloadUrl"
+              :disabled="!intAndroidManual"
               external
-              icon="i-tabler-file-description"
+              icon="i-tabler-file-zip"
               color="neutral"
               variant="ghost"
               size="md"
               class="gap-2 py-2.5"
             >
-              패치 매니페스트 다운로드
+              수동 패치 파일 다운로드
+            </UButton>
+          </div>
+        </article>
+
+        <article class="flex flex-col gap-1 border border-default bg-muted">
+          <div class="flex flex-col gap-5 p-5">
+            <div class="flex flex-col">
+              <UIcon
+                name="i-tabler-brand-android"
+                class="size-7 md:size-8"
+              />
+              <span class="mt-3 text-xs text-muted">CN_ANDROID</span>
+              <span class="mt-1 text-xl font-medium">Android 중국 버전</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-x-2 gap-y-4">
+              <div class="flex min-w-0 flex-col">
+                <span class="text-xs text-dimmed">버전</span>
+                <span class="truncate text-sm">{{ latestPatchVersion ?? '확인 중' }}</span>
+              </div>
+              <div class="flex min-w-0 flex-col">
+                <span class="text-xs text-dimmed">릴리즈 시각</span>
+                <span class="truncate text-sm">{{ latestPatchRelease ? formatDate(latestPatchRelease.publishedAt) : '—' }}</span>
+              </div>
+              <div class="flex min-w-0 flex-col">
+                <span class="text-xs text-dimmed">크기</span>
+                <span class="text-sm">{{ cnAndroidManual ? formatFileSize(cnAndroidManual.asset.size) : '—' }}</span>
+              </div>
+              <div class="flex min-w-0 flex-col">
+                <span class="text-xs text-dimmed">다운로드</span>
+                <span class="text-sm">{{ cnAndroidDownloadCount !== null ? formatCount(cnAndroidDownloadCount) : '—' }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex h-full flex-col bg-default/75 p-2">
+            <UButton
+              :href="cnAndroidManual?.asset.downloadUrl"
+              :disabled="!cnAndroidManual"
+              external
+              icon="i-tabler-file-zip"
+              color="neutral"
+              variant="ghost"
+              size="md"
+              class="gap-2 py-2.5"
+            >
+              수동 패치 파일 다운로드
             </UButton>
           </div>
         </article>

@@ -1,4 +1,4 @@
-export type PatchWatcherRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
+export type PatchWatcherRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID' | 'CN_ANDROID'
 
 export type PatchWatcherRunStatus
   = 'running'
@@ -34,6 +34,7 @@ export interface PatchWatcherRunSummary {
   startedAt: string
   finishedAt: string | null
   durationMs: number | null
+  errorMessage: string | null
   message: string | null
 }
 
@@ -54,6 +55,7 @@ export interface PatchWatcherRouteSummary {
   checkedAt: string | null
   observedAt: string | null
   durationMs: number | null
+  errorMessage: string | null
   message: string | null
   successRate7d: number | null
   hourly: PatchWatcherHourlyStat[]
@@ -85,6 +87,7 @@ export interface PatchWatcherHistoryRoute {
   status: PatchWatcherRouteStatus
   revision: string | null
   durationMs: number | null
+  errorMessage: string | null
   message: string | null
 }
 

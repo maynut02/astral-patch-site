@@ -17,7 +17,7 @@ import { getEditorDiffParts } from '~/utils/editor-diff'
 import { formatEditorCount, formatEditorDate, formatEditorPercent } from '~/utils/editor-helpers'
 import { EDITOR_STATUS_META, EDITOR_VISIBLE_STATUSES } from '~/utils/editor-progress'
 
-type SupportedRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID'
+type SupportedRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID' | 'CN_ANDROID'
 type GuideAnswerKey = 'route' | 'resources' | 'patcher' | 'started' | 'shizuku'
 
 interface ReleaseAssetMatch {
@@ -55,7 +55,8 @@ const changeStatusColors: Record<EditorChangeStatus, 'warning' | 'success' | 'er
 const routeOptions = [
   { label: 'Steam 글로벌', value: 'INT_STEAM', icon: 'i-tabler-brand-steam' },
   { label: 'Steam 중국', value: 'CN_STEAM', icon: 'i-tabler-brand-steam' },
-  { label: 'Android 일본', value: 'INT_ANDROID', icon: 'i-tabler-brand-android' }
+  { label: 'Android 일본', value: 'INT_ANDROID', icon: 'i-tabler-brand-android' },
+  { label: 'Android 중국', value: 'CN_ANDROID', icon: 'i-tabler-brand-android' }
 ]
 const yesNoOptions = [
   { label: '예', value: 'yes' },
@@ -138,10 +139,10 @@ const selectedGameNotice = ref<GameNotice | null>(null)
 
 const selectedRoute = computed<SupportedRoute | null>(() => {
   const route = answers.route
-  return route === 'INT_STEAM' || route === 'CN_STEAM' || route === 'INT_ANDROID' ? route : null
+  return route === 'INT_STEAM' || route === 'CN_STEAM' || route === 'INT_ANDROID' || route === 'CN_ANDROID' ? route : null
 })
 const isSteam = computed(() => selectedRoute.value === 'INT_STEAM' || selectedRoute.value === 'CN_STEAM')
-const isAndroid = computed(() => selectedRoute.value === 'INT_ANDROID')
+const isAndroid = computed(() => selectedRoute.value === 'INT_ANDROID' || selectedRoute.value === 'CN_ANDROID')
 
 const recentReleases = computed<RecentReleaseEntry[]>(() => {
   const releases = releaseFeed.value?.releases
