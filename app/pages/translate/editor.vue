@@ -2074,8 +2074,8 @@ watch(items, (nextItems) => {
                 :content="false"
                 :items="[{ label: '파일', value: 'category' }, { label: '버전', value: 'version' }]"
                 color="neutral"
-                size="xs"
-                :ui="{ trigger: 'h-6 px-3 leading-4', list: 'bg-elevated/50' }"
+                size="sm"
+                :ui="{ trigger: 'h-7 leading-4 px-3', list: 'h-9 bg-elevated/50 p-1' }"
                 class="w-fit"
               />
 
@@ -2084,9 +2084,10 @@ watch(items, (nextItems) => {
                 icon="i-tabler-search"
                 color="neutral"
                 variant="soft"
-                class="w-full min-w-0"
+                size="lg"
+                class="h-9 w-full min-w-0"
                 :placeholder="sidebarListMode === 'category' ? '파일 검색' : '버전 검색'"
-                :ui="{ base: 'h-8 leading-5', trailing: 'pe-1', leadingIcon: 'size-4' }"
+                :ui="{ base: 'h-9 leading-5', trailing: 'pe-1', leadingIcon: 'size-4' }"
               >
                 <template
                   v-if="sidebarListSearch.length"
@@ -2202,8 +2203,8 @@ watch(items, (nextItems) => {
                     :content="false"
                     :items="dictionaryPanelTabs"
                     color="neutral"
-                    size="xs"
-                    :ui="{ trigger: 'h-6 px-3 leading-4', list: 'bg-elevated/50' }"
+                    size="sm"
+                    :ui="{ trigger: 'h-7 leading-4 px-3', list: 'h-9 bg-elevated/50 p-1' }"
                     class="w-fit"
                   />
                 </div>

@@ -29,6 +29,7 @@ export interface EditorFiltersResponse {
 }
 
 export type EditorChangeStatus = 'pending' | 'approved' | 'rejected' | 'superseded'
+export type EditorChangeKind = 'translation_edit' | 'retain_confirmation'
 
 export type EditorHistoryAction = 'source_changed' | 'translation_changed'
 
@@ -154,6 +155,8 @@ export interface EditorTranslationLogEntry {
   reviewerHandle: string | null
   previousText: string | null
   proposedText: string
+  changeKind: EditorChangeKind
+  pendingCandidateCount?: number
   status: EditorChangeStatus
   createdAt: string
   reviewedAt: string | null

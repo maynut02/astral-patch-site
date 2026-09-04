@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   EditorBatchReviewResponse,
+  EditorChangeKind,
   EditorReviewAction,
   EditorReviewCandidateGroup,
   EditorReviewCandidatesResponse,
@@ -22,9 +23,11 @@ const defaultData: EditorTranslationLogResponse = {
 }
 
 const page = ref(1)
+const reviewKind = ref<EditorChangeKind>('translation_edit')
 const reviewingId = ref<string | null>(null)
 const batchReviewAction = ref<EditorReviewAction | null>(null)
 const isPreparingApproval = ref(false)
+const preparingApprovalId = ref<string | null>(null)
 const selectedIds = ref<Set<string>>(new Set())
 const approvalModalOpen = ref(false)
 const approvalGroups = ref<EditorReviewCandidateGroup[]>([])
@@ -37,11 +40,16 @@ const {
   error,
   refresh
 } = await useFetch<EditorTranslationLogResponse>('/api/editor/review', {
-  query: computed(() => ({ page: page.value })),
+  query: computed(() => ({ page: page.value, changeKind: reviewKind.value })),
   default: () => defaultData
 })
 
 const entries = computed(() => data.value?.entries ?? [])
+const reviewTabs = [
+  { label: '번역 수정', value: 'translation_edit' },
+  { label: '유지 확인', value: 'retain_confirmation' }
+]
+const currentReviewLabel = computed(() => reviewKind.value === 'retain_confirmation' ? '유지 확인' : '번역 수정')
 const isReviewing = computed(() => Boolean(reviewingId.value || batchReviewAction.value || isPreparingApproval.value))
 const selectedEntries = computed(() => entries.value.filter(entry => selectedIds.value.has(entry.id)))
 const selectedCount = computed(() => selectedEntries.value.length)
@@ -88,6 +96,17 @@ function updatePageSelection(value: boolean | 'indeterminate'): void {
     : new Set()
 }
 
+function updateReviewKind(value: string | number): void {
+  if ((value !== 'translation_edit' && value !== 'retain_confirmation') || value === reviewKind.value) {
+    return
+  }
+
+  page.value = 1
+  selectedIds.value = new Set()
+  resetApprovalDialog()
+  reviewKind.value = value
+}
+
 function setApprovalSelection(unitId: string, value: unknown): void {
   if (typeof value !== 'string') {
     return
@@ -113,11 +132,7 @@ async function refreshAfterReview(): Promise<void> {
   }
 }
 
-async function review(entry: EditorTranslationLogEntry, action: EditorReviewAction): Promise<void> {
-  if (isReviewing.value) {
-    return
-  }
-
+async function executeSingleReview(entry: EditorTranslationLogEntry, action: EditorReviewAction): Promise<void> {
   reviewingId.value = entry.id
 
   try {
@@ -141,6 +156,19 @@ async function review(entry: EditorTranslationLogEntry, action: EditorReviewActi
   } finally {
     reviewingId.value = null
   }
+}
+
+async function review(entry: EditorTranslationLogEntry, action: EditorReviewAction): Promise<void> {
+  if (isReviewing.value) {
+    return
+  }
+
+  if (action === 'approve') {
+    await prepareApproval([entry], new Set([entry.id]), entry.id)
+    return
+  }
+
+  await executeSingleReview(entry, 'reject')
 }
 
 async function executeBatchReview(ids: string[], action: EditorReviewAction): Promise<void> {
@@ -180,16 +208,20 @@ async function executeBatchReview(ids: string[], action: EditorReviewAction): Pr
   }
 }
 
-async function prepareSelectedApproval(): Promise<void> {
-  const currentSelection = selectedEntries.value
-  if (!currentSelection.length) {
+async function prepareApproval(
+  requestedEntries: EditorTranslationLogEntry[],
+  preselectedIds: Set<string>,
+  singleEntryId: string | null = null
+): Promise<void> {
+  if (!requestedEntries.length) {
     return
   }
 
   isPreparingApproval.value = true
+  preparingApprovalId.value = singleEntryId
 
   try {
-    const unitIds = [...new Set(currentSelection.map(entry => entry.unitId))]
+    const unitIds = [...new Set(requestedEntries.map(entry => entry.unitId))]
     const response = await $fetch<EditorReviewCandidatesResponse>('/api/editor/review/candidates', {
       method: 'POST',
       body: { unitIds }
@@ -212,7 +244,7 @@ async function prepareSelectedApproval(): Promise<void> {
     const selections: Record<string, string> = {}
 
     for (const group of groups) {
-      const selectedCandidates = group.candidates.filter(candidate => selectedIds.value.has(candidate.id))
+      const selectedCandidates = group.candidates.filter(candidate => preselectedIds.has(candidate.id))
       if (!selectedCandidates.length) {
         showToast({
           id: 'translation-batch-review-stale',
@@ -231,7 +263,11 @@ async function prepareSelectedApproval(): Promise<void> {
     }
 
     if (groups.every(group => group.candidates.length === 1)) {
-      await executeBatchReview(groups.map(group => group.candidates[0]!.id), 'approve')
+      if (requestedEntries.length === 1) {
+        await executeSingleReview(requestedEntries[0]!, 'approve')
+      } else {
+        await executeBatchReview(groups.map(group => group.candidates[0]!.id), 'approve')
+      }
       return
     }
 
@@ -246,7 +282,12 @@ async function prepareSelectedApproval(): Promise<void> {
     })
   } finally {
     isPreparingApproval.value = false
+    preparingApprovalId.value = null
   }
+}
+
+async function prepareSelectedApproval(): Promise<void> {
+  await prepareApproval(selectedEntries.value, new Set(selectedEntries.value.map(entry => entry.id)))
 }
 
 async function reviewSelected(action: EditorReviewAction): Promise<void> {
@@ -295,9 +336,20 @@ async function confirmApprovalSelection(): Promise<void> {
         size="md"
         class="w-fit shrink-0"
       >
-        승인 대기 {{ (data?.total ?? 0).toLocaleString() }}건
+        {{ currentReviewLabel }} 승인 대기 {{ (data?.total ?? 0).toLocaleString() }}건
       </UBadge>
     </header>
+
+    <UTabs
+      :model-value="reviewKind"
+      :items="reviewTabs"
+      :content="false"
+      color="neutral"
+      size="sm"
+      :ui="{ trigger: 'h-7 leading-4 px-3', list: 'h-9 bg-elevated/50 p-1' }"
+      class="w-fit"
+      @update:model-value="updateReviewKind"
+    />
 
     <UAlert
       v-if="error"
@@ -338,8 +390,8 @@ async function confirmApprovalSelection(): Promise<void> {
       color="neutral"
       variant="soft"
       icon="i-tabler-circle-check"
-      title="승인 대기 중인 번역이 없습니다."
-      description="현재 검토가 필요한 번역 제안이 모두 처리되었습니다."
+      :title="reviewKind === 'retain_confirmation' ? '승인 대기 중인 유지 확인 요청이 없습니다.' : '승인 대기 중인 번역 수정이 없습니다.'"
+      :description="reviewKind === 'retain_confirmation' ? '현재 번역을 그대로 유지할지 검토할 항목이 없습니다.' : '현재 검토가 필요한 실제 번역 수정 제안이 없습니다.'"
     />
 
     <div
@@ -409,6 +461,21 @@ async function confirmApprovalSelection(): Promise<void> {
           >
             승인 대기
           </UBadge>
+          <UBadge
+            :color="entry.changeKind === 'retain_confirmation' ? 'neutral' : 'info'"
+            variant="soft"
+            size="sm"
+          >
+            {{ entry.changeKind === 'retain_confirmation' ? '유지 확인' : '번역 수정' }}
+          </UBadge>
+          <UBadge
+            v-if="(entry.pendingCandidateCount ?? 0) > 1"
+            color="warning"
+            variant="outline"
+            size="sm"
+          >
+            다른 승인 대기 요청 {{ (entry.pendingCandidateCount ?? 1) - 1 }}건
+          </UBadge>
           <div class="flex flex-1">
             <NuxtLink
               :to="{
@@ -435,7 +502,22 @@ async function confirmApprovalSelection(): Promise<void> {
         </header>
 
         <div class="flex flex-col gap-1.5">
-          <p class="whitespace-pre-wrap wrap-break-word bg-default/75 p-4 text-sm leading-6 text-toned">
+          <div
+            v-if="entry.changeKind === 'retain_confirmation'"
+            class="flex flex-col gap-2 bg-default/75 p-4"
+          >
+            <div class="flex items-center gap-2 text-xs font-medium text-muted">
+              <UIcon name="i-tabler-equal" class="size-4" />
+              기존 승인 번역을 현재 원문에도 그대로 유지
+            </div>
+            <p class="whitespace-pre-wrap wrap-break-word text-sm leading-6 text-toned">
+              {{ entry.proposedText }}
+            </p>
+          </div>
+          <p
+            v-else
+            class="whitespace-pre-wrap wrap-break-word bg-default/75 p-4 text-sm leading-6 text-toned"
+          >
             <template
               v-for="(part, partIndex) in getEditorDiffParts(entry.previousText ?? '', entry.proposedText)"
               :key="`${part.type}-${partIndex}`"
@@ -503,7 +585,7 @@ async function confirmApprovalSelection(): Promise<void> {
                 color="success"
                 variant="soft"
                 size="md"
-                :loading="reviewingId === entry.id"
+                :loading="reviewingId === entry.id || preparingApprovalId === entry.id"
                 :disabled="isReviewing"
                 @click="review(entry, 'approve')"
               >
@@ -542,8 +624,8 @@ async function confirmApprovalSelection(): Promise<void> {
             color="warning"
             variant="soft"
             icon="i-tabler-git-merge"
-            title="현재 페이지 밖의 요청도 함께 표시됩니다."
-            description="승인한 요청을 제외한 같은 항목의 다른 승인 대기 요청은 자동 종료됩니다."
+            title="다른 탭과 현재 페이지 밖의 요청도 함께 표시됩니다."
+            description="같은 항목의 모든 승인 대기 요청을 비교할 수 있으며, 승인한 요청을 제외한 나머지는 자동 종료됩니다."
           />
 
           <section
@@ -581,6 +663,13 @@ async function confirmApprovalSelection(): Promise<void> {
               <template #label="{ item }">
                 <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                   <span class="font-medium text-default">{{ item.handle ? `@${item.handle}` : '익명' }}</span>
+                  <UBadge
+                    :color="item.changeKind === 'retain_confirmation' ? 'neutral' : 'info'"
+                    variant="soft"
+                    size="xs"
+                  >
+                    {{ item.changeKind === 'retain_confirmation' ? '유지 확인' : '번역 수정' }}
+                  </UBadge>
                   <time
                     class="text-xs font-normal text-muted"
                     :datetime="item.createdAt"
@@ -591,19 +680,25 @@ async function confirmApprovalSelection(): Promise<void> {
               </template>
 
               <template #description="{ item }">
-                <template
-                  v-for="(part, partIndex) in getEditorDiffParts(item.previousText ?? '', item.proposedText)"
-                  :key="`${item.id}-${part.type}-${partIndex}`"
-                >
-                  <span
-                    :class="part.type === 'removed'
-                      ? 'bg-error/10 text-error'
-                      : part.type === 'added'
-                        ? 'bg-success/10 text-success'
-                        : 'text-toned'"
-                  >{{ part.text }}</span>
+                <template v-if="item.changeKind === 'retain_confirmation'">
+                  <span class="text-muted">기존 번역 유지 · </span>
+                  <span class="text-toned">{{ item.proposedText }}</span>
                 </template>
-                <span v-if="!item.previousText && !item.proposedText">빈 문자열</span>
+                <template v-else>
+                  <template
+                    v-for="(part, partIndex) in getEditorDiffParts(item.previousText ?? '', item.proposedText)"
+                    :key="`${item.id}-${part.type}-${partIndex}`"
+                  >
+                    <span
+                      :class="part.type === 'removed'
+                        ? 'bg-error/10 text-error'
+                        : part.type === 'added'
+                          ? 'bg-success/10 text-success'
+                          : 'text-toned'"
+                    >{{ part.text }}</span>
+                  </template>
+                  <span v-if="!item.previousText && !item.proposedText">빈 문자열</span>
+                </template>
               </template>
             </URadioGroup>
           </section>

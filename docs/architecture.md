@@ -59,7 +59,8 @@ translation_units / source_versions
 - 하나를 승인하면 같은 항목·locale의 나머지 pending 제안은 `superseded`로 종료합니다.
 - `translations`에는 패치가 사용하는 마지막 승인 번역을 유지합니다.
 - 승인 당시 원문과 현재 원문이 다르면 UI에서 `확인 필요`로 표시합니다.
-- `유지`는 기존 승인 문구를 현재 원문 버전에 대한 새 제안으로 등록합니다.
+- `유지`는 기존 승인 문구를 현재 원문 버전에 대한 `retain_confirmation` 제안으로 등록합니다.
+- 실제 번역 수정은 `translation_edit`로 기록하며, 승인 페이지에서 유지 확인 요청과 분리해 검토합니다.
 
 ## 에디터 상태
 

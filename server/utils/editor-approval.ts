@@ -72,6 +72,7 @@ export async function getPendingEditorReviewCandidates(
       NULL::text AS "reviewerHandle",
       tc.previous_text AS "previousText",
       tc.proposed_text AS "proposedText",
+      tc.change_kind AS "changeKind",
       tc.status,
       tc.created_at AS "createdAt",
       tc.reviewed_at AS "reviewedAt"

@@ -135,6 +135,7 @@ export async function saveEditorTranslation(
         source_version_id,
         previous_text,
         proposed_text,
+        change_kind,
         status,
         created_by
       )
@@ -146,6 +147,7 @@ export async function saveEditorTranslation(
         ${current.sourceVersionId},
         ${current.currentText || null},
         ${proposedText},
+        'translation_edit',
         'pending',
         ${userId}
       )
@@ -254,6 +256,7 @@ export async function retainEditorTranslation(unitId: string, userId: string): P
         source_version_id,
         previous_text,
         proposed_text,
+        change_kind,
         status,
         created_by
       )
@@ -265,6 +268,7 @@ export async function retainEditorTranslation(unitId: string, userId: string): P
         ${current.sourceVersionId},
         ${current.approvedText},
         ${current.approvedText},
+        'retain_confirmation',
         'pending',
         ${userId}
       )
