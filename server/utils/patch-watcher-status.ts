@@ -13,7 +13,7 @@ import type {
 } from '#shared/types/status'
 import { withDatabaseRetry } from './database'
 
-const ROUTES: PatchWatcherRoute[] = ['INT_STEAM', 'CN_STEAM', 'INT_ANDROID']
+const ROUTES: PatchWatcherRoute[] = ['INT_STEAM', 'CN_STEAM', 'INT_ANDROID', 'CN_ANDROID']
 const WATCH_INTERVAL_MINUTES = 5
 const DELAYED_AFTER_MINUTES = 10
 const OUTAGE_AFTER_MINUTES = 20
@@ -33,6 +33,7 @@ interface WatchRunRow {
   startedAt: Date
   finishedAt: Date | null
   durationMs: number | null
+  errorMessage: string | null
 }
 
 interface RouteStateRow {
@@ -43,6 +44,7 @@ interface RouteStateRow {
   status: Exclude<PatchWatcherRouteStatus, 'unknown'> | null
   checkedAt: Date | null
   durationMs: number | null
+  errorMessage: string | null
 }
 
 interface HourlyStatRow {
@@ -60,6 +62,7 @@ interface HistoryRunRow extends WatchRunRow {
     status: Exclude<PatchWatcherRouteStatus, 'unknown'>
     revision: string | null
     durationMs: number | null
+    errorMessage: string | null
   }>
 }
 
@@ -108,6 +111,7 @@ function toRunSummary(row: WatchRunRow): PatchWatcherRunSummary {
     startedAt: row.startedAt.toISOString(),
     finishedAt: toIso(row.finishedAt),
     durationMs: row.durationMs === null ? null : Number(row.durationMs),
+    errorMessage: row.errorMessage,
     message: getRunMessage(row.status)
   }
 }
@@ -210,7 +214,8 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
         workflow_dispatched AS "workflowDispatched",
         started_at AS "startedAt",
         finished_at AS "finishedAt",
-        duration_ms AS "durationMs"
+        duration_ms AS "durationMs",
+        error_message AS "errorMessage"
       FROM patch_watch_runs
       ORDER BY started_at DESC
       LIMIT 1
@@ -223,7 +228,8 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
         workflow_dispatched AS "workflowDispatched",
         started_at AS "startedAt",
         finished_at AS "finishedAt",
-        duration_ms AS "durationMs"
+        duration_ms AS "durationMs",
+        error_message AS "errorMessage"
       FROM patch_watch_runs
       WHERE status <> 'skipped_locked'
       ORDER BY started_at DESC
@@ -237,7 +243,8 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
         state.observed_at AS "observedAt",
         latest.status,
         latest.started_at AS "checkedAt",
-        latest.duration_ms AS "durationMs"
+        latest.duration_ms AS "durationMs",
+        latest.error_message AS "errorMessage"
       FROM patch_watch_routes AS state
       LEFT JOIN LATERAL (
         SELECT
@@ -245,7 +252,8 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
           history.revision,
           history.status,
           history.started_at,
-          history.duration_ms
+          history.duration_ms,
+          history.error_message
         FROM patch_watch_run_routes AS history
         WHERE history.route = state.route
         ORDER BY history.started_at DESC
@@ -255,7 +263,8 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
         WHEN 'INT_STEAM' THEN 1
         WHEN 'CN_STEAM' THEN 2
         WHEN 'INT_ANDROID' THEN 3
-        ELSE 4
+        WHEN 'CN_ANDROID' THEN 4
+        ELSE 5
       END
     `),
     withDatabaseRetry<HourlyStatRow[]>(database => database<HourlyStatRow[]>`
@@ -267,7 +276,7 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
         ) AS hour
       ),
       routes(route) AS (
-        VALUES ('INT_STEAM'), ('CN_STEAM'), ('INT_ANDROID')
+        VALUES ('INT_STEAM'), ('CN_STEAM'), ('INT_ANDROID'), ('CN_ANDROID')
       ),
       route_stats AS (
         SELECT
@@ -350,6 +359,7 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
       checkedAt: toIso(row.checkedAt),
       observedAt: toIso(row.observedAt),
       durationMs: row.durationMs === null ? null : Number(row.durationMs),
+      errorMessage: row.errorMessage,
       message: getRouteMessage(routeStatus),
       successRate7d: total > 0 ? Math.round((success / total) * 10_000) / 100 : null,
       hourly
@@ -391,18 +401,21 @@ export async function getPatchWatcherHistory(
       run.started_at AS "startedAt",
       run.finished_at AS "finishedAt",
       run.duration_ms AS "durationMs",
+      run.error_message AS "errorMessage",
       COALESCE(
         json_agg(
           json_build_object(
             'route', route.route,
             'status', route.status,
             'revision', route.revision,
-            'durationMs', route.duration_ms
+            'durationMs', route.duration_ms,
+            'errorMessage', route.error_message
           ) ORDER BY CASE route.route
             WHEN 'INT_STEAM' THEN 1
             WHEN 'CN_STEAM' THEN 2
             WHEN 'INT_ANDROID' THEN 3
-            ELSE 4
+            WHEN 'CN_ANDROID' THEN 4
+            ELSE 5
           END
         ) FILTER (WHERE route.route IS NOT NULL),
         '[]'::json
@@ -424,6 +437,7 @@ export async function getPatchWatcherHistory(
       status: route.status,
       revision: route.revision,
       durationMs: route.durationMs === null ? null : Number(route.durationMs),
+      errorMessage: route.errorMessage,
       message: getRouteMessage(route.status)
     }))
   }))

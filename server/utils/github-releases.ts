@@ -337,7 +337,7 @@ function normalizePatchDistributionEntry(value: unknown): PatchDistributionEntry
   const catalogHash = asString(value.catalogHash)
 
   if (
-    (route !== 'INT_STEAM' && route !== 'CN_STEAM' && route !== 'INT_ANDROID')
+    (route !== 'INT_STEAM' && route !== 'CN_STEAM' && route !== 'INT_ANDROID' && route !== 'CN_ANDROID')
     || (channel !== 'develop' && channel !== 'release')
     || !gameVersion
     || !revision

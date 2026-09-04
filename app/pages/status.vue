@@ -24,7 +24,8 @@ useAstralPageSeo('서비스 상태')
 const routeMeta: Record<PatchWatcherRoute, { label: string, icon: string }> = {
   INT_STEAM: { label: 'Steam 글로벌', icon: 'i-tabler-brand-steam' },
   CN_STEAM: { label: 'Steam 중국', icon: 'i-tabler-brand-steam' },
-  INT_ANDROID: { label: 'Android 일본', icon: 'i-tabler-brand-android' }
+  INT_ANDROID: { label: 'Android 일본', icon: 'i-tabler-brand-android' },
+  CN_ANDROID: { label: 'Android 중국', icon: 'i-tabler-brand-android' }
 }
 
 const overallMeta: Record<PatchWatcherOverallState, StatusMeta> = {
@@ -106,6 +107,14 @@ onBeforeUnmount(() => {
 const isLoading = computed(() => status.value === 'idle' || status.value === 'pending')
 const isHistoryLoading = computed(() => historyStatus.value === 'idle' || historyStatus.value === 'pending')
 const currentOverallMeta = computed(() => overallMeta[data.value?.overall.state ?? 'degraded'])
+const latestRunStandaloneError = computed(() => {
+  const errorMessage = data.value?.latestRun?.errorMessage
+  if (!errorMessage || data.value?.routes.some(route => Boolean(route.errorMessage))) {
+    return null
+  }
+
+  return errorMessage
+})
 
 const dateTimeFormatter = new Intl.DateTimeFormat('ko-KR', {
   year: 'numeric',
@@ -195,6 +204,14 @@ function getHourTooltip(hour: PatchWatcherHourlyStat): string {
   }
 
   return `${label} · ${hour.success}/${hour.total}회 성공 · ${formatSuccessRate(hour.successRate)}`
+}
+
+function getHistoryRouteErrors(entry: PatchWatcherHistoryResponse['entries'][number]) {
+  return entry.routes.filter(route => Boolean(route.errorMessage))
+}
+
+function getStandaloneRunError(entry: PatchWatcherHistoryResponse['entries'][number]): string | null {
+  return getHistoryRouteErrors(entry).length > 0 ? null : entry.errorMessage
 }
 
 async function refreshAll(): Promise<void> {
@@ -308,6 +325,17 @@ function updateHistoryFilter(value: string | number): void {
               <p class="mt-1 text-sm text-muted">
                 {{ data.overall.message }}
               </p>
+              <div
+                v-if="latestRunStandaloneError"
+                class="mt-3 border border-error/30 bg-error/5 p-3"
+              >
+                <p class="text-xs font-medium text-error">
+                  최근 실행 오류
+                </p>
+                <p class="mt-1 whitespace-pre-wrap wrap-break-word font-mono text-xs leading-5 text-toned">
+                  {{ latestRunStandaloneError }}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -337,7 +365,7 @@ function updateHistoryFilter(value: string | number): void {
         </div>
       </article>
 
-      <div class="grid gap-4 lg:grid-cols-3">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <article
           v-for="route in data.routes"
           :key="route.route"
@@ -370,12 +398,24 @@ function updateHistoryFilter(value: string | number): void {
 
           <p
             v-if="route.message"
-            class="mt-3 text-xs text-muted"
+            class="mx-3 mt-3 text-xs text-muted"
           >
             {{ route.message }}
           </p>
 
-          <dl class="grid grid-cols-2 gap-4 text-sm p-5 bg-default/75">
+          <div
+            v-if="route.errorMessage"
+            class="mx-3 mt-3 border border-error/30 bg-error/5 p-3"
+          >
+            <p class="text-xs font-medium text-error">
+              실패 원인
+            </p>
+            <p class="mt-1 whitespace-pre-wrap wrap-break-word font-mono text-xs leading-5 text-toned">
+              {{ route.errorMessage }}
+            </p>
+          </div>
+
+          <dl class="grid grid-cols-2 gap-4 bg-default/75 p-5 text-sm">
             <div>
               <dt class="text-xs text-muted">
                 리비전
@@ -585,6 +625,36 @@ function updateHistoryFilter(value: string | number): void {
             >
               {{ entry.message }}
             </p>
+
+            <div
+              v-if="getHistoryRouteErrors(entry).length"
+              class="flex flex-col gap-2 md:col-span-4"
+            >
+              <div
+                v-for="route in getHistoryRouteErrors(entry)"
+                :key="`${entry.id}-${route.route}-error`"
+                class="bg-error/5 p-3"
+              >
+                <p class="text-xs font-medium text-error">
+                  {{ routeMeta[route.route].label }} 실패
+                </p>
+                <p class="mt-1 whitespace-pre-wrap wrap-break-word font-mono text-xs leading-5 text-toned">
+                  {{ route.errorMessage }}
+                </p>
+              </div>
+            </div>
+
+            <div
+              v-else-if="getStandaloneRunError(entry)"
+              class="bg-error/5 p-3 md:col-span-4"
+            >
+              <p class="text-xs font-medium text-error">
+                실행 실패
+              </p>
+              <p class="mt-1 whitespace-pre-wrap wrap-break-word font-mono text-xs leading-5 text-toned">
+                {{ getStandaloneRunError(entry) }}
+              </p>
+            </div>
           </article>
         </div>
 
