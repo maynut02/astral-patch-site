@@ -86,12 +86,13 @@ jobs:
             cat "$stdout_file"
             cat "$stderr_file" >&2
 
-            severity_counts="$(node - "$stdout_file" <<'NODE'
+            audit_result="$(node - "$stdout_file" <<'NODE'
           const fs = require('node:fs')
 
           const file = process.argv[2]
           let high = 0
           let critical = 0
+          let timeoutError = false
 
           try {
             const report = JSON.parse(fs.readFileSync(file, 'utf8'))
@@ -104,14 +105,18 @@ jobs:
                 if (advisory?.severity === 'critical') critical += 1
               }
             }
+
+            const errorCode = Number(report?.error?.code ?? NaN)
+            const errorMessage = String(report?.error?.message ?? '')
+            timeoutError = errorCode === 23 || /timeout|timed out|operation was aborted/i.test(errorMessage)
           } catch {
-            // 네트워크 오류처럼 JSON 보고서가 없는 경우는 아래에서 별도로 판별한다.
+            // JSON 보고서가 없는 네트워크 오류는 stderr 검사에서 판별한다.
           }
 
-          process.stdout.write(`${high} ${critical}`)
+          process.stdout.write(`${high} ${critical} ${timeoutError ? 1 : 0}`)
           NODE
             )"
-            read -r high_count critical_count <<<"$severity_counts"
+            read -r high_count critical_count json_timeout <<<"$audit_result"
 
             if (( high_count > 0 || critical_count > 0 )); then
               echo "High/critical vulnerabilities found: high=${high_count}, critical=${critical_count}" >&2
@@ -124,7 +129,8 @@ jobs:
               exit 0
             fi
 
-            if [ "$audit_exit" -eq 124 ] || grep -Eqi 'timeout|timed out|operation was aborted due to timeout|error \(23\)' "$stderr_file"; then
+            if [ "$audit_exit" -eq 124 ] || [ "$json_timeout" -eq 1 ] \
+              || grep -Eqi 'timeout|timed out|operation was aborted due to timeout|error \(23\)' "$stdout_file" "$stderr_file"; then
               rm -f "$stdout_file" "$stderr_file"
 
               if [ "$attempt" -eq 2 ]; then
