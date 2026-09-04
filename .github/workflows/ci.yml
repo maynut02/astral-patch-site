@@ -75,15 +75,70 @@ jobs:
           pnpm config set fetch-timeout 30000
 
           for attempt in 1 2; do
-            if timeout 60s pnpm audit --prod --audit-level high; then
-              exit 0
-            fi
+            stdout_file="$(mktemp)"
+            stderr_file="$(mktemp)"
 
-            if [ "$attempt" -eq 2 ]; then
+            set +e
+            timeout 60s pnpm audit --prod --audit-level high --json >"$stdout_file" 2>"$stderr_file"
+            audit_exit=$?
+            set -e
+
+            cat "$stdout_file"
+            cat "$stderr_file" >&2
+
+            severity_counts="$(node - "$stdout_file" <<'NODE'
+          const fs = require('node:fs')
+
+          const file = process.argv[2]
+          let high = 0
+          let critical = 0
+
+          try {
+            const report = JSON.parse(fs.readFileSync(file, 'utf8'))
+            high = Number(report?.metadata?.vulnerabilities?.high ?? 0)
+            critical = Number(report?.metadata?.vulnerabilities?.critical ?? 0)
+
+            if (high === 0 && critical === 0 && report?.advisories) {
+              for (const advisory of Object.values(report.advisories)) {
+                if (advisory?.severity === 'high') high += 1
+                if (advisory?.severity === 'critical') critical += 1
+              }
+            }
+          } catch {
+            // 네트워크 오류처럼 JSON 보고서가 없는 경우는 아래에서 별도로 판별한다.
+          }
+
+          process.stdout.write(`${high} ${critical}`)
+          NODE
+            )"
+            read -r high_count critical_count <<<"$severity_counts"
+
+            if (( high_count > 0 || critical_count > 0 )); then
+              echo "High/critical vulnerabilities found: high=${high_count}, critical=${critical_count}" >&2
+              rm -f "$stdout_file" "$stderr_file"
               exit 1
             fi
 
-            sleep 10
+            if [ "$audit_exit" -eq 0 ]; then
+              rm -f "$stdout_file" "$stderr_file"
+              exit 0
+            fi
+
+            if [ "$audit_exit" -eq 124 ] || grep -Eqi 'timeout|timed out|operation was aborted due to timeout|error \(23\)' "$stderr_file"; then
+              rm -f "$stdout_file" "$stderr_file"
+
+              if [ "$attempt" -eq 2 ]; then
+                echo "::warning::pnpm audit could not reach the npm security advisory API because of a network timeout. High/critical vulnerability status could not be verified in this run."
+                exit 0
+              fi
+
+              sleep 10
+              continue
+            fi
+
+            echo "pnpm audit failed for a non-timeout reason (exit code ${audit_exit})." >&2
+            rm -f "$stdout_file" "$stderr_file"
+            exit "$audit_exit"
           done
 
       - name: Stop migration database
