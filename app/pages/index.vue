@@ -18,7 +18,7 @@ import { formatEditorCount, formatEditorDate, formatEditorPercent } from '~/util
 import { EDITOR_STATUS_META, EDITOR_VISIBLE_STATUSES } from '~/utils/editor-progress'
 
 type SupportedRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID' | 'CN_ANDROID'
-type GuideAnswerKey = 'route' | 'resources' | 'patcher' | 'started' | 'shizuku'
+type GuideAnswerKey = 'route' | 'steamMethod' | 'resources' | 'patcher' | 'plugin' | 'started' | 'shizuku'
 
 interface ReleaseAssetMatch {
   asset: ReleaseAssetInfo
@@ -34,6 +34,7 @@ const RECENT_ITEM_LIMIT = 5
 
 const releaseFeedLabels: Record<ReleaseFeedKey, string> = {
   patch: '한글패치',
+  windowsPlugin: 'Windows 플러그인',
   windowsPatcher: 'Windows 패치 프로그램',
   androidPatcher: 'Android 패치 앱'
 }
@@ -61,6 +62,10 @@ const routeOptions = [
 const yesNoOptions = [
   { label: '예', value: 'yes' },
   { label: '아니오', value: 'no' }
+]
+const steamMethodOptions = [
+  { label: 'Windows 플러그인', value: 'plugin', icon: 'i-tabler-plug' },
+  { label: 'Windows 패치 프로그램', value: 'patcher', icon: 'i-tabler-app-window' }
 ]
 const patcherOptions = [
   { label: '예', value: 'yes' },
@@ -127,8 +132,10 @@ const isOverviewLoading = computed(() => overviewStatus.value === 'idle' || over
 
 const answers = reactive<Record<GuideAnswerKey, string | null>>({
   route: null,
+  steamMethod: null,
   resources: null,
   patcher: null,
+  plugin: null,
   started: null,
   shizuku: null
 })
@@ -312,6 +319,7 @@ function findAssetInRelease(release: ReleaseNoteEntry | null, assetName: string)
 }
 
 const windowsPatcher = computed(() => releaseFeed.value?.distribution.windowsPatcher ?? null)
+const windowsPlugin = computed(() => releaseFeed.value?.distribution.windowsPlugin ?? null)
 const androidPatcher = computed(() => releaseFeed.value?.distribution.androidPatcher ?? null)
 const latestPatchRelease = computed(() =>
   releaseFeed.value?.distribution.stablePatch?.release
@@ -325,6 +333,7 @@ const steamManualPatch = computed(() => {
 
   return findAssetInRelease(latestPatchRelease.value, `${selectedRoute.value}_manual_patch.zip`)
 })
+const steamPluginTargetFolder = computed(() => selectedRoute.value === 'CN_STEAM' ? '8vJXn6CN' : '8vJXnINT')
 
 function resetAnswers(...keys: GuideAnswerKey[]): void {
   for (const key of keys) {
@@ -333,10 +342,13 @@ function resetAnswers(...keys: GuideAnswerKey[]): void {
 }
 
 watch(() => answers.route, () => {
-  resetAnswers('resources', 'patcher', 'started', 'shizuku')
+  resetAnswers('steamMethod', 'resources', 'patcher', 'plugin', 'started', 'shizuku')
+})
+watch(() => answers.steamMethod, () => {
+  resetAnswers('resources', 'patcher', 'plugin', 'started')
 })
 watch(() => answers.resources, () => {
-  resetAnswers('patcher', 'started')
+  resetAnswers('patcher', 'plugin', 'started')
 })
 watch(() => answers.patcher, () => {
   resetAnswers('started', 'shizuku')
@@ -487,134 +499,213 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
 
         <template v-if="isSteam">
           <HomeGuideStep
-            v-model="answers.resources"
+            v-model="answers.steamMethod"
             :step="2"
-            title="인게임 리소스 다운로드를 완료했나요?"
-            description="한글패치를 적용하기 전에 게임 안에서 필요한 리소스 다운로드가 완료되어 있어야 합니다."
-            :options="yesNoOptions"
-            :status="answers.resources === 'no' ? 'warning' : 'info'"
-          >
-            <UAlert
-              v-if="answers.resources === 'no'"
-              color="neutral"
-              variant="soft"
-              class="bg-muted"
-              title="먼저 인게임 리소스 다운로드를 완료해 주세요."
-              description="게임을 실행해 필요한 리소스를 모두 받은 뒤 '예'를 선택하세요."
-            />
-          </HomeGuideStep>
+            title="어떤 방식으로 한글패치를 설치할까요?"
+            description="게임 실행 시 자동으로 패치를 확인하는 Windows 플러그인 또는 별도 패치 프로그램을 선택할 수 있습니다."
+            :options="steamMethodOptions"
+          />
 
-          <HomeGuideStep
-            v-if="answers.resources === 'yes'"
-            v-model="answers.patcher"
-            :step="3"
-            title="Windows 패치 프로그램을 설치했나요?"
-            description="프로그램을 사용하지 않는 경우 수동 패치 파일을 받을 수 있습니다."
-            :options="patcherOptions"
-            :status="answers.patcher === 'no' ? 'warning' : answers.patcher === 'manual' ? 'success' : 'info'"
-          >
-            <div
-              v-if="answers.patcher === 'no'"
-              class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
+          <template v-if="answers.steamMethod === 'plugin'">
+            <HomeGuideStep
+              v-model="answers.plugin"
+              :step="3"
+              title="Windows 플러그인을 설치했나요?"
+              description="압축 파일의 내용물을 Astral Party 설치 폴더 안의 사용 중인 버전 폴더에 복사합니다."
+              :options="yesNoOptions"
+              :status="answers.plugin === 'no' ? 'warning' : 'info'"
             >
-              <div>
-                <p class="text-sm font-medium text-default">
-                  Windows 패치 프로그램 설치가 필요합니다.
-                </p>
-                <p class="mt-1 text-sm text-muted">
-                  프로그램을 다운로드하고 한 번 실행한 뒤 '예'를 선택하세요.
-                </p>
-              </div>
-              <UButton
-                :href="windowsPatcher?.index.downloadUrl"
-                :disabled="!windowsPatcher"
-                external
-                icon="i-tabler-download"
-                color="info"
-                variant="soft"
-                size="lg"
-                class="shrink-0 justify-center px-4 py-2.5"
+              <div
+                v-if="answers.plugin === 'no'"
+                class="flex flex-col gap-4 bg-muted p-4"
               >
-                Windows 패치 프로그램 다운로드
-              </UButton>
-            </div>
+                <div class="flex flex-col gap-1">
+                  <p class="text-sm font-medium text-default">
+                    Windows 플러그인을 다운로드해 설치해 주세요.
+                  </p>
+                  <p class="text-sm text-muted">
+                    Steam → 라이브러리 → Astral Party → 관리 → 로컬 파일 탐색으로 설치 폴더를 연 뒤 <code class="text-default">{{ steamPluginTargetFolder }}</code> 폴더로 이동합니다.
+                  </p>
+                  <p class="text-sm text-muted">
+                    다운로드한 압축 파일을 열고 안의 내용물을 전부 해당 폴더에 붙여넣습니다. 같은 이름의 파일이 있으면 덮어씁니다.
+                  </p>
+                </div>
 
-            <div
-              v-if="answers.patcher === 'manual'"
-              class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
+                <div class="flex flex-wrap gap-2">
+                  <UButton
+                    :href="windowsPlugin?.index.downloadUrl"
+                    :disabled="!windowsPlugin"
+                    external
+                    icon="i-tabler-file-zip"
+                    color="info"
+                    variant="soft"
+                    size="lg"
+                    class="px-4 py-2.5"
+                  >
+                    Windows 플러그인 다운로드
+                  </UButton>
+                  <UButton
+                    to="/download"
+                    icon="i-tabler-help"
+                    color="neutral"
+                    variant="soft"
+                    size="lg"
+                    class="px-4 py-2.5"
+                  >
+                    자세한 설치 방법
+                  </UButton>
+                </div>
+              </div>
+            </HomeGuideStep>
+
+            <HomeGuideStep
+              v-if="answers.plugin === 'yes'"
+              :step="4"
+              title="준비가 완료되었습니다."
+              description="이제 평소처럼 Steam에서 게임을 실행하면 플러그인이 한글패치 상태를 자동으로 확인합니다."
+              complete
             >
-              <div>
-                <p class="text-sm font-medium text-default">
-                  수동 설치 파일을 사용합니다.
-                </p>
-                <p class="mt-1 text-sm text-muted">
-                  압축 파일 내의 설치 안내에 따라 직접 파일을 복사해 주세요.
-                </p>
+              <UAlert
+                color="info"
+                variant="soft"
+                icon="i-tabler-info-circle"
+                title="최초 실행은 평소보다 오래 걸릴 수 있습니다."
+                description="처음 실행할 때는 BepInEx 초기화와 런타임 준비 때문에 화면에 아무런 표시가 없는 상태가 잠시 이어질 수 있습니다. 일정 시간이 지나 한글패치 알림이 나타날 때까지 게임을 강제 종료하지 마세요."
+              />
+            </HomeGuideStep>
+          </template>
+
+          <template v-else-if="answers.steamMethod === 'patcher'">
+            <HomeGuideStep
+              v-model="answers.resources"
+              :step="3"
+              title="인게임 리소스 다운로드를 완료했나요?"
+              description="한글패치를 적용하기 전에 게임 안에서 필요한 리소스 다운로드가 완료되어 있어야 합니다."
+              :options="yesNoOptions"
+              :status="answers.resources === 'no' ? 'warning' : 'info'"
+            >
+              <UAlert
+                v-if="answers.resources === 'no'"
+                color="neutral"
+                variant="soft"
+                class="bg-muted"
+                title="먼저 인게임 리소스 다운로드를 완료해 주세요."
+                description="게임을 실행해 필요한 리소스를 모두 받은 뒤 '예'를 선택하세요."
+              />
+            </HomeGuideStep>
+
+            <HomeGuideStep
+              v-if="answers.resources === 'yes'"
+              v-model="answers.patcher"
+              :step="4"
+              title="Windows 패치 프로그램을 설치했나요?"
+              description="프로그램을 사용하지 않는 경우 수동 패치 파일을 받을 수 있습니다."
+              :options="patcherOptions"
+              :status="answers.patcher === 'no' ? 'warning' : answers.patcher === 'manual' ? 'success' : 'info'"
+            >
+              <div
+                v-if="answers.patcher === 'no'"
+                class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <p class="text-sm font-medium text-default">
+                    Windows 패치 프로그램 설치가 필요합니다.
+                  </p>
+                  <p class="mt-1 text-sm text-muted">
+                    프로그램을 다운로드하고 한 번 실행한 뒤 '예'를 선택하세요.
+                  </p>
+                </div>
+                <UButton
+                  :href="windowsPatcher?.index.downloadUrl"
+                  :disabled="!windowsPatcher"
+                  external
+                  icon="i-tabler-download"
+                  color="info"
+                  variant="soft"
+                  size="lg"
+                  class="shrink-0 justify-center px-4 py-2.5"
+                >
+                  Windows 패치 프로그램 다운로드
+                </UButton>
               </div>
-              <UButton
-                :href="steamManualPatch?.asset.downloadUrl"
-                :disabled="!steamManualPatch"
-                external
-                icon="i-tabler-file-zip"
-                color="info"
-                variant="soft"
-                size="lg"
-                class="shrink-0 justify-center px-4 py-2.5"
-              >
-                수동 패치 파일 다운로드
-              </UButton>
-            </div>
-          </HomeGuideStep>
 
-          <HomeGuideStep
-            v-if="answers.resources === 'yes' && answers.patcher === 'yes'"
-            v-model="answers.started"
-            :step="4"
-            title="Windows 패치 프로그램을 한 번 실행했나요?"
-            description="다운로드 후 최소 한번은 실행해야 사이트를 통해 프로그램을 실행시킬 수 있습니다."
-            :options="yesNoOptions"
-            :status="answers.started === 'no' ? 'warning' : 'info'"
-          >
-            <UAlert
-              v-if="answers.started === 'no'"
-              color="neutral"
-              variant="soft"
-              class="bg-muted"
-              title="Windows 패치 프로그램을 먼저 한 번 실행해 주세요."
-              description="프로그램 창이 정상적으로 열리는 것을 확인한 뒤 '예'를 선택하세요."
-            />
-          </HomeGuideStep>
+              <div
+                v-if="answers.patcher === 'manual'"
+                class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <p class="text-sm font-medium text-default">
+                    수동 설치 파일을 사용합니다.
+                  </p>
+                  <p class="mt-1 text-sm text-muted">
+                    압축 파일 내의 설치 안내에 따라 직접 파일을 복사해 주세요.
+                  </p>
+                </div>
+                <UButton
+                  :href="steamManualPatch?.asset.downloadUrl"
+                  :disabled="!steamManualPatch"
+                  external
+                  icon="i-tabler-file-zip"
+                  color="info"
+                  variant="soft"
+                  size="lg"
+                  class="shrink-0 justify-center px-4 py-2.5"
+                >
+                  수동 패치 파일 다운로드
+                </UButton>
+              </div>
+            </HomeGuideStep>
 
-          <HomeGuideStep
-            v-if="answers.resources === 'yes' && answers.patcher === 'yes' && answers.started === 'yes'"
-            :step="5"
-            title="준비가 완료되었습니다."
-            description="원하는 작업을 선택하면 Windows 패치 프로그램이 바로 실행됩니다."
-            complete
-          >
-            <div class="flex flex-wrap gap-2">
-              <UButton
-                icon="i-tabler-wand"
-                color="info"
+            <HomeGuideStep
+              v-if="answers.resources === 'yes' && answers.patcher === 'yes'"
+              v-model="answers.started"
+              :step="5"
+              title="Windows 패치 프로그램을 한 번 실행했나요?"
+              description="다운로드 후 최소 한번은 실행해야 사이트를 통해 프로그램을 실행시킬 수 있습니다."
+              :options="yesNoOptions"
+              :status="answers.started === 'no' ? 'warning' : 'info'"
+            >
+              <UAlert
+                v-if="answers.started === 'no'"
+                color="neutral"
                 variant="soft"
-                size="lg"
-                class="px-4 py-2.5"
-                @click="launchSelectedSteam('install')"
-              >
-                원클릭 한글패치 설치
-              </UButton>
-              <UButton
-                icon="i-tabler-trash"
-                color="error"
-                variant="soft"
-                size="lg"
-                class="px-4 py-2.5"
-                @click="launchSelectedSteam('remove')"
-              >
-                원클릭 한글패치 삭제
-              </UButton>
-            </div>
-          </HomeGuideStep>
+                class="bg-muted"
+                title="Windows 패치 프로그램을 먼저 한 번 실행해 주세요."
+                description="프로그램 창이 정상적으로 열리는 것을 확인한 뒤 '예'를 선택하세요."
+              />
+            </HomeGuideStep>
+
+            <HomeGuideStep
+              v-if="answers.resources === 'yes' && answers.patcher === 'yes' && answers.started === 'yes'"
+              :step="6"
+              title="준비가 완료되었습니다."
+              description="원하는 작업을 선택하면 Windows 패치 프로그램이 바로 실행됩니다."
+              complete
+            >
+              <div class="flex flex-wrap gap-2">
+                <UButton
+                  icon="i-tabler-wand"
+                  color="info"
+                  variant="soft"
+                  size="lg"
+                  class="px-4 py-2.5"
+                  @click="launchSelectedSteam('install')"
+                >
+                  원클릭 한글패치 설치
+                </UButton>
+                <UButton
+                  icon="i-tabler-trash"
+                  color="error"
+                  variant="soft"
+                  size="lg"
+                  class="px-4 py-2.5"
+                  @click="launchSelectedSteam('remove')"
+                >
+                  원클릭 한글패치 삭제
+                </UButton>
+              </div>
+            </HomeGuideStep>
+          </template>
         </template>
 
         <template v-if="isAndroid">

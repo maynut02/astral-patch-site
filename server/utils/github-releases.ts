@@ -8,7 +8,8 @@ import type {
   ReleaseFeedResponse,
   ReleaseHistoryPageResponse,
   ReleaseNoteEntry,
-  WindowsPatcherIndex
+  WindowsPatcherIndex,
+  WindowsPluginIndex
 } from '#shared/types/releases'
 
 const PATCH_REPOSITORY = 'maynut02/astral-party-korean-patch'
@@ -180,6 +181,11 @@ function isWindowsPatcherRelease(release: ReleaseNoteEntry): boolean {
     || hasAsset(release, asset => asset.name.toLowerCase() === 'astralwindowspatcher.exe')
 }
 
+function isWindowsPluginRelease(release: ReleaseNoteEntry): boolean {
+  return release.tagName.startsWith('windows-plugin-v')
+    || hasAsset(release, asset => /^astralwindowsplugin-v.+\.zip$/i.test(asset.name))
+}
+
 function isAndroidPatcherRelease(release: ReleaseNoteEntry): boolean {
   return release.tagName.startsWith('android-patcher-v')
     || hasAsset(release, asset => asset.name.toLowerCase() === 'astralandroidpatcher.apk')
@@ -203,6 +209,7 @@ function classifyReleases(
 ): ReleaseFeedResponse['releases'] {
   return {
     patch: sortReleases(patchSource.filter(isPatchRelease)),
+    windowsPlugin: sortReleases(patcherSource.filter(isWindowsPluginRelease)),
     windowsPatcher: sortReleases(patcherSource.filter(isWindowsPatcherRelease)),
     androidPatcher: sortReleases(patcherSource.filter(isAndroidPatcherRelease))
   }
@@ -273,8 +280,10 @@ async function fetchRequiredPatcherReleases(
 
     const windowsReleases = releases.filter(isWindowsPatcherRelease)
     const androidReleases = releases.filter(isAndroidPatcherRelease)
+    const hasWindowsPlugin = releases.some(isWindowsPluginRelease)
     const hasRequiredPatchers = hasIndexedAsset(windowsReleases, windowsPatcherDownloadUrl)
       && hasIndexedAsset(androidReleases, androidPatcherDownloadUrl)
+      && hasWindowsPlugin
 
     if (rows.length < GITHUB_PAGE_SIZE || hasRequiredPatchers) {
       break
@@ -497,6 +506,31 @@ function resolveWindowsPatcher(
   }
 }
 
+function resolveWindowsPlugin(
+  releases: ReleaseNoteEntry[]
+): IndexedReleaseArtifact<WindowsPluginIndex> | null {
+  const candidates = sortReleases(releases.filter(isWindowsPluginRelease))
+
+  for (const release of candidates) {
+    const asset = release.assets.find(item => /^astralwindowsplugin-v.+\.zip$/i.test(item.name))
+    if (!asset) {
+      continue
+    }
+
+    return {
+      index: {
+        version: versionFromTag(release.tagName, 'windows-plugin-v'),
+        downloadUrl: asset.downloadUrl,
+        size: asset.size
+      },
+      release,
+      asset
+    }
+  }
+
+  return null
+}
+
 function resolveAndroidPatcher(
   index: AndroidPatcherIndex | null,
   releases: ReleaseNoteEntry[]
@@ -567,6 +601,7 @@ export async function getReleaseFeed(): Promise<ReleaseFeedResponse> {
           }
         : null,
       windowsPatcher: resolveWindowsPatcher(windowsPatcherIndex, releases.windowsPatcher),
+      windowsPlugin: resolveWindowsPlugin(patcherSource),
       androidPatcher: resolveAndroidPatcher(androidPatcherIndex, releases.androidPatcher)
     }
   }
