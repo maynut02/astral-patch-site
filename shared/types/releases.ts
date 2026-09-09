@@ -1,4 +1,4 @@
-export type ReleaseFeedKey = 'patch' | 'windowsPatcher' | 'androidPatcher'
+export type ReleaseFeedKey = 'patch' | 'windowsPlugin' | 'windowsPatcher' | 'androidPatcher'
 
 export type PatchRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID' | 'CN_ANDROID'
 export type PatchChannel = 'develop' | 'release'
@@ -51,6 +51,12 @@ export interface WindowsPatcherIndex {
   size: number
 }
 
+export interface WindowsPluginIndex {
+  version: string
+  downloadUrl: string
+  size: number
+}
+
 export interface AndroidPatcherIndex {
   version: string
   versionCode: number
@@ -74,6 +80,7 @@ export interface ReleaseDistribution {
   patchIndex: PatchDistributionIndex | null
   stablePatch: StablePatchDistribution | null
   windowsPatcher: IndexedReleaseArtifact<WindowsPatcherIndex> | null
+  windowsPlugin: IndexedReleaseArtifact<WindowsPluginIndex> | null
   androidPatcher: IndexedReleaseArtifact<AndroidPatcherIndex> | null
 }
 

@@ -9,24 +9,25 @@ useAstralPageSeo('릴리즈 노트')
 
 const releaseTabs: Array<{ label: string, value: ReleaseFeedKey, icon: string }> = [
   { label: '한글패치', value: 'patch', icon: 'i-tabler-package' },
-  { label: 'Windows 패치 프로그램', value: 'windowsPatcher', icon: 'i-tabler-brand-windows' },
-  { label: 'Android 패치 앱', value: 'androidPatcher', icon: 'i-tabler-brand-android' }
+  { label: '패치 플러그인', value: 'windowsPlugin', icon: 'i-tabler-plug' },
+  { label: '패치 프로그램', value: 'windowsPatcher', icon: 'i-tabler-brand-windows' },
+  { label: '패치 앱', value: 'androidPatcher', icon: 'i-tabler-brand-android' }
 ]
 
 const activeTab = ref<ReleaseFeedKey>('patch')
-const expandedPatchDownloads = ref<Set<string>>(new Set())
+const expandedDownloads = ref<Set<string>>(new Set())
 
 function getReleaseKey(release: ReleaseNoteEntry): string {
   return `${release.id}:${release.tagName}`
 }
 
-function isPatchDownloadExpanded(release: ReleaseNoteEntry): boolean {
-  return expandedPatchDownloads.value.has(getReleaseKey(release))
+function isDownloadExpanded(release: ReleaseNoteEntry): boolean {
+  return expandedDownloads.value.has(getReleaseKey(release))
 }
 
-function togglePatchDownload(release: ReleaseNoteEntry): void {
+function toggleDownload(release: ReleaseNoteEntry): void {
   const key = getReleaseKey(release)
-  const next = new Set(expandedPatchDownloads.value)
+  const next = new Set(expandedDownloads.value)
 
   if (next.has(key)) {
     next.delete(key)
@@ -34,7 +35,7 @@ function togglePatchDownload(release: ReleaseNoteEntry): void {
     next.add(key)
   }
 
-  expandedPatchDownloads.value = next
+  expandedDownloads.value = next
 }
 const {
   data: initialHistoryPage,
@@ -48,6 +49,7 @@ const {
 function createEmptyReleaseGroups(): Record<ReleaseFeedKey, ReleaseNoteEntry[]> {
   return {
     patch: [],
+    windowsPlugin: [],
     windowsPatcher: [],
     androidPatcher: []
   }
@@ -242,12 +244,24 @@ function isDefaultPatchAsset(name: string): boolean {
     || lowerName === 'cn_android_manual_patch.zip'
 }
 
+function isDefaultWindowsPluginAsset(name: string): boolean {
+  return /^astralwindowsplugin-v.+\.zip$/i.test(name)
+}
+
 function getVisibleAssets(release: ReleaseNoteEntry) {
-  if (activeTab.value !== 'patch' || isPatchDownloadExpanded(release)) {
+  if (isDownloadExpanded(release)) {
     return release.assets
   }
 
-  return release.assets.filter(asset => isDefaultPatchAsset(asset.name))
+  if (activeTab.value === 'patch') {
+    return release.assets.filter(asset => isDefaultPatchAsset(asset.name))
+  }
+
+  if (activeTab.value === 'windowsPlugin') {
+    return release.assets.filter(asset => isDefaultWindowsPluginAsset(asset.name))
+  }
+
+  return release.assets
 }
 
 function getAssetIcon(name: string): string {
@@ -437,17 +451,17 @@ async function reloadReleases(): Promise<void> {
             class="flex flex-col"
           >
             <button
-              v-if="activeTab === 'patch'"
+              v-if="activeTab === 'patch' || activeTab === 'windowsPlugin'"
               type="button"
               class="flex w-full items-center justify-between gap-3 border-b border-default p-3 text-left transition-colors hover:bg-elevated/50"
-              :aria-expanded="isPatchDownloadExpanded(release)"
-              @click="togglePatchDownload(release)"
+              :aria-expanded="isDownloadExpanded(release)"
+              @click="toggleDownload(release)"
             >
               <span class="text-xs font-medium text-muted">다운로드</span>
               <UIcon
                 name="i-tabler-chevron-up"
                 class="size-4 shrink-0 text-dimmed transition-transform"
-                :class="isPatchDownloadExpanded(release) ? '' : 'rotate-180'"
+                :class="isDownloadExpanded(release) ? '' : 'rotate-180'"
               />
             </button>
             <div

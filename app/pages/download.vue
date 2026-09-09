@@ -35,6 +35,12 @@ let relativeTimeTimer: ReturnType<typeof setInterval> | undefined
 
 const installationGuideItems = [
   {
+    label: 'Windows 패치 플러그인 설치 및 사용 방법',
+    icon: 'i-tabler-plug',
+    value: 'windows-plugin',
+    slot: 'windows-plugin'
+  },
+  {
     label: 'Windows 패치 프로그램 설치 및 사용 방법',
     icon: 'i-tabler-app-window',
     value: 'windows-patcher',
@@ -72,6 +78,7 @@ function findAssetInRelease(release: ReleaseNoteEntry | null, assetName: string)
 }
 
 const windowsPatcher = computed(() => releaseFeed.value?.distribution.windowsPatcher ?? null)
+const windowsPlugin = computed(() => releaseFeed.value?.distribution.windowsPlugin ?? null)
 const androidPatcher = computed(() => releaseFeed.value?.distribution.androidPatcher ?? null)
 const latestPatchRelease = computed(() =>
   releaseFeed.value?.distribution.stablePatch?.release
@@ -251,6 +258,50 @@ function reloadReleases(): void {
         <article class="flex flex-col gap-1 border border-default bg-muted">
           <div class="flex flex-col gap-5 p-5">
             <div class="flex flex-col">
+              <UIcon name="i-tabler-plug" class="size-7 md:size-8" />
+              <span class="text-xs text-muted mt-3">{{ windowsPlugin?.asset?.name ?? 'AstralWindowsPlugin-v*.zip' }}</span>
+              <span class="text-xl font-medium mt-1">Windows 패치 플러그인</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-x-2 gap-y-4">
+              <div class="flex min-w-0 flex-col">
+                <span class="text-xs text-dimmed">버전</span>
+                <span class="truncate text-sm">{{ windowsPlugin ? `v${windowsPlugin.index.version}` : '확인 중' }}</span>
+              </div>
+              <div class="flex min-w-0 flex-col">
+                <span class="text-xs text-dimmed">릴리즈 시각</span>
+                <span class="truncate text-sm">{{ windowsPlugin?.release ? formatDate(windowsPlugin.release.publishedAt) : '—' }}</span>
+              </div>
+              <div class="flex min-w-0 flex-col">
+                <span class="text-xs text-dimmed">크기</span>
+                <span class="text-sm">{{ windowsPlugin ? formatFileSize(windowsPlugin.index.size) : '—' }}</span>
+              </div>
+              <div class="flex min-w-0 flex-col">
+                <span class="text-xs text-dimmed">다운로드</span>
+                <span class="text-sm">{{ windowsPlugin?.asset ? formatCount(windowsPlugin.asset.downloadCount) : '—' }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col p-2 bg-default/75 h-full">
+            <UButton
+              :href="windowsPlugin?.index.downloadUrl"
+              :disabled="!windowsPlugin"
+              external
+              icon="i-tabler-download"
+              color="info"
+              variant="ghost"
+              size="md"
+              class="gap-2 py-2.5"
+            >
+              Windows 패치 플러그인 다운로드
+            </UButton>
+          </div>
+        </article>
+
+        <article class="flex flex-col gap-1 border border-default bg-muted">
+          <div class="flex flex-col gap-5 p-5">
+            <div class="flex flex-col">
               <UIcon name="i-tabler-app-window" class="size-7 md:size-8" />
               <span class="text-xs text-muted mt-3">AstralWindowsPatcher.exe</span>
               <span class="text-xl font-medium mt-1">Windows 패치 프로그램</span>
@@ -356,8 +407,6 @@ function reloadReleases(): void {
             </UButton>
           </div>
         </article>
-
-        <article />
       </div>
     </section>
 
@@ -622,6 +671,97 @@ function reloadReleases(): void {
             body: 'px-3 pb-5 sm:px-5'
           }"
         >
+          <template #windows-plugin-body>
+            <div class="flex flex-col gap-6 pt-1">
+              <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="flex items-center gap-2 bg-elevated px-3 py-2.5 text-sm text-toned">
+                  <UIcon
+                    name="i-tabler-check"
+                    class="size-4 shrink-0 text-success"
+                  />
+                  Steam 글로벌·중국 버전 지원
+                </div>
+                <div class="flex items-center gap-2 bg-elevated px-3 py-2.5 text-sm text-toned">
+                  <UIcon
+                    name="i-tabler-check"
+                    class="size-4 shrink-0 text-success"
+                  />
+                  게임 실행 시 패치 자동 확인
+                </div>
+              </div>
+
+              <ol class="flex flex-col gap-5">
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">1</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      게임 설치 경로 열기
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      Steam에서 라이브러리 → Astral Party → 관리 → 로컬 파일 탐색 순서로 게임 설치 폴더를 엽니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">2</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      사용하는 버전의 폴더로 이동
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      글로벌 버전은 8vJXnINT, 중국 버전은 8vJXn6CN 폴더로 이동합니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">3</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      플러그인 파일 복사
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      다운로드한 AstralWindowsPlugin 압축파일을 열고, 압축파일 안의 내용물을 모두 해당 게임 폴더에 붙여넣습니다. 같은 이름의 파일이 있으면 덮어씁니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">4</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      게임 실행
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      평소처럼 Steam에서 게임을 실행합니다. 최초 실행은 BepInEx 초기화와 런타임 준비 때문에 화면에 아무런 표시가 없는 상태가 잠시 이어질 수 있으며, 일정 시간이 지난 뒤 한글패치 알림이 나타납니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">5</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      플러그인 제거
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      제거하려면 게임 폴더에서 BepInEx, dotnet, .doorstop_version, doorstop_config.ini, winhttp.dll, 적용방법.txt, LICENSE-BepInEx.txt를 삭제합니다.
+                    </p>
+                  </div>
+                </li>
+              </ol>
+
+              <UAlert
+                icon="i-tabler-alert-triangle-filled"
+                color="warning"
+                variant="soft"
+                title="다른 BepInEx 플러그인을 함께 사용하는 경우"
+                description="BepInEx 또는 dotnet 폴더를 통째로 삭제하면 다른 플러그인도 함께 제거될 수 있습니다. 다른 BepInEx 플러그인을 사용 중이라면 공용 파일 삭제에 주의해 주세요."
+              />
+            </div>
+          </template>
+
           <template #windows-patcher-body>
             <div class="flex flex-col gap-6 pt-1">
               <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
