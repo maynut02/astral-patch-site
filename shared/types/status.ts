@@ -1,4 +1,4 @@
-export type PatchWatcherRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID' | 'CN_ANDROID'
+export type PatchWatcherRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID' | 'CN_ANDROID' | 'INT_IOS'
 
 export type PatchWatcherRunStatus
   = 'running'

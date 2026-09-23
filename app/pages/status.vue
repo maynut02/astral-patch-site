@@ -25,7 +25,8 @@ const routeMeta: Record<PatchWatcherRoute, { label: string, icon: string }> = {
   INT_STEAM: { label: 'Steam 글로벌', icon: 'i-tabler-brand-steam' },
   CN_STEAM: { label: 'Steam 중국', icon: 'i-tabler-brand-steam' },
   INT_ANDROID: { label: 'Android 일본', icon: 'i-tabler-brand-android' },
-  CN_ANDROID: { label: 'Android 중국', icon: 'i-tabler-brand-android' }
+  CN_ANDROID: { label: 'Android 중국', icon: 'i-tabler-brand-android' },
+  INT_IOS: { label: 'iOS 일본', icon: 'i-tabler-brand-apple' }
 }
 
 const overallMeta: Record<PatchWatcherOverallState, StatusMeta> = {

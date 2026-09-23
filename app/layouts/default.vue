@@ -16,6 +16,7 @@ const publicNavItems: NavItem[] = [
   { link: '/change', icon: 'i-tabler-history-toggle', label: '변경 기록' },
   { link: '/status', icon: 'i-tabler-activity-heartbeat', label: '서비스 상태' },
   { link: '/mod', icon: 'i-tabler-package', label: '모드 허브' },
+  // { link: '/party', icon: 'i-tabler-users-group', label: '파티 채팅' },
   { link: '/notice', icon: 'i-tabler-speakerphone', label: '공지사항' },
   { link: '/contributor', icon: 'i-tabler-user-heart', label: '기여자' }
 ]
@@ -73,6 +74,10 @@ const authButtonLabel = computed(() => {
 
 const route = useRoute()
 
+function isPartyRoomNavItem(item: NavItem): boolean {
+  return item.link === '/party' && route.meta.partyChat === true
+}
+
 function login() {
   if (isLoggedIn.value) {
     return
@@ -106,7 +111,10 @@ watch(() => route.fullPath, () => {
 </script>
 
 <template>
-  <div class="flex flex-col md:flex-row min-h-dvh">
+  <div
+    class="flex flex-col md:flex-row"
+    :class="route.meta.partyChat ? 'h-dvh overflow-hidden' : 'min-h-dvh'"
+  >
     <aside
       class="hidden md:flex flex-col gap-3 w-14 h-dvh p-2 shrink-0 sticky top-0 transition-[width] duration-200 ease-in-out border-r border-default"
       :class="isSidebarCollapsed ? 'lg:w-14' : 'lg:w-52'"
@@ -185,11 +193,13 @@ watch(() => route.fullPath, () => {
             :to="item.link"
             :active-class="item.emphasis === 'info' ? 'bg-info/20! text-info!' : 'bg-elevated/80! text-default!'"
             :aria-label="item.label"
+            :aria-current="isPartyRoomNavItem(item) ? 'page' : undefined"
             :class="[
               'p-2 flex items-center gap-2 overflow-hidden transition-all shrink-0',
               item.emphasis === 'info'
                 ? 'text-info hover:bg-info/10 hover:text-info'
-                : 'text-muted hover:bg-muted hover:text-toned'
+                : 'text-muted hover:bg-muted hover:text-toned',
+              isPartyRoomNavItem(item) && 'bg-elevated/80! text-default!'
             ]"
           >
             <div class="flex justify-center items-center size-6 shrink-0">
@@ -330,7 +340,7 @@ watch(() => route.fullPath, () => {
       </div>
     </aside>
 
-    <header class="flex items-center justify-between gap-3 px-3 py-2 sticky top-0 z-10 md:hidden bg-default border-b border-default">
+    <header class="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b border-default bg-default px-3 py-2 md:hidden">
       <NuxtLink
         to="/"
         aria-label="Astral Patch 홈"
@@ -357,7 +367,10 @@ watch(() => route.fullPath, () => {
       </button>
     </header>
 
-    <main class="relative min-w-0 flex-1 px-3 py-5 md:px-5 pb-20">
+    <main
+      class="relative min-w-0 flex-1"
+      :class="route.meta.partyChat ? 'min-h-0 overflow-hidden' : 'px-3 py-5 md:px-5 pb-20'"
+    >
       <slot />
     </main>
 
@@ -379,11 +392,13 @@ watch(() => route.fullPath, () => {
                 :to="item.link"
                 :active-class="item.emphasis === 'info' ? 'bg-info/20! text-info!' : 'bg-elevated/80! text-default!'"
                 :aria-label="item.label"
+                :aria-current="isPartyRoomNavItem(item) ? 'page' : undefined"
                 :class="[
                   'flex min-h-12 items-center gap-3 px-3 py-2 transition-colors',
                   item.emphasis === 'info'
                     ? 'text-info hover:bg-info/10 hover:text-info'
-                    : 'text-muted hover:bg-muted hover:text-toned'
+                    : 'text-muted hover:bg-muted hover:text-toned',
+                  isPartyRoomNavItem(item) && 'bg-elevated/80! text-default!'
                 ]"
                 @click="closeMobileNavigation"
               >
