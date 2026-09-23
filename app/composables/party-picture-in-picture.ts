@@ -121,7 +121,7 @@ export function usePartyPictureInPicture() {
       target.value = current.document.body
     } catch {
       await close()
-      error.value = 'PiP 창을 열지 못했습니다. 다시 시도하거나 일반 작은 창을 사용해 주세요.'
+      error.value = 'PiP 창을 열지 못했습니다. 다시 시도해 주세요.'
     } finally {
       opening.value = false
     }

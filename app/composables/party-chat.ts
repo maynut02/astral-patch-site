@@ -1,4 +1,4 @@
-import { PARTY_HISTORY_MAX_MESSAGES, type PartyCharacterId, type PartyOrder, type PartyParticipant, type PartyRoomMessage, type PartyServerMessage } from '#shared/types/party'
+import { PARTY_HISTORY_MAX_MESSAGES, type PartyCharacterId, type PartyChatMessage, type PartyOrder, type PartyParticipant, type PartyRoomMessage, type PartyServerMessage } from '#shared/types/party'
 
 interface PartyCredentials {
   nickname: string
@@ -6,9 +6,20 @@ interface PartyCredentials {
   order: PartyOrder | null
 }
 
+interface LocalPartyChatMessage extends PartyChatMessage {
+  delivery: 'sending' | 'failed' | 'unconfirmed'
+  failureReason?: string
+}
+
+type PartyDisplayMessage = PartyRoomMessage | LocalPartyChatMessage
+
+function isLocalMessage(message: PartyDisplayMessage): message is LocalPartyChatMessage {
+  return message.kind === 'chat' && 'delivery' in message
+}
+
 export function usePartyChat(roomId: string) {
   const status = ref<'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error'>('idle')
-  const messages = ref<PartyRoomMessage[]>([])
+  const messages = ref<PartyDisplayMessage[]>([])
   const participants = ref<PartyParticipant[]>([])
   const participantId = ref('')
   const activeCharacterId = ref<PartyCharacterId | null>(null)
@@ -16,19 +27,18 @@ export function usePartyChat(roomId: string) {
   const error = ref('')
   const errorCode = ref('')
   const joined = ref(false)
-  const pendingMessage = ref<{ id: string, text: string } | null>(null)
-  const lastAcknowledgedId = ref('')
   const loadingOlder = ref(false)
   const hasOlder = ref(false)
   const historyError = ref('')
   let requestedBefore = ''
   let loadedHistory = false
   let socket: WebSocket | undefined
+  let activeSessionId: string | undefined
   let credentials: PartyCredentials | undefined
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined
   let connectionTimer: ReturnType<typeof setTimeout> | undefined
-  let sendTimer: ReturnType<typeof setTimeout> | undefined
+  const sendTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let historyTimer: ReturnType<typeof setTimeout> | undefined
   let stopped = false
   let attempt = 0
@@ -38,22 +48,40 @@ export function usePartyChat(roomId: string) {
     clearTimeout(reconnectTimer)
     clearTimeout(connectionTimer)
     clearInterval(heartbeatTimer)
-    clearTimeout(sendTimer)
     clearTimeout(historyTimer)
   }
 
-  function acknowledge(history: PartyRoomMessage[]) {
-    if (pendingMessage.value && history.some(message => message.kind === 'chat' && message.clientMessageId === pendingMessage.value?.id)) {
-      lastAcknowledgedId.value = pendingMessage.value.id
-      pendingMessage.value = null
-      clearTimeout(sendTimer)
-    }
+  function clearSendTimer(clientMessageId: string) {
+    clearTimeout(sendTimers.get(clientMessageId))
+    sendTimers.delete(clientMessageId)
+  }
+
+  function failMessage(clientMessageId: string, reason: string, delivery: 'failed' | 'unconfirmed' = 'unconfirmed') {
+    clearSendTimer(clientMessageId)
+    messages.value = messages.value.map(message => isLocalMessage(message) && message.clientMessageId === clientMessageId
+      ? { ...message, delivery, failureReason: reason }
+      : message)
+  }
+
+  function failPendingMessages(reason: string) {
+    for (const clientMessageId of [...sendTimers.keys()]) failMessage(clientMessageId, reason)
   }
 
   function appendMessage(message: PartyRoomMessage) {
-    if (messages.value.some(existing => existing.id === message.id)) return
+    const index = messages.value.findIndex(existing => existing.id === message.id || (message.kind === 'chat'
+      && isLocalMessage(existing)
+      && existing.clientMessageId === message.clientMessageId
+      && existing.participant.id === message.participant.id))
+    if (index >= 0) {
+      if (isLocalMessage(messages.value[index]!)) {
+        messages.value = messages.value.map((existing, position) => position === index ? message : existing)
+      }
+      if (message.kind === 'chat') clearSendTimer(message.clientMessageId)
+      return
+    }
     const next = [...messages.value, message]
     messages.value = loadedHistory ? next : next.slice(-PARTY_HISTORY_MAX_MESSAGES)
+    if (message.kind === 'chat') clearSendTimer(message.clientMessageId)
   }
 
   function connect() {
@@ -94,7 +122,15 @@ export function usePartyChat(roomId: string) {
         error.value = ''
         errorCode.value = ''
         participantId.value = data.participantId
-        messages.value = data.messages
+        const confirmedIds = new Set(data.messages.filter((message): message is PartyChatMessage => message.kind === 'chat')
+          .map(message => message.clientMessageId))
+        const unresolved = activeSessionId && activeSessionId !== data.sessionId
+          ? []
+          : messages.value.filter(isLocalMessage).filter(message => !confirmedIds.has(message.clientMessageId))
+        activeSessionId = data.sessionId
+        messages.value = [...data.messages, ...unresolved]
+        for (const clientMessageId of confirmedIds) clearSendTimer(clientMessageId)
+        failPendingMessages('전송 결과를 확인하지 못했습니다. 다시 보내면 중복될 수 있습니다.')
         hasOlder.value = data.messages.length > 0
         loadingOlder.value = false
         clearTimeout(historyTimer)
@@ -109,14 +145,8 @@ export function usePartyChat(roomId: string) {
           credentials.characterId = self.characterId
           credentials.order = self.order
         }
-        acknowledge(data.messages)
-        if (pendingMessage.value) {
-          pendingMessage.value = null
-          error.value = '전송을 확인하지 못했습니다. 입력 내용을 확인하고 다시 보내 주세요.'
-        }
       } else if (data.type === 'CHAT') {
         appendMessage(data.message)
-        acknowledge([data.message])
       } else if (data.type === 'JOIN_NOTICE') {
         appendMessage(data.notice)
       } else if (data.type === 'LEAVE_NOTICE') {
@@ -125,7 +155,9 @@ export function usePartyChat(roomId: string) {
         if (!loadingOlder.value || data.before !== requestedBefore) return
         const known = new Set(messages.value.map(message => message.id))
         const older = data.messages.filter(message => !known.has(message.id))
-        messages.value = [...older, ...messages.value]
+        const confirmedIds = new Set(older.filter((message): message is PartyChatMessage => message.kind === 'chat').map(message => message.clientMessageId))
+        messages.value = [...older, ...messages.value.filter(message => !isLocalMessage(message) || !confirmedIds.has(message.clientMessageId))]
+        for (const clientMessageId of confirmedIds) clearSendTimer(clientMessageId)
         loadedHistory = true
         hasOlder.value = data.hasMore
         loadingOlder.value = false
@@ -161,6 +193,7 @@ export function usePartyChat(roomId: string) {
         }
         error.value = data.message
         errorCode.value = data.code
+        if (data.clientMessageId) failMessage(data.clientMessageId, data.message, 'failed')
         if (status.value !== 'connected') {
           stopped = true
           status.value = 'error'
@@ -173,15 +206,12 @@ export function usePartyChat(roomId: string) {
           clearTimers()
           ws.close()
         }
-        if (data.clientMessageId === pendingMessage.value?.id) {
-          pendingMessage.value = null
-          clearTimeout(sendTimer)
-        }
       }
     }
     ws.onerror = () => { /* The close handler retries failed connections. */ }
     ws.onclose = () => {
       if (socket !== ws || stopped) return
+      failPendingMessages('연결이 끊겨 전송 결과를 확인하지 못했습니다. 다시 보내면 중복될 수 있습니다.')
       clearTimers()
       loadingOlder.value = false
       clearTimeout(historyTimer)
@@ -193,6 +223,7 @@ export function usePartyChat(roomId: string) {
   }
 
   function join(value: PartyCredentials) {
+    failPendingMessages('전송 결과를 확인하지 못했습니다. 다시 보내면 중복될 수 있습니다.')
     clearTimers()
     const previous = socket
     socket = undefined
@@ -226,17 +257,45 @@ export function usePartyChat(roomId: string) {
   }
 
   function send(text: string): boolean {
-    if (status.value !== 'connected' || socket?.readyState !== WebSocket.OPEN || pendingMessage.value || !text.trim() || text.trim().length > 1000) return false
-    const id = crypto.randomUUID()
-    pendingMessage.value = { id, text }
+    const currentSocket = socket
+    if (status.value !== 'connected' || currentSocket?.readyState !== WebSocket.OPEN || !text.trim() || text.trim().length > 1000) return false
+    const self = participants.value.find(participant => participant.id === participantId.value)
+    if (!self) return false
+    const clientMessageId = crypto.randomUUID()
+    const optimisticMessage: LocalPartyChatMessage = {
+      kind: 'chat',
+      id: clientMessageId,
+      clientMessageId,
+      participant: { ...self },
+      text: text.trim(),
+      createdAt: new Date().toISOString(),
+      delivery: 'sending'
+    }
+    const next = [...messages.value, optimisticMessage]
+    messages.value = loadedHistory ? next : next.slice(-PARTY_HISTORY_MAX_MESSAGES)
     error.value = ''
-    socket.send(JSON.stringify({ type: 'CHAT', text, clientMessageId: id }))
-    sendTimer = setTimeout(() => {
-      if (pendingMessage.value?.id !== id) return
-      error.value = '전송 확인이 지연되어 다시 연결합니다. 입력 내용은 유지됩니다.'
-      socket?.close()
-    }, 10_000)
+    try {
+      currentSocket.send(JSON.stringify({ type: 'CHAT', text, clientMessageId }))
+    } catch {
+      failMessage(clientMessageId, '메시지를 보내지 못했습니다. 다시 시도해 주세요.', 'failed')
+      error.value = '메시지를 보내지 못했습니다. 다시 시도해 주세요.'
+      currentSocket.close()
+      return true
+    }
+    sendTimers.set(clientMessageId, setTimeout(() => {
+      if (!sendTimers.has(clientMessageId)) return
+      failMessage(clientMessageId, '전송 확인이 지연되었습니다. 다시 보내면 중복될 수 있습니다.')
+      error.value = '전송 확인이 지연되어 다시 연결합니다.'
+      currentSocket.close()
+    }, 10_000))
     return true
+  }
+
+  function takeLocalMessage(clientMessageId: string): string | null {
+    const local = messages.value.find(message => isLocalMessage(message) && message.clientMessageId === clientMessageId && message.delivery !== 'sending')
+    if (!local || !isLocalMessage(local)) return null
+    messages.value = messages.value.filter(message => !isLocalMessage(message) || message.clientMessageId !== clientMessageId)
+    return local.text
   }
 
   function changeCharacter(characterId: PartyCharacterId): boolean {
@@ -266,9 +325,10 @@ export function usePartyChat(roomId: string) {
   onBeforeUnmount(() => {
     stopped = true
     clearTimers()
+    for (const clientMessageId of sendTimers.keys()) clearSendTimer(clientMessageId)
     socket?.close(1000, 'leave-room')
     credentials = undefined
   })
 
-  return { status, messages, participants, participantId, activeCharacterId, activeOrder, error, errorCode, joined, pendingMessage, lastAcknowledgedId, loadingOlder, hasOlder, historyError, join, send, loadOlder, changeCharacter, changeOrder }
+  return { status, messages, participants, participantId, activeCharacterId, activeOrder, error, errorCode, joined, loadingOlder, hasOlder, historyError, join, send, takeLocalMessage, loadOlder, changeCharacter, changeOrder }
 }

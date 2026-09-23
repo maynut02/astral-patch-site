@@ -28,7 +28,7 @@ export const PARTY_LIMITS = Object.freeze({
   maxIncomingMessageBytes: 16 * 1024,
   maxOutgoingMessageBytes: 1024 * 1024,
   maxBufferedBytes: 1024 * 1024,
-  emptyRoomTtlMs: 5 * 60_000,
+  emptyRoomTtlMs: 3 * 60_000,
   heartbeatIntervalMs: 30_000,
   heartbeatTimeoutMs: 90_000,
   maxNicknameLength: 20,

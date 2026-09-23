@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { PARTY_ORDERS, PARTY_SPECTATOR_ID, getPartyCharacterImage, type PartyCharacter, type PartyCharacterId, type PartyOrder, type PartyRoomSummary } from '#shared/types/party'
+import { PARTY_ORDERS, PARTY_ROOM_ID_PATTERN, PARTY_SPECTATOR_ID, getPartyCharacterImage, type PartyCharacter, type PartyCharacterId, type PartyOrder, type PartyRoomSummary } from '#shared/types/party'
 import { readBrowserStorage, writeBrowserStorage } from '~/utils/browser-storage'
+import { getRequestErrorMessage } from '~/utils/request-error'
 
 definePageMeta({ partyChat: true, key: route => route.path })
 const route = useRoute()
@@ -14,7 +15,6 @@ enteredRoom.value = null
 const enteredNickname = useState<string | null>('party-nickname-handoff', () => null)
 const providedNickname = enteredNickname.value
 enteredNickname.value = null
-const nicknameErrorHandoff = useState<string | null>('party-nickname-error-handoff', () => null)
 const { data: room, error: roomError, status: roomStatus, refresh: refreshRoom } = await useFetch<PartyRoomSummary>('/api/party/rooms', {
   key: `party-room-${roomId}`,
   method: 'POST',
@@ -24,8 +24,11 @@ const { data: room, error: roomError, status: roomStatus, refresh: refreshRoom }
 })
 if (handoff) room.value = handoff
 const { data: characters, error: charactersError, status: charactersStatus, refresh: refreshCharacters } = await useFetch<PartyCharacter[]>('/api/party/characters', { default: () => [] })
-const { status, messages, participants, participantId, activeCharacterId, activeOrder, error, errorCode, joined, pendingMessage, lastAcknowledgedId, loadingOlder, hasOlder, historyError, join, send, loadOlder, changeCharacter, changeOrder } = usePartyChat(roomId)
+const { status, messages, participants, participantId, activeCharacterId, activeOrder, error, errorCode, joined, loadingOlder, hasOlder, historyError, join, send, takeLocalMessage, loadOlder, changeCharacter, changeOrder } = usePartyChat(roomId)
 const nickname = ref(providedNickname || '')
+const nicknameError = ref('')
+const submittingNickname = ref(false)
+const showNicknameModal = ref(!providedNickname && PARTY_ROOM_ID_PATTERN.test(roomId))
 const characterId = ref<PartyCharacterId>(PARTY_SPECTATOR_ID)
 const order = ref<PartyOrder | null>(null)
 const characterSearch = ref('')
@@ -49,7 +52,6 @@ const keyboardInset = ref(0)
 const isComposerFocused = ref(false)
 const KEYBOARD_INSET_THRESHOLD = 80
 let visualViewport: VisualViewport | null = null
-let sentDraft = ''
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 let historyScrollAnchor: { before: string, top: number, height: number } | null = null
 
@@ -83,8 +85,8 @@ const statusLabel = computed(() => status.value === 'idle'
 const statusColor = computed(() => status.value === 'idle'
   ? 'bg-warning'
   : status.value === 'connected' ? 'bg-success' : status.value === 'error' ? 'bg-error' : 'bg-warning')
-const canSend = computed(() => status.value === 'connected' && !pendingMessage.value && Boolean(draft.value.trim()) && draft.value.trim().length <= 1000)
-const windowButtonLabel = computed(() => pipTarget.value ? '원래 페이지로 돌아가기' : pipSupported.value ? '항상 위에 표시 (PiP)' : '작은 창으로 열기')
+const canSend = computed(() => status.value === 'connected' && Boolean(draft.value.trim()) && draft.value.trim().length <= 1000)
+const pipButtonLabel = computed(() => pipTarget.value ? '원래 페이지로 돌아가기' : '항상 위에 표시 (PiP)')
 
 watch([room, profileReady], ([value, ready]) => {
   if (value && ready && !joined.value && status.value === 'idle') enterRoom()
@@ -92,10 +94,15 @@ watch([room, profileReady], ([value, ready]) => {
 
 watch(errorCode, (code) => {
   if (code !== 'NICKNAME_TAKEN') return
-  enteredNickname.value = nickname.value
-  nicknameErrorHandoff.value = error.value
-  void navigateTo({ path: '/party', query: { roomId } })
+  profileReady.value = false
+  nicknameError.value = error.value || '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
+  showNicknameModal.value = true
 })
+
+watch(nickname, () => {
+  nicknameError.value = ''
+  formError.value = ''
+}, { flush: 'sync' })
 
 watch(pipTarget, async () => {
   showParticipants.value = false
@@ -116,11 +123,8 @@ onMounted(() => {
   updateKeyboardInset()
 
   if (!providedNickname) nickname.value = readBrowserStorage('party-nickname') || ''
-  if (!nickname.value.trim() || nickname.value.trim().length > 20) {
-    void navigateTo({ path: '/party', query: { roomId } })
-    return
-  }
-  profileReady.value = true
+  if (providedNickname && nickname.value.trim() && nickname.value.trim().length <= 20) profileReady.value = true
+  else showNicknameModal.value = PARTY_ROOM_ID_PATTERN.test(roomId)
   if (!room.value) void refreshRoom()
 })
 onBeforeUnmount(() => {
@@ -166,9 +170,47 @@ function enterRoom() {
   join({ nickname: nickname.value, characterId: PARTY_SPECTATOR_ID, order: null })
 }
 
-function editRoomDetails() {
-  enteredNickname.value = nickname.value
-  void navigateTo({ path: '/party', query: { roomId } })
+function isNicknameTakenResponse(cause: unknown): boolean {
+  if (!cause || typeof cause !== 'object') return false
+  const response = cause as { statusCode?: unknown, data?: { statusCode?: unknown } }
+  return response.statusCode === 409 || response.data?.statusCode === 409
+}
+
+async function submitNickname() {
+  if (submittingNickname.value) return
+  const name = nickname.value.trim()
+  if (!name || name.length > 20) {
+    nicknameError.value = '20자 이내의 닉네임을 입력해 주세요.'
+    return
+  }
+
+  nicknameError.value = ''
+  formError.value = ''
+  submittingNickname.value = true
+  try {
+    room.value = await $fetch<PartyRoomSummary>('/api/party/rooms', {
+      method: 'POST',
+      body: { roomId, nickname: name }
+    })
+    nickname.value = name
+    showNicknameModal.value = false
+    profileReady.value = true
+    enterRoom()
+  } catch (cause) {
+    if (isNicknameTakenResponse(cause)) {
+      nicknameError.value = '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
+    } else {
+      formError.value = getRequestErrorMessage(cause, '채팅방에 들어가지 못했습니다. 다시 시도해 주세요.')
+    }
+  } finally {
+    submittingNickname.value = false
+  }
+}
+
+function openNicknameModal() {
+  profileReady.value = false
+  formError.value = ''
+  showNicknameModal.value = true
 }
 
 watch(joined, async (value) => {
@@ -221,7 +263,9 @@ function toggleCharacterPicker() {
 }
 
 function submitMessage() {
-  if (canSend.value && send(draft.value)) sentDraft = draft.value
+  if (!canSend.value || !send(draft.value)) return
+  draft.value = ''
+  void scrollToBottom().then(() => input.value?.textareaRef?.focus())
 }
 
 function onInputKeydown(event: KeyboardEvent) {
@@ -231,11 +275,13 @@ function onInputKeydown(event: KeyboardEvent) {
   }
 }
 
-watch(lastAcknowledgedId, async () => {
-  if (draft.value === sentDraft) draft.value = ''
-  await scrollToBottom()
+function restoreLocalMessage(clientMessageId: string) {
+  if (draft.value) return
+  const text = takeLocalMessage(clientMessageId)
+  if (text === null) return
+  draft.value = text
   input.value?.textareaRef?.focus()
-})
+}
 
 function onScroll() {
   const list = messageList.value
@@ -273,7 +319,14 @@ async function scrollToBottom() {
   unread.value = 0
 }
 
-watch(() => messages.value.at(-1)?.id, () => {
+watch(messages, (current, previous) => {
+  const latest = current.at(-1)
+  if (!latest) return
+  const latestKey = latest.kind === 'chat' ? latest.clientMessageId : latest.id
+  if (previous.some((message) => {
+    const key = message.kind === 'chat' ? message.clientMessageId : message.id
+    return key === latestKey
+  })) return
   if (nearBottom.value) void scrollToBottom()
   else unread.value++
 })
@@ -309,14 +362,9 @@ async function copyLink() {
   }
 }
 
-function openWindow() {
-  window.open(`/party/${encodeURIComponent(roomId)}`, '_blank', 'popup,width=440,height=720,noopener,noreferrer')
-}
-
-function toggleFloatingWindow() {
+function togglePip() {
   if (pipTarget.value) void closePip()
-  else if (pipSupported.value) void openPip()
-  else openWindow()
+  else void openPip()
 }
 </script>
 
@@ -425,18 +473,18 @@ function toggleFloatingWindow() {
             />
           </UTooltip>
           <UTooltip
-            v-if="joined"
-            :text="windowButtonLabel"
+            v-if="joined && pipSupported"
+            :text="pipButtonLabel"
             :portal="useDefaultOverlayPortal"
             :delay-duration="0"
           >
             <UButton
-              :icon="pipTarget ? 'i-tabler-window-maximize' : pipSupported ? 'i-tabler-window-minimize' : 'i-tabler-external-link'"
-              :aria-label="windowButtonLabel"
+              :icon="pipTarget ? 'i-tabler-window-maximize' : 'i-tabler-window-minimize'"
+              :aria-label="pipButtonLabel"
               :loading="pipOpening"
               color="neutral"
               variant="ghost"
-              @click="toggleFloatingWindow"
+              @click="togglePip"
             />
           </UTooltip>
           <UTooltip
@@ -590,12 +638,6 @@ function toggleFloatingWindow() {
           <p role="alert" class="text-xs text-warning">
             {{ pipError }}
           </p>
-          <UButton
-            label="일반 작은 창 열기"
-            size="xs"
-            variant="outline"
-            @click="openWindow"
-          />
         </div>
 
         <div v-if="!room && !roomError && (roomStatus === 'idle' || roomStatus === 'pending')" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" role="status">
@@ -603,7 +645,7 @@ function toggleFloatingWindow() {
             채팅방을 여는 중입니다…
           </p>
         </div>
-        <div v-else-if="roomError || !room" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+        <div v-else-if="!room" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <UIcon name="i-tabler-message-off" class="size-8 text-dimmed" />
           <h2 class="font-semibold">
             {{ roomError?.statusCode === 400 ? '올바르지 않은 방 ID입니다.' : '채팅방을 열지 못했습니다.' }}
@@ -621,7 +663,10 @@ function toggleFloatingWindow() {
 
         <div v-else-if="!joined" class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <UIcon name="i-tabler-message-circle" class="size-8 text-muted" />
-          <p v-if="connecting || status === 'idle'" role="status" class="text-sm text-muted">
+          <p v-if="showNicknameModal" role="status" class="text-sm text-muted">
+            닉네임을 입력하면 채팅방에 입장합니다.
+          </p>
+          <p v-else-if="connecting || status === 'idle'" role="status" class="text-sm text-muted">
             채팅방에 연결하는 중입니다…
           </p>
           <p v-if="formError || error" role="alert" class="text-sm text-error">
@@ -634,7 +679,7 @@ function toggleFloatingWindow() {
             variant="soft"
             @click="enterRoom"
           />
-          <UButton :label="errorCode === 'NICKNAME_TAKEN' ? '다른 닉네임 입력' : '방 ID와 닉네임 수정'" variant="outline" @click="editRoomDetails" />
+          <UButton label="닉네임 변경" variant="outline" @click="openNicknameModal" />
         </div>
 
         <template v-else>
@@ -698,9 +743,9 @@ function toggleFloatingWindow() {
                       <div class="min-w-0 flex-1">
                         <div class="mb-1 flex items-center gap-1.5">
                           <span class="shrink-0 px-1 py-px text-xs font-semibold" :class="message.participant.order ? orderColors[message.participant.order] : 'bg-muted text-muted'">{{ message.participant.order || '관전' }}</span>
-                          <span class="truncate text-xs font-medium" :class="activeParticipantIds.has(message.participant.id) ? 'text-toned' : 'text-dimmed'">{{ message.participant.nickname }}</span>
+                          <span class="truncate text-xs font-medium" :class="activeParticipantIds.has(message.participant.id) || 'delivery' in message ? 'text-toned' : 'text-dimmed'">{{ message.participant.nickname }}</span>
                           <UIcon
-                            v-if="!activeParticipantIds.has(message.participant.id)"
+                            v-if="!activeParticipantIds.has(message.participant.id) && !('delivery' in message)"
                             name="i-tabler-plug-connected"
                             role="img"
                             aria-label="나간 사용자"
@@ -708,18 +753,43 @@ function toggleFloatingWindow() {
                           />
                           <time :datetime="message.createdAt" class="shrink-0 text-[10px] text-dimmed">{{ formatTime(message.createdAt) }}</time>
                         </div>
-                        <p class="whitespace-pre-wrap text-sm leading-relaxed wrap-anywhere">
+                        <p
+                          class="whitespace-pre-wrap text-sm leading-relaxed wrap-anywhere"
+                          :class="'delivery' in message && message.delivery === 'sending' ? 'motion-safe:animate-pulse' : undefined"
+                        >
                           {{ message.text }}
                         </p>
+                        <div v-if="'delivery' in message && message.delivery !== 'sending'" class="mt-1 flex items-center gap-2 text-xs" :class="message.delivery === 'failed' ? 'text-error' : 'text-warning'">
+                          <span role="alert">{{ message.failureReason || '전송 실패' }}</span>
+                          <UButton
+                            label="다시 입력"
+                            size="xs"
+                            color="neutral"
+                            variant="link"
+                            :disabled="Boolean(draft)"
+                            @click="restoreLocalMessage(message.clientMessageId)"
+                          />
+                        </div>
                       </div>
                     </article>
                   </template>
                 </div>
                 <form
-                  class="sticky bottom-0 mt-auto pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+                  class="sticky bottom-0 mt-auto flex flex-col pb-[max(0.75rem,env(safe-area-inset-bottom))]"
                   :style="keyboardInset ? { bottom: `${keyboardInset}px`, marginBottom: `${keyboardInset}px`, paddingBottom: '0px' } : undefined"
                   @submit.prevent="submitMessage"
                 >
+                  <UButton
+                    v-if="unread"
+                    type="button"
+                    :label="`새 메시지 ${unread}개`"
+                    icon="i-tabler-arrow-down"
+                    size="sm"
+                    color="warning"
+                    variant="soft"
+                    class="mb-2 self-center shadow-lg"
+                    @click="scrollToBottom"
+                  />
                   <div class="mx-auto w-full max-w-4xl bg-muted/80 backdrop-blur-md border border-default">
                     <div class="flex items-end gap-2">
                       <UFormField name="message" class="min-w-0 flex-1">
@@ -747,7 +817,6 @@ function toggleFloatingWindow() {
                           icon="i-tabler-send"
                           aria-label="메시지 전송"
                           :disabled="!canSend"
-                          :loading="Boolean(pendingMessage)"
                           color="neutral"
                         />
                       </div>
@@ -756,17 +825,59 @@ function toggleFloatingWindow() {
                 </form>
               </div>
             </div>
-            <UButton
-              v-if="unread"
-              :label="`새 메시지 ${unread}개`"
-              icon="i-tabler-arrow-down"
-              size="xs"
-              class="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-lg"
-              @click="scrollToBottom"
-            />
           </div>
         </template>
       </div>
     </Teleport>
+    <UModal
+      v-model:open="showNicknameModal"
+      :title="`채팅방 입장 - ${roomId}`"
+      :dismissible="false"
+      :close="false"
+      :ui="{ footer: 'justify-end' }"
+    >
+      <template #body>
+        <form id="party-nickname-form" class="space-y-4" @submit.prevent="submitNickname">
+          <UFormField
+            label="닉네임"
+            name="nickname"
+            :error="nicknameError || undefined"
+            required
+          >
+            <UInput
+              v-model="nickname"
+              placeholder="파티원에게 표시할 이름"
+              :maxlength="20"
+              required
+              autofocus
+              autocomplete="nickname"
+              color="neutral"
+              :disabled="submittingNickname"
+              class="w-full"
+            />
+          </UFormField>
+          <p v-if="formError" role="alert" class="text-sm text-error">
+            {{ formError }}
+          </p>
+        </form>
+      </template>
+      <template #footer>
+        <UButton
+          :to="{ path: '/party', query: { roomId } }"
+          label="돌아가기"
+          color="neutral"
+          variant="ghost"
+        />
+        <UButton
+          type="submit"
+          form="party-nickname-form"
+          label="입장"
+          color="info"
+          variant="soft"
+          :loading="submittingNickname"
+          :disabled="submittingNickname || !nickname.trim() || nickname.trim().length > 20"
+        />
+      </template>
+    </UModal>
   </div>
 </template>
