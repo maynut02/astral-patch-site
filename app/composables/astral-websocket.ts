@@ -98,15 +98,13 @@ function sendTopicControl(
 }
 
 function addConsumerTopics(topics: Set<AstralWebSocketTopic>): void {
-  const newlyActiveTopics: AstralWebSocketTopic[] = []
-
   for (const topic of topics) {
     const currentCount = topicConsumerCounts.get(topic) || 0
     topicConsumerCounts.set(topic, currentCount + 1)
-    if (currentCount === 0) newlyActiveTopics.push(topic)
   }
 
-  sendTopicControl('WS_SUBSCRIBE', newlyActiveTopics)
+  // A new consumer also needs the topic's snapshot when the socket is already open.
+  sendTopicControl('WS_SUBSCRIBE', [...topics])
 }
 
 function removeConsumerTopics(topics: Set<AstralWebSocketTopic>): void {
@@ -274,6 +272,9 @@ export function useAstralWebSocket(options: UseAstralWebSocketOptions = {}) {
   }
 
   onMounted(() => {
+    status.value = sharedStatus
+    clientId.value = sharedClientId
+    lastMessageAt.value = sharedLastMessageAt
     consumers.add(consumer)
     addConsumerTopics(topics)
     connectSharedSocket()

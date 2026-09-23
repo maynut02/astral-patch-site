@@ -11,6 +11,9 @@
     "db:check": "node scripts/check-migrations.mjs",
     "lint": "eslint .",
     "typecheck": "nuxt typecheck",
+    "test:party": "node scripts/test-party-chat.mjs",
+    "test:party:rooms": "node --experimental-strip-types scripts/test-party-rooms.mjs",
+    "test:party:storage": "node scripts/test-party-storage.mjs",
     "lint:fix": "eslint . --fix",
     "check": "pnpm run db:check && pnpm run lint && pnpm run typecheck && pnpm run build"
   },
@@ -18,7 +21,7 @@
     "@iconify-json/lucide": "^1.2.126",
     "@iconify-json/tabler": "^1.2.38",
     "@nuxt/fonts": "0.14.0",
-    "@nuxt/ui": "^4.11.0",
+    "@nuxt/ui": "^4.11.1",
     "@takumi-rs/core": "^2.13.2",
     "nuxt": "^4.5.2",
     "nuxt-auth-utils": "0.5.30",
@@ -32,7 +35,8 @@
     "eslint": "^10.9.0",
     "nuxtseo-layer-devtools": "^5.3.14",
     "typescript": "^6.0.3",
-    "vue-tsc": "^3.3.11"
+    "vue-tsc": "^3.3.11",
+    "ws": "8.21.3"
   },
   "packageManager": "pnpm@11.20.0",
   "engines": {

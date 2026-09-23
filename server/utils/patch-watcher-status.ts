@@ -13,7 +13,7 @@ import type {
 } from '#shared/types/status'
 import { withDatabaseRetry } from './database'
 
-const ROUTES: PatchWatcherRoute[] = ['INT_STEAM', 'CN_STEAM', 'INT_ANDROID', 'CN_ANDROID']
+const ROUTES: PatchWatcherRoute[] = ['INT_STEAM', 'CN_STEAM', 'INT_ANDROID', 'CN_ANDROID', 'INT_IOS']
 const WATCH_INTERVAL_MINUTES = 5
 const DELAYED_AFTER_MINUTES = 10
 const OUTAGE_AFTER_MINUTES = 20
@@ -264,7 +264,8 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
         WHEN 'CN_STEAM' THEN 2
         WHEN 'INT_ANDROID' THEN 3
         WHEN 'CN_ANDROID' THEN 4
-        ELSE 5
+        WHEN 'INT_IOS' THEN 5
+        ELSE 6
       END
     `),
     withDatabaseRetry<HourlyStatRow[]>(database => database<HourlyStatRow[]>`
@@ -276,7 +277,7 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
         ) AS hour
       ),
       routes(route) AS (
-        VALUES ('INT_STEAM'), ('CN_STEAM'), ('INT_ANDROID'), ('CN_ANDROID')
+        VALUES ('INT_STEAM'), ('CN_STEAM'), ('INT_ANDROID'), ('CN_ANDROID'), ('INT_IOS')
       ),
       route_stats AS (
         SELECT
@@ -415,7 +416,8 @@ export async function getPatchWatcherHistory(
             WHEN 'CN_STEAM' THEN 2
             WHEN 'INT_ANDROID' THEN 3
             WHEN 'CN_ANDROID' THEN 4
-            ELSE 5
+            WHEN 'INT_IOS' THEN 5
+            ELSE 6
           END
         ) FILTER (WHERE route.route IS NOT NULL),
         '[]'::json

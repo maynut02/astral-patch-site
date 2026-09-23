@@ -17,6 +17,9 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-https://factchat-cloud.mindlogic.ai/v1/gateway}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      ASTRAL_WS_ALLOWED_ORIGINS: ${ASTRAL_WS_ALLOWED_ORIGINS:-https://astral.maynutlab.com}
+      # The app port is bound to loopback; nginx overwrites X-Real-IP.
+      ASTRAL_TRUST_PROXY: ${ASTRAL_TRUST_PROXY:-true}
     logging:
       driver: json-file
       options:

@@ -6,3 +6,4 @@ allowBuilds:
 
 overrides:
   'fontless>esbuild': 0.28.2
+  '@tiptap/core': 3.31.3
