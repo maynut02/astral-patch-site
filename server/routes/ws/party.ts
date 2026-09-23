@@ -363,10 +363,6 @@ export default defineWebSocketHandler({
     if (update) broadcastPresence(update)
   },
 
-  pong(peer) {
-    touchPartyConnection(peer as PartyPeer)
-  },
-
   async error(peer, error) {
     console.error(`[ws/party] Peer error: ${peer.id}`, error)
     const update = await removePartyConnection(peer as PartyPeer)
