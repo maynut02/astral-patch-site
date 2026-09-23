@@ -64,6 +64,7 @@ test('room IDs require six ASCII digits and preserve leading zeros', async () =>
 })
 
 test('entering an ID creates or returns the same room, and idle rooms expire', async (t) => {
+  assert.equal(PARTY_LIMITS.emptyRoomTtlMs, 3 * 60_000)
   const startedAt = Date.now()
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: startedAt })
   const pings = []

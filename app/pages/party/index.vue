@@ -14,13 +14,10 @@ const entryError = ref('')
 const nicknameError = ref('')
 const enteredRoom = useState<PartyRoomSummary | null>('party-room-handoff', () => null)
 const enteredNickname = useState<string | null>('party-nickname-handoff', () => null)
-const nicknameErrorHandoff = useState<string | null>('party-nickname-error-handoff', () => null)
 
 onMounted(() => {
   nickname.value = enteredNickname.value ?? readBrowserStorage('party-nickname') ?? ''
-  nicknameError.value = nicknameErrorHandoff.value ?? ''
   enteredNickname.value = null
-  nicknameErrorHandoff.value = null
 })
 
 watch([roomId, nickname], () => {
