@@ -29,7 +29,7 @@ interface GatewayError {
   message?: string
 }
 
-const AI_TRANSLATION_MODEL = 'gpt-5.6-luna'
+const AI_TRANSLATION_MODEL = 'gpt-6-luna'
 const MAX_SOURCE_CHARACTERS = 40_000
 const MAX_TRANSLATION_CHARACTERS = 10_000
 
@@ -138,8 +138,9 @@ export async function generateEditorAiTranslation(
       },
       body: {
         model: AI_TRANSLATION_MODEL,
+        reasoning_effort: 'none',
         temperature: 0.2,
-        max_tokens: 1024,
+        max_completion_tokens: 1024,
         messages: [{
           role: 'system',
           content: '너는 게임 현지화 전문 번역가다. 원문의 의미와 특수 문법을 보존하면서 자연스러운 한국어로 번역한다.'
