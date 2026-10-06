@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { parseReleaseMarkdown } from '~/utils/release-markdown'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   source: string
-}>()
+  baseUrl?: string
+  imageBaseUrl?: string
+  emptyText?: string
+}>(), { emptyText: '등록된 릴리즈 노트가 없습니다.' })
 
-const blocks = computed(() => parseReleaseMarkdown(props.source))
+const blocks = computed(() => parseReleaseMarkdown(props.source, props.baseUrl, props.imageBaseUrl))
 
 function headingClass(level: number): string {
   if (level === 1) {
@@ -142,6 +145,6 @@ function headingClass(level: number): string {
     v-else
     class="text-sm text-muted"
   >
-    등록된 릴리즈 노트가 없습니다.
+    {{ emptyText }}
   </p>
 </template>
