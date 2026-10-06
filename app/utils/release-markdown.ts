@@ -1,5 +1,6 @@
 export type ReleaseMarkdownInlineNode
   = | { type: 'text', text: string }
+    | { type: 'image', src: string, alt: string }
     | { type: 'strong' | 'emphasis' | 'delete', children: ReleaseMarkdownInlineNode[] }
     | { type: 'code', text: string }
     | { type: 'link', href: string, children: ReleaseMarkdownInlineNode[] }
@@ -36,6 +37,22 @@ function isSafeHref(value: string): boolean {
   }
 }
 
+function resolveMarkdownHref(value: string, baseUrl?: string, image = false): string | null {
+  let href = value.trim()
+  if (!href) return null
+
+  if (baseUrl) {
+    try {
+      href = new URL(href, baseUrl).href
+    } catch {
+      return null
+    }
+  }
+
+  if (!isSafeHref(href) || (image && !/^https?:\/\//i.test(href) && !href.startsWith('/'))) return null
+  return href
+}
+
 function findClosingMarker(text: string, marker: string, start: number): number {
   let index = start
   while (index < text.length) {
@@ -65,7 +82,7 @@ function pushText(nodes: ReleaseMarkdownInlineNode[], text: string): void {
   }
 }
 
-export function parseReleaseMarkdownInline(text: string): ReleaseMarkdownInlineNode[] {
+export function parseReleaseMarkdownInline(text: string, baseUrl?: string, imageBaseUrl = baseUrl): ReleaseMarkdownInlineNode[] {
   const nodes: ReleaseMarkdownInlineNode[] = []
   let index = 0
   let plainStart = 0
@@ -94,7 +111,7 @@ export function parseReleaseMarkdownInline(text: string): ReleaseMarkdownInlineN
         flushPlain(index)
         nodes.push({
           type: 'strong',
-          children: parseReleaseMarkdownInline(text.slice(index + 2, end))
+          children: parseReleaseMarkdownInline(text.slice(index + 2, end), baseUrl, imageBaseUrl)
         })
         index = end + 2
         plainStart = index
@@ -108,7 +125,7 @@ export function parseReleaseMarkdownInline(text: string): ReleaseMarkdownInlineN
         flushPlain(index)
         nodes.push({
           type: 'delete',
-          children: parseReleaseMarkdownInline(text.slice(index + 2, end))
+          children: parseReleaseMarkdownInline(text.slice(index + 2, end), baseUrl, imageBaseUrl)
         })
         index = end + 2
         plainStart = index
@@ -123,11 +140,30 @@ export function parseReleaseMarkdownInline(text: string): ReleaseMarkdownInlineN
         flushPlain(index)
         nodes.push({
           type: 'emphasis',
-          children: parseReleaseMarkdownInline(text.slice(index + 1, end))
+          children: parseReleaseMarkdownInline(text.slice(index + 1, end), baseUrl, imageBaseUrl)
         })
         index = end + 1
         plainStart = index
         continue
+      }
+    }
+
+    if (text[index] === '!' && text[index + 1] === '[') {
+      const labelEnd = findClosingMarker(text, ']', index + 2)
+      if (labelEnd !== -1 && text[labelEnd + 1] === '(') {
+        const hrefEnd = findClosingMarker(text, ')', labelEnd + 2)
+        if (hrefEnd !== -1) {
+          const src = resolveMarkdownHref(text.slice(labelEnd + 2, hrefEnd).trim().split(/\s+/)[0] ?? '', imageBaseUrl, true)
+          flushPlain(index)
+          if (src) {
+            nodes.push({ type: 'image', src, alt: text.slice(index + 2, labelEnd) })
+          } else {
+            pushText(nodes, text.slice(index, hrefEnd + 1))
+          }
+          index = hrefEnd + 1
+          plainStart = index
+          continue
+        }
       }
     }
 
@@ -136,13 +172,13 @@ export function parseReleaseMarkdownInline(text: string): ReleaseMarkdownInlineN
       if (labelEnd !== -1 && text[labelEnd + 1] === '(') {
         const hrefEnd = findClosingMarker(text, ')', labelEnd + 2)
         if (hrefEnd !== -1) {
-          const href = text.slice(labelEnd + 2, hrefEnd).trim().split(/\s+/)[0] ?? ''
-          if (isSafeHref(href)) {
+          const href = resolveMarkdownHref(text.slice(labelEnd + 2, hrefEnd).trim().split(/\s+/)[0] ?? '', baseUrl)
+          if (href) {
             flushPlain(index)
             nodes.push({
               type: 'link',
               href,
-              children: parseReleaseMarkdownInline(text.slice(index + 1, labelEnd))
+              children: parseReleaseMarkdownInline(text.slice(index + 1, labelEnd), baseUrl, imageBaseUrl)
             })
             index = hrefEnd + 1
             plainStart = index
@@ -241,7 +277,8 @@ function startsBlock(line: string, nextLine = ''): boolean {
     || (line.includes('|') && isTableSeparator(nextLine))
 }
 
-export function parseReleaseMarkdown(source: string): ReleaseMarkdownBlock[] {
+export function parseReleaseMarkdown(source: string, baseUrl?: string, imageBaseUrl = baseUrl): ReleaseMarkdownBlock[] {
+  const inline = (text: string) => parseReleaseMarkdownInline(text, baseUrl, imageBaseUrl)
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const blocks: ReleaseMarkdownBlock[] = []
   let index = 0
@@ -276,7 +313,7 @@ export function parseReleaseMarkdown(source: string): ReleaseMarkdownBlock[] {
       blocks.push({
         type: 'heading',
         level: heading[1]?.length ?? 1,
-        children: parseReleaseMarkdownInline(heading[2] ?? '')
+        children: inline(heading[2] ?? '')
       })
       index += 1
       continue
@@ -289,7 +326,7 @@ export function parseReleaseMarkdown(source: string): ReleaseMarkdownBlock[] {
     }
 
     if (line.includes('|') && isTableSeparator(nextLine)) {
-      const headers = splitTableRow(line).map(parseReleaseMarkdownInline)
+      const headers = splitTableRow(line).map(inline)
       const rows: ReleaseMarkdownInlineNode[][][] = []
       index += 2
       while (index < lines.length) {
@@ -297,7 +334,7 @@ export function parseReleaseMarkdown(source: string): ReleaseMarkdownBlock[] {
         if (!row.trim() || !row.includes('|')) {
           break
         }
-        rows.push(splitTableRow(row).map(parseReleaseMarkdownInline))
+        rows.push(splitTableRow(row).map(inline))
         index += 1
       }
       blocks.push({ type: 'table', headers, rows })
@@ -312,7 +349,7 @@ export function parseReleaseMarkdown(source: string): ReleaseMarkdownBlock[] {
       }
       blocks.push({
         type: 'blockquote',
-        children: parseReleaseMarkdownInline(quoteLines.join(' '))
+        children: inline(quoteLines.join(' '))
       })
       continue
     }
@@ -340,7 +377,7 @@ export function parseReleaseMarkdown(source: string): ReleaseMarkdownBlock[] {
 
         items.push({
           checked,
-          children: parseReleaseMarkdownInline(content)
+          children: inline(content)
         })
         index += 1
       }
@@ -363,7 +400,7 @@ export function parseReleaseMarkdown(source: string): ReleaseMarkdownBlock[] {
 
     blocks.push({
       type: 'paragraph',
-      children: parseReleaseMarkdownInline(paragraphLines.join(' '))
+      children: inline(paragraphLines.join(' '))
     })
   }
 

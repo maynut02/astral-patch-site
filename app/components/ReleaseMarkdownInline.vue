@@ -15,6 +15,15 @@ defineProps<{
       {{ node.text }}
     </template>
 
+    <img
+      v-else-if="node.type === 'image'"
+      :src="node.src"
+      :alt="node.alt"
+      loading="lazy"
+      referrerpolicy="no-referrer"
+      class="inline-block max-w-full align-middle"
+    >
+
     <strong
       v-else-if="node.type === 'strong'"
       class="font-semibold text-default"
