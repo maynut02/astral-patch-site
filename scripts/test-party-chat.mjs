@@ -299,6 +299,55 @@ test('Party HTTP and WebSocket integration', { timeout: 60_000 }, async (t) => {
     await spectator.wait(message => message.type === 'PARTICIPANTS' && message.participants.some(participant => participant.id === joined.participantId && participant.order === null), offset)
   })
 
+  await t.test('unselected players retain orders in presence, chat and history', async () => {
+    const waitingRoomId = nextRoomId()
+    assert.equal((await request('/api/party/rooms', { roomId: waitingRoomId })).status, 200)
+    const waiting = await client()
+    const observer = await client()
+    waiting.send({ type: 'JOIN', roomId: waitingRoomId, nickname: '미선택 플레이어', characterId: 'unselected', order: 'P4' })
+    const joined = await waiting.wait(message => message.type === 'JOINED')
+    const self = participants => participants.find(participant => participant.id === joined.participantId)
+    assert.equal(self(joined.participants).characterId, 'unselected')
+    assert.equal(self(joined.participants).order, 'P4')
+    observer.send({ type: 'JOIN', roomId: waitingRoomId, nickname: '미선택 관찰자', characterId: 'spectator' })
+    await observer.wait(message => message.type === 'JOINED')
+    await observer.wait(message => message.type === 'JOIN_NOTICE' && message.notice.nickname === '미선택 관찰자')
+    const id = randomUUID()
+    waiting.send({ type: 'CHAT', text: '캐릭터 선택 전', clientMessageId: id })
+    const chat = await observer.wait(message => message.type === 'CHAT' && message.message.clientMessageId === id)
+    assert.equal(chat.message.participant.characterId, 'unselected')
+    assert.equal(chat.message.participant.order, 'P4')
+
+    for (const [characterId, order] of [['306', 'P4'], ['unselected', 'P4'], ['spectator', null], ['unselected', 'P1']]) {
+      const ownOffset = waiting.messages.length
+      const observerOffset = observer.messages.length
+      waiting.send({ type: 'SET_CHARACTER', characterId })
+      const predicate = message => message.type === 'PARTICIPANTS' && self(message.participants)?.characterId === characterId
+      const presence = await waiting.wait(predicate, ownOffset)
+      assert.equal(self(presence.participants).order, order)
+      assert.deepEqual(await observer.wait(predicate, observerOffset), presence)
+    }
+    for (const order of ['P1', 'P2', 'P3', 'P4']) {
+      const offset = observer.messages.length
+      waiting.send({ type: 'SET_ORDER', order })
+      await observer.wait(message => message.type === 'PARTICIPANTS' && self(message.participants)?.order === order, offset)
+    }
+    const offset = waiting.messages.length
+    waiting.send({ type: 'SET_ORDER', order: 'P5' })
+    assert.equal((await waiting.wait(message => message.type === 'ERROR', offset)).code, 'INVALID_ORDER')
+
+    const lateReader = await client()
+    lateReader.send({ type: 'JOIN', roomId: waitingRoomId, nickname: '미선택 기록 독자', characterId: 'spectator' })
+    const restored = await lateReader.wait(message => message.type === 'JOINED')
+    assert.equal(restored.sessionId, joined.sessionId)
+    const savedChat = restored.messages.find(message => message.kind === 'chat' && message.clientMessageId === id)
+    assert.equal(savedChat.participant.characterId, 'unselected')
+    assert.equal(savedChat.participant.order, 'P4')
+    waiting.close()
+    observer.close()
+    lateReader.close()
+  })
+
   await t.test('bound replayed history by message size', async () => {
     const text = '가'.repeat(1000)
     for (let index = 0; index < 105; index++) {

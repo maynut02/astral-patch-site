@@ -71,6 +71,8 @@ jobs:
         timeout-minutes: 3
         run: |
           set -euo pipefail
+          # The two advisory exceptions have local fixes, verified before audit.
+          pnpm run test:security
           pnpm config set fetch-retries 0
           pnpm config set fetch-timeout 30000
 
@@ -96,14 +98,16 @@ jobs:
 
           try {
             const report = JSON.parse(fs.readFileSync(file, 'utf8'))
-            high = Number(report?.metadata?.vulnerabilities?.high ?? 0)
-            critical = Number(report?.metadata?.vulnerabilities?.critical ?? 0)
-
-            if (high === 0 && critical === 0 && report?.advisories) {
+            // pnpm 11 metadata still counts ignored advisories. The advisory
+            // map contains the actionable results after level/exception filtering.
+            if (report?.advisories && typeof report.advisories === 'object') {
               for (const advisory of Object.values(report.advisories)) {
                 if (advisory?.severity === 'high') high += 1
                 if (advisory?.severity === 'critical') critical += 1
               }
+            } else {
+              high = Number(report?.metadata?.vulnerabilities?.high ?? 0)
+              critical = Number(report?.metadata?.vulnerabilities?.critical ?? 0)
             }
 
             const errorCode = Number(report?.error?.code ?? NaN)

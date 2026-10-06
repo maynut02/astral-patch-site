@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PARTY_ORDERS, PARTY_ROOM_ID_PATTERN, PARTY_SPECTATOR_ID, getPartyCharacterImage, type PartyCharacter, type PartyCharacterId, type PartyOrder, type PartyRoomSummary } from '#shared/types/party'
+import { PARTY_ORDERS, PARTY_ROOM_ID_PATTERN, PARTY_SPECTATOR_ID, PARTY_UNSELECTED_ID, getPartyCharacterImage, type PartyCharacter, type PartyCharacterId, type PartyOrder, type PartyRoomSummary } from '#shared/types/party'
 import { readBrowserStorage, writeBrowserStorage } from '~/utils/browser-storage'
 import { getRequestErrorMessage } from '~/utils/request-error'
 
@@ -336,10 +336,12 @@ function characterImage(id: PartyCharacterId) {
 }
 
 function characterName(id: PartyCharacterId) {
+  if (id === PARTY_UNSELECTED_ID) return '미선택'
   return id === PARTY_SPECTATOR_ID ? '관전' : characterNames.value.get(id) || `캐릭터 #${id}`
 }
 
 function characterIcon(id: PartyCharacterId) {
+  if (id === PARTY_UNSELECTED_ID) return 'i-tabler-user-question'
   return id === PARTY_SPECTATOR_ID ? 'i-tabler-eye' : undefined
 }
 

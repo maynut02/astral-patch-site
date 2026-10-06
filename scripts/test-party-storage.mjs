@@ -79,8 +79,10 @@ try {
   const bob = await client()
   const other = await client()
 
-  alice.send({ type: 'JOIN', roomId, nickname: '앨리스', characterId: '101' })
+  alice.send({ type: 'JOIN', roomId, nickname: '앨리스', characterId: 'unselected', order: 'P3' })
   const firstJoin = await alice.wait(message => message.type === 'JOINED')
+  assert.equal(firstJoin.participants.find(participant => participant.id === firstJoin.participantId).characterId, 'unselected')
+  assert.equal(firstJoin.participants.find(participant => participant.id === firstJoin.participantId).order, 'P3')
   await alice.wait(message => message.type === 'JOIN_NOTICE')
   bob.send({ type: 'JOIN', roomId, nickname: '밥', characterId: '101' })
   await bob.wait(message => message.type === 'JOINED')
@@ -99,7 +101,8 @@ try {
 
   const offset = alice.messages.length
   alice.send({ type: 'SET_CHARACTER', characterId: '306' })
-  await alice.wait(message => message.type === 'PARTICIPANTS' && message.participants.some(participant => participant.nickname === '앨리스' && participant.characterId === '306'), offset)
+  const selected = await alice.wait(message => message.type === 'PARTICIPANTS' && message.participants.some(participant => participant.nickname === '앨리스' && participant.characterId === '306'), offset)
+  assert.equal(selected.participants.find(participant => participant.nickname === '앨리스').order, 'P3')
 
   const reader = await client()
   reader.send({ type: 'JOIN', roomId, nickname: '독자', characterId: 'spectator' })
@@ -114,6 +117,29 @@ try {
   const history = await reader.wait(message => message.type === 'HISTORY' && message.before === before, historyOffset)
   assert.ok(history.messages.length > 0 && history.messages.length <= 50)
   assert.ok(history.messages.some(message => message.kind === 'chat' && message.participant.nickname === '앨리스' && message.participant.characterId === '306'))
+  assert.ok(history.messages.filter(message => message.kind === 'chat' && message.participant.nickname === '앨리스').every(message => message.participant.order === 'P3'))
+
+  let updateOffset = alice.messages.length
+  alice.send({ type: 'SET_CHARACTER', characterId: 'unselected' })
+  await alice.wait(message => message.type === 'PARTICIPANTS' && message.participants.some(participant => participant.id === firstJoin.participantId && participant.characterId === 'unselected' && participant.order === 'P3'), updateOffset)
+  updateOffset = alice.messages.length
+  alice.send({ type: 'SET_ORDER', order: 'P4' })
+  await alice.wait(message => message.type === 'PARTICIPANTS' && message.participants.some(participant => participant.id === firstJoin.participantId && participant.characterId === 'unselected' && participant.order === 'P4'), updateOffset)
+
+  historyOffset = reader.messages.length
+  reader.send({ type: 'HISTORY', before })
+  const waitingHistory = await reader.wait(message => message.type === 'HISTORY' && message.before === before, historyOffset)
+  const waitingMessages = waitingHistory.messages.filter(message => message.kind === 'chat' && message.participant.nickname === '앨리스')
+  assert.ok(waitingMessages.length > 0)
+  assert.ok(waitingMessages.every(message => message.participant.characterId === 'unselected' && message.participant.order === 'P4'))
+
+  const lateReader = await client()
+  lateReader.send({ type: 'JOIN', roomId, nickname: '미선택 기록 독자', characterId: 'spectator' })
+  const waitingJoin = await lateReader.wait(message => message.type === 'JOINED')
+  assert.equal(waitingJoin.sessionId, firstJoin.sessionId)
+  const recentWaiting = waitingJoin.messages.filter(message => message.kind === 'chat' && message.participant.nickname === '앨리스')
+  assert.ok(recentWaiting.length > 0)
+  assert.ok(recentWaiting.every(message => message.participant.characterId === 'unselected' && message.participant.order === 'P4'))
 
   historyOffset = reader.messages.length
   reader.send({ type: 'HISTORY', before: unrelatedId })
