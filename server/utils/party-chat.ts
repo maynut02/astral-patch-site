@@ -6,6 +6,7 @@ import {
   PARTY_ORDERS,
   PARTY_ROOM_ID_PATTERN,
   PARTY_SPECTATOR_ID,
+  PARTY_UNSELECTED_ID,
   type PartyCharacterId,
   type PartyChatMessage,
   type PartyJoinNotice,
@@ -226,7 +227,7 @@ export function normalizePartyChatText(value: unknown): string | null {
 
 export function isPartyCharacterId(value: unknown): value is PartyCharacterId {
   return typeof value === 'string'
-    && (value === PARTY_SPECTATOR_ID || PARTY_CHARACTER_IDS.some(id => id === value))
+    && (value === PARTY_SPECTATOR_ID || value === PARTY_UNSELECTED_ID || PARTY_CHARACTER_IDS.some(id => id === value))
 }
 
 export function isPartyOrder(value: unknown): value is PartyOrder {

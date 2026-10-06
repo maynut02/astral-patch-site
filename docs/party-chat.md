@@ -30,7 +30,9 @@ API를 지원하지 않는 브라우저에서는 PiP 버튼을 숨긴다. PiP �
 
 클라이언트는 `ws(s)://<host>/ws/party`에 연결한다. 브라우저 Origin은 기본 사이트(`https://astral.maynutlab.com`), `ASTRAL_WS_ALLOWED_ORIGINS`에 지정한 Origin, 개발 환경의 localhost만 허용한다.
 
-닉네임은 방 ID 입력란 아래에서 받고, 방 화면은 전달된 닉네임으로 바로 입장한다. 같은 방에서 이미 사용 중인 닉네임은 대소문자와 유니코드 정규화 차이를 무시하고 거부하며 `NICKNAME_TAKEN` 오류를 반환한다. 다른 방에서는 같은 닉네임을 사용할 수 있다. 공유 링크로 방을 직접 방문하면 방 화면 위의 모달에서 닉네임을 입력받으며, 저장된 닉네임이 있다면 미리 채운다. 중복 닉네임 오류도 모달 입력칸에 표시한다. 기본 입장 캐릭터는 항상 `spectator`(관전)이고 순서는 `null`이다. 방 헤더에서 캐릭터와 순서(`P1`~`P4`)를 변경한다. 관전 중에는 순서를 선택할 수 없고, 관전에서 캐릭터로 바꾸면 순서는 `P1`부터 시작한다. 캐릭터 사이에서 변경하면 기존 순서를 유지한다. 순서는 여러 참가자가 중복 선택할 수 있다. 캐릭터 ID는 문자열이며 `shared/types/party.ts`의 `PARTY_CHARACTER_IDS`에 `101`~`129`, `301`~`306` 총 35개를 명시한다. 서버는 입장과 변경 요청에서 이 목록과 `spectator`를 검증한다.
+닉네임은 방 ID 입력란 아래에서 받고, 방 화면은 전달된 닉네임으로 바로 입장한다. 같은 방에서 이미 사용 중인 닉네임은 대소문자와 유니코드 정규화 차이를 무시하고 거부하며 `NICKNAME_TAKEN` 오류를 반환한다. 다른 방에서는 같은 닉네임을 사용할 수 있다. 공유 링크로 방을 직접 방문하면 방 화면 위의 모달에서 닉네임을 입력받으며, 저장된 닉네임이 있다면 미리 채운다. 중복 닉네임 오류도 모달 입력칸에 표시한다. 웹의 기본 입장 캐릭터는 `spectator`(관전)이고 순서는 `null`이다. 방 헤더에서 캐릭터와 순서(`P1`~`P4`)를 변경한다. 관전 중에는 순서를 선택할 수 없고, 관전에서 캐릭터 또는 미선택 상태로 바꾸면 순서는 `P1`부터 시작한다. 플레이어 상태 사이에서 변경하면 기존 순서를 유지한다. 순서는 여러 참가자가 중복 선택할 수 있다. 캐릭터 ID는 문자열이며 `shared/types/party.ts`의 `PARTY_CHARACTER_IDS`에 `101`~`129`, `301`~`306` 총 35개를 명시한다. 서버는 입장과 변경 요청에서 이 목록과 `spectator`, `unselected`를 검증한다.
+
+`unselected`는 게임에 참가했지만 캐릭터를 아직 선택하지 않은 플레이어를 뜻한다. `spectator`와 달리 `P1`~`P4` 순서를 갖고 `SET_ORDER`를 사용할 수 있다. `JOIN.order`를 생략하면 기존 플레이어 규약과 같이 `P1`로 시작하며, 명시적인 `null` 또는 잘못된 순서는 `INVALID_ORDER`로 거절한다. 미선택과 선택된 캐릭터 사이를 전환하면 순서를 유지하고, 관전으로 전환하면 순서를 `null`로 비운다. 웹은 수신한 미선택을 '미선택'과 기본 아이콘으로 표시하고 이미지 URL을 만들지 않는다. `unselected`는 웹의 캐릭터 선택 옵션에 추가하지 않으며 두 특수 상태는 게임 캐릭터 목록 API에 포함하지 않는다. DB의 `character_id`는 문자열이고 기존 제약은 관전 여부와 순서만 확인하므로 추가 마이그레이션은 필요하지 않다.
 
 `GET /api/party/characters`는 `{ id, name, nickname, image }` 배열을 반환한다. DB의 `kind=str`, `namespace=STRCharacter`에서 `unit_key={id}0`은 이름, `{id}1`은 별명이다. 승인된 한국어 번역을 우선하고, 번역이 비어 있으면 영어·중국어 원문 순서로 사용한다. 조회 결과는 5분간 캐시되며 검토 중인 번역은 노출하지 않는다. 이미지는 `https://file.maynutlab.com/character/UT_Item_Hero_{id}.png`를 사용한다.
 
@@ -38,6 +40,8 @@ API를 지원하지 않는 브라우저에서는 PiP 버튼을 숨긴다. PiP �
 
 ```json
 { "type": "JOIN", "roomId": "001234", "nickname": "닉네임", "characterId": "spectator", "order": null }
+{ "type": "JOIN", "roomId": "001234", "nickname": "미선택 플레이어", "characterId": "unselected", "order": "P3" }
+{ "type": "SET_CHARACTER", "characterId": "unselected" }
 { "type": "SET_CHARACTER", "characterId": "306" }
 { "type": "SET_ORDER", "order": "P2" }
 { "type": "CHAT", "text": "안녕하세요", "clientMessageId": "local-id" }

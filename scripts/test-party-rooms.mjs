@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { changePartyCharacter, changePartyOrder, createPartyRoom, getPartyHistory, getPartyRoom, isPartyNicknameTaken, joinPartyRoom, normalizePartyRoomId, PARTY_LIMITS, recordPartyJoin, registerPartyConnection, removePartyConnection, sendPartyChat, setPartyChatStore, touchPartyConnection } from '../server/utils/party-chat.ts'
+import { changePartyCharacter, changePartyOrder, createPartyRoom, getPartyHistory, getPartyRoom, isPartyCharacterId, isPartyNicknameTaken, joinPartyRoom, normalizePartyRoomId, PARTY_LIMITS, recordPartyJoin, registerPartyConnection, removePartyConnection, sendPartyChat, setPartyChatStore, touchPartyConnection } from '../server/utils/party-chat.ts'
+import { PARTY_CHARACTER_IDS, PARTY_ORDERS, PARTY_UNSELECTED_ID, getPartyCharacterImage } from '../shared/types/party.ts'
 
 // node --experimental-strip-types scripts/test-party-rooms.mjs
 const storedRooms = new Map()
@@ -301,6 +302,90 @@ test('spectators have no order and players may share an order', async (t) => {
   const history = await joinPartyRoom(reader, { roomId: '223344', nickname: '독자', characterId: 'spectator' })
   assert.equal(history.ok, true)
   assert.deepEqual(history.messages.map(message => message.participant.order), [null, 'P3'])
+})
+
+test('unselected players have no image and keep all four orders', async (t) => {
+  assert.equal(PARTY_CHARACTER_IDS.length, 35)
+  assert.equal(PARTY_CHARACTER_IDS.includes(PARTY_UNSELECTED_ID), false)
+  assert.equal(isPartyCharacterId(PARTY_UNSELECTED_ID), true)
+  assert.equal(getPartyCharacterImage(PARTY_UNSELECTED_ID), '')
+  assert.equal(getPartyCharacterImage('spectator'), '')
+  assert.equal(getPartyCharacterImage('101'), 'https://file.maynutlab.com/character/UT_Item_Hero_101.png')
+  for (const value of ['Unselected', ' unselected ', 'unknown', '', null, 101]) {
+    assert.equal(isPartyCharacterId(value), false)
+  }
+
+  assert.equal((await createPartyRoom('223345')).ok, true)
+  for (const order of PARTY_ORDERS) {
+    const peer = { id: `unselected-${order}`, send() {}, close() {} }
+    assert.equal(registerPartyConnection(peer, peer.id), true)
+    t.after(() => removePartyConnection(peer))
+    const input = { roomId: '223345', nickname: peer.id, characterId: PARTY_UNSELECTED_ID }
+    for (const invalidOrder of ['P5', '', null, 1]) {
+      assert.equal((await joinPartyRoom(peer, { ...input, order: invalidOrder })).code, 'INVALID_ORDER')
+    }
+    const joined = await joinPartyRoom(peer, { ...input, order })
+    assert.equal(joined.ok, true)
+    assert.equal(joined.participants.find(participant => participant.id === joined.participantId).order, order)
+    assert.equal((await changePartyOrder(peer, 'P5')).code, 'INVALID_ORDER')
+    for (const nextOrder of PARTY_ORDERS) {
+      const changed = await changePartyOrder(peer, nextOrder)
+      assert.equal(changed.ok, true)
+      assert.equal(changed.participants.find(participant => participant.id === joined.participantId).order, nextOrder)
+    }
+    const chat = await sendPartyChat(peer, { text: '캐릭터 선택 전' })
+    assert.equal(chat.ok, true)
+    assert.equal(chat.message.participant.characterId, PARTY_UNSELECTED_ID)
+    assert.equal(chat.message.participant.order, 'P4')
+  }
+})
+
+test('unselected transitions preserve player orders and clear spectator orders in history', async (t) => {
+  assert.equal((await createPartyRoom('223346')).ok, true)
+  const peer = { id: 'unselected-transitions', send() {}, close() {} }
+  const reader = { id: 'unselected-transitions-reader', send() {}, close() {} }
+  for (const connection of [peer, reader]) {
+    assert.equal(registerPartyConnection(connection, connection.id), true)
+    t.after(() => removePartyConnection(connection))
+  }
+  const joined = await joinPartyRoom(peer, { roomId: '223346', nickname: '미선택 플레이어', characterId: PARTY_UNSELECTED_ID })
+  assert.equal(joined.ok, true)
+  assert.equal(joined.participants[0].order, 'P1')
+  assert.equal((await changePartyOrder(peer, 'P3')).ok, true)
+  const first = await sendPartyChat(peer, { text: '선택 전' })
+  assert.equal(first.ok, true)
+
+  for (const characterId of ['306', PARTY_UNSELECTED_ID]) {
+    const changed = await changePartyCharacter(peer, characterId)
+    assert.equal(changed.ok, true)
+    assert.equal(changed.participants[0].characterId, characterId)
+    assert.equal(changed.participants[0].order, 'P3')
+  }
+  assert.equal((await changePartyCharacter(peer, 'spectator')).participants[0].order, null)
+  assert.equal((await changePartyOrder(peer, 'P4')).code, 'SPECTATOR_ORDER_DISABLED')
+  const spectatorHistory = await joinPartyRoom(reader, { roomId: '223346', nickname: '독자', characterId: 'spectator' })
+  assert.equal(spectatorHistory.ok, true)
+  assert.equal(spectatorHistory.messages[0].participant.characterId, 'spectator')
+  assert.equal(spectatorHistory.messages[0].participant.order, null)
+
+  const waiting = await changePartyCharacter(peer, PARTY_UNSELECTED_ID)
+  assert.equal(waiting.ok, true)
+  assert.equal(waiting.participants.find(participant => participant.id === joined.participantId).order, 'P1')
+  assert.equal((await changePartyOrder(peer, 'P4')).ok, true)
+  const second = await sendPartyChat(peer, { text: '다시 미선택' })
+  const earlier = await getPartyHistory(reader, second.message.id)
+  assert.deepEqual(earlier.messages.map(message => [message.id, message.participant.characterId, message.participant.order]), [[first.message.id, PARTY_UNSELECTED_ID, 'P4']])
+
+  await removePartyConnection(peer)
+  const restarted = await import('../server/utils/party-chat.ts?unselected-restart-test')
+  restarted.setPartyChatStore(memoryStore)
+  const restoredPeer = { id: 'unselected-restored', send() {}, close() {} }
+  assert.equal(restarted.registerPartyConnection(restoredPeer, restoredPeer.id), true)
+  t.after(() => restarted.removePartyConnection(restoredPeer))
+  const restored = await restarted.joinPartyRoom(restoredPeer, { roomId: '223346', nickname: '미선택 플레이어', characterId: PARTY_UNSELECTED_ID, order: 'P4' })
+  assert.equal(restored.ok, true)
+  assert.equal(restored.sessionId, joined.sessionId)
+  assert.deepEqual(restored.messages.filter(message => message.kind === 'chat').map(message => [message.participant.characterId, message.participant.order]), [[PARTY_UNSELECTED_ID, 'P4'], [PARTY_UNSELECTED_ID, 'P4']])
 })
 
 test('a valid session and its transcript survive a process restart', async (t) => {

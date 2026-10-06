@@ -7,10 +7,11 @@ export const PARTY_CHARACTER_IDS = [
 ] as const
 
 export const PARTY_SPECTATOR_ID = 'spectator' as const
+export const PARTY_UNSELECTED_ID = 'unselected' as const
 export const PARTY_ORDERS = ['P1', 'P2', 'P3', 'P4'] as const
 
 export type PartyGameCharacterId = typeof PARTY_CHARACTER_IDS[number]
-export type PartyCharacterId = PartyGameCharacterId | typeof PARTY_SPECTATOR_ID
+export type PartyCharacterId = PartyGameCharacterId | typeof PARTY_SPECTATOR_ID | typeof PARTY_UNSELECTED_ID
 export type PartyOrder = typeof PARTY_ORDERS[number]
 
 export interface PartyCharacter {
@@ -21,7 +22,9 @@ export interface PartyCharacter {
 }
 
 export function getPartyCharacterImage(id: PartyCharacterId): string {
-  return id === PARTY_SPECTATOR_ID ? '' : `https://file.maynutlab.com/character/UT_Item_Hero_${id}.png`
+  return id === PARTY_SPECTATOR_ID || id === PARTY_UNSELECTED_ID
+    ? ''
+    : `https://file.maynutlab.com/character/UT_Item_Hero_${id}.png`
 }
 
 export const PARTY_ROOM_ID_PATTERN = /^[0-9]{6}$/
