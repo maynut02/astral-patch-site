@@ -5,6 +5,7 @@ export const MOD_PLATFORMS = ['windows', 'android'] as const
 export type ModPlatform = typeof MOD_PLATFORMS[number]
 
 export interface ModEntry {
+  // Decimal bigint ID; keep it as a string to preserve precision in JSON.
   id: string
   name: string
   summary: string

@@ -3,6 +3,7 @@ import type { ModEntry, ModSaveInput } from '#shared/types/mod'
 import { MOD_PLATFORM_ITEMS } from '~/utils/mod'
 import { getRequestErrorMessage } from '~/utils/request-error'
 
+const platformItems = MOD_PLATFORM_ITEMS.map(({ label, value }) => ({ label, value }))
 const props = defineProps<{ mod?: ModEntry | null }>()
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ saved: [mod: ModEntry] }>()
@@ -46,7 +47,6 @@ async function save(): Promise<void> {
   <UModal
     v-model:open="open"
     :title="isEditing ? '모드 정보 수정' : '모드 등록'"
-    description="GitHub 저장소를 연결하고 모드의 소개와 설치 방법을 추가하세요."
     :dismissible="!submitting"
     :close="!submitting"
     :ui="{ content: 'sm:max-w-2xl' }"
@@ -64,7 +64,6 @@ async function save(): Promise<void> {
           label="GitHub 저장소"
           name="repository"
           required
-          description="공개 저장소의 주소 또는 소유자/저장소 이름을 입력하세요."
         >
           <UInput
             v-model="form.repository"
@@ -108,38 +107,41 @@ async function save(): Promise<void> {
         <UFormField label="지원 플랫폼" name="platforms" required>
           <UCheckboxGroup
             v-model="form.platforms"
-            :items="MOD_PLATFORM_ITEMS"
+            :items="platformItems"
             orientation="horizontal"
+            color="neutral"
             :disabled="submitting"
           />
         </UFormField>
 
         <UFormField label="추가 상세정보" name="description" description="설치 방법, 요구사항, 호환 버전 등을 Markdown으로 작성할 수 있습니다.">
-          <div class="mb-2 flex items-center justify-end">
-            <UButton
+          <div class="relative">
+            <div v-if="preview" class="min-h-36 border border-default bg-muted p-4 pt-12">
+              <ReleaseMarkdown :source="form.description" empty-text="작성한 상세정보가 여기에 표시됩니다." />
+            </div>
+            <UTextarea
+              v-else
+              v-model="form.description"
+              placeholder="## 설치 방법&#10;1. 릴리즈 파일을 다운로드하세요.&#10;2. …"
+              class="w-full"
               color="neutral"
-              variant="ghost"
+              variant="soft"
+              :rows="7"
+              :maxlength="20000"
+              :disabled="submitting"
+            />
+            <UButton
+              type="button"
+              color="neutral"
+              variant="soft"
               size="xs"
+              class="absolute right-2 top-2 z-10"
               :icon="preview ? 'i-tabler-pencil' : 'i-tabler-eye'"
               @click="preview = !preview"
             >
               {{ preview ? '작성' : '미리보기' }}
             </UButton>
           </div>
-          <div v-if="preview" class="min-h-36 border border-default bg-muted p-4">
-            <ReleaseMarkdown :source="form.description" empty-text="작성한 상세정보가 여기에 표시됩니다." />
-          </div>
-          <UTextarea
-            v-else
-            v-model="form.description"
-            placeholder="## 설치 방법&#10;1. 릴리즈 파일을 다운로드하세요.&#10;2. …"
-            class="w-full"
-            color="neutral"
-            variant="soft"
-            :rows="7"
-            :maxlength="20000"
-            :disabled="submitting"
-          />
         </UFormField>
       </form>
     </template>
@@ -159,7 +161,6 @@ async function save(): Promise<void> {
           color="neutral"
           :loading="submitting"
           :disabled="!canSubmit"
-          :icon="isEditing ? 'i-tabler-device-floppy' : 'i-tabler-plus'"
         >
           {{ isEditing ? '저장' : '등록' }}
         </UButton>

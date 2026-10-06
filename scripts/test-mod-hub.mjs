@@ -93,8 +93,10 @@ for (const [key, path, prefix] of [
   }))).default
 }
 
-const modId = '11111111-1111-4111-8111-111111111111'
-const missingId = '22222222-2222-4222-8222-222222222222'
+const modId = '1'
+const missingId = '999'
+const maxModId = '9223372036854775807'
+const unsafeIntegerModId = '9007199254740993'
 const input = { name: '테스트 모드', summary: '요약', description: '# 설명\n\n본문', repository: 'owner/repo', platforms: ['windows'] }
 
 function rowFor(mod, viewerId) {
@@ -133,12 +135,16 @@ function memoryDatabase() {
       return mod ? [{ repository: mod.repository }] : []
     }
     if (sql.startsWith('INSERT INTO mods')) {
-      const [id, name, summary, description, repository, platforms, createdBy] = values
+      assert.match(sql, /^INSERT INTO mods \(name, summary, description, repository, platforms, created_by\) VALUES /)
+      assert.match(sql, / RETURNING id(?:::text(?: AS "?id"?)?)?$/)
+      assert.equal(values.length, 6)
+      const [name, summary, description, repository, platforms, createdBy] = values
+      const id = String(state.nextModId++)
       if ([...state.mods.values()].some(mod => mod.repository.toLowerCase() === repository.toLowerCase())) {
         throw Object.assign(new Error('unique repository'), { code: '23505' })
       }
       state.mods.set(id, { id, name, summary, description, repository, platforms, createdBy, createdAt: new Date(), updatedAt: new Date() })
-      return []
+      return [{ id }]
     }
     if (sql.startsWith('UPDATE mods')) {
       assert.match(sql, /WHERE id = \? AND created_by = \? RETURNING id$/)
@@ -166,6 +172,7 @@ beforeEach(() => {
     mods: new Map([[modId, {
       ...input, id: modId, createdBy: 'owner', createdAt: new Date('2026-01-01'), updatedAt: new Date('2026-01-01')
     }]]),
+    nextModId: 2n,
     sql: [], snapshotCalls: [], releaseCalls: [], rateCalls: [], session: {}, limited: false
   }
   state.database = memoryDatabase()
@@ -191,7 +198,9 @@ function event(method, path = '/api/mods', body, headers = {}) {
   if (payload) request.push(payload)
   request.push(null)
   const result = createEvent(request, new ServerResponse(request))
-  result.context.params = { id: modId }
+  const pathname = new URL(path, 'http://localhost').pathname
+  const id = pathname.match(/^\/api\/mods\/([^/]+)(?:\/releases)?$/)?.[1]
+  result.context.params = id === undefined ? {} : { id: decodeURIComponent(id) }
   return result
 }
 
@@ -229,8 +238,26 @@ test('validation enforces text limits, Unicode length, supported platforms and s
   for (const value of [null, [], 'text']) assert.throws(() => hub.parseModSaveInput(value), status(400))
 })
 
-test('UUID validation prevents invalid IDs from reaching SQL or GitHub', async () => {
-  for (const id of ['bad', `${modId}' OR true`, '', null]) {
+test('mod IDs accept canonical positive bigint strings without losing precision', () => {
+  for (const id of [
+    modId, '9', '10', '100', '9007199254740991', '9007199254740992', unsafeIntegerModId,
+    '999999999999999999', '1000000000000000000', '9223372036854775806', maxModId
+  ]) {
+    assert.equal(hub.parseModId(id), id)
+    assert.equal(typeof hub.parseModId(id), 'string')
+  }
+  assert.equal(state.sql.length, 0)
+})
+
+test('invalid mod IDs are rejected before SQL or GitHub', async () => {
+  for (const id of [
+    '11111111-1111-4111-8111-111111111111', 'bad', `${modId}' OR true`, '',
+    '0', '00', '01', '001', '-1', '+1', '1.0', '0.1', '1e2', '1E2', '0x10',
+    ' 1', '1 ', '\t1', '1\n', '1\r', '\n1', '1\u00A0', '1\0', '１', '١',
+    '9223372036854775808', '9999999999999999999', '10000000000000000000',
+    null, undefined, 0, 1, Number.MAX_SAFE_INTEGER, 1n, BigInt(maxModId), true, ['1'], {}, new String('1')
+  ]) {
+    assert.throws(() => hub.parseModId(id), status(400), `Invalid ID: ${String(id)}`)
     await assert.rejects(hub.getModDetail(id), status(400))
     await assert.rejects(hub.updateMod('owner', id, input), status(400))
     await assert.rejects(hub.getModReleases(id, '1'), status(400))
@@ -269,10 +296,39 @@ test('create checks public repo and stores canonical github.repository with sess
   const mod = await hub.createMod('owner', { ...input, repository: 'request/project', created_by: 'admin', canEdit: true })
   assert.deepEqual(state.snapshotCalls, ['request/project'])
   assert.equal(mod.repository, 'canonical/project')
+  assert.equal(mod.id, '2')
   assert.equal(state.mods.get(mod.id).createdBy, 'owner')
   assert.equal(mod.canEdit, true)
   assert.equal(state.rateCalls[0].bucketKey, 'mod-mutation:owner')
   assert.deepEqual(state.rateCalls[0].windows.map(({ limit, windowMs }) => [limit, windowMs]), [[10, 60_000], [60, 3_600_000]])
+})
+
+test('consecutive registrations receive DB-generated string IDs starting at 1', async () => {
+  state.mods.clear()
+  state.nextModId = 1n
+  const first = await hub.createMod('owner', { ...input, id: maxModId, repository: 'owner/first' })
+  const second = await hub.createMod('other', { ...input, id: '1', repository: 'other/second' })
+  const third = await hub.createMod('owner', { ...input, repository: 'owner/third' })
+  assert.deepEqual([first.id, second.id, third.id], ['1', '2', '3'])
+  assert.deepEqual([...state.mods.keys()], ['1', '2', '3'])
+  assert.equal(state.mods.get(second.id).createdBy, 'other')
+  assert.equal(state.sql.filter(({ sql }) => sql.startsWith('INSERT INTO mods')).length, 3)
+})
+
+test('DB-generated IDs preserve precision above JS safe integers and at bigint max', async () => {
+  state.nextModId = BigInt(unsafeIntegerModId)
+  const first = await hub.createMod('owner', { ...input, repository: 'owner/large-first' })
+  const second = await hub.createMod('owner', { ...input, repository: 'owner/large-second' })
+  assert.equal(first.id, unsafeIntegerModId)
+  assert.equal(second.id, '9007199254740994')
+  state.nextModId = BigInt(maxModId)
+  const last = await hub.createMod('owner', { ...input, repository: 'owner/max-id' })
+  assert.equal(last.id, maxModId)
+  for (const mod of [first, second, last]) {
+    assert.equal(typeof mod.id, 'string')
+    assert.equal(JSON.parse(JSON.stringify(mod)).id, mod.id)
+    assert.equal(state.mods.get(mod.id).id, mod.id)
+  }
 })
 
 test('private/unavailable GitHub repo prevents insertion', async () => {
@@ -375,14 +431,55 @@ test('public GET handlers disable caching and personalize canEdit from current s
   assert.deepEqual(state.releaseCalls.at(-1), { repository: 'owner/repo', page: 2 })
 })
 
+test('numeric detail/update/release routes preserve exact IDs and owner-only access', async () => {
+  const base = state.mods.get(modId)
+  for (const id of [modId, unsafeIntegerModId, maxModId]) {
+    const repository = `owner/repo-${id}`
+    state.mods.set(id, { ...base, id, repository })
+    const path = `/api/mods/${id}`
+    signIn('owner')
+    const detail = await routes.detail(event('GET', path))
+    assert.equal(detail.mod.id, id)
+    assert.equal(detail.mod.canEdit, true)
+    const updated = await routes.update(event('PATCH', path, { name: `모드 ${id}` }))
+    assert.equal(updated.id, id)
+    assert.equal(updated.name, `모드 ${id}`)
+    assert.equal(JSON.parse(JSON.stringify(updated)).id, id)
+    assert.equal((await routes.releases(event('GET', `${path}/releases?page=2`))).page, 2)
+    assert.deepEqual(state.releaseCalls.at(-1), { repository, page: 2 })
+    const networkCalls = state.snapshotCalls.length
+    for (const viewerId of ['other', 'admin']) {
+      signIn(viewerId)
+      await assert.rejects(routes.update(event('PATCH', path, { repository: 'owner/new' })), status(403))
+    }
+    assert.equal(state.snapshotCalls.length, networkCalls)
+    assert.equal(state.mods.get(id).repository, repository)
+  }
+})
+
+test('numeric routes reject malformed and out-of-range IDs before mod queries', async () => {
+  signIn('owner')
+  for (const id of ['11111111-1111-4111-8111-111111111111', '0', '01', '-1', '1.5', '1e2', '1 ', '9223372036854775808']) {
+    const path = `/api/mods/${encodeURIComponent(id)}`
+    await assert.rejects(routes.detail(event('GET', path)), status(400))
+    await assert.rejects(routes.update(event('PATCH', path, { name: '수정' })), status(400))
+    await assert.rejects(routes.releases(event('GET', `${path}/releases`)), status(400))
+  }
+  assert.equal(state.sql.some(({ sql }) => /(?:FROM|UPDATE) mods/.test(sql)), false)
+  assert.equal(state.snapshotCalls.length, 0)
+  assert.equal(state.releaseCalls.length, 0)
+  assert.equal(state.rateCalls.length, 0)
+})
+
 test('mutation handlers require a current DB account, rejecting anonymous/deleted sessions', async () => {
   for (const key of ['create', 'update']) {
     const method = key === 'create' ? 'POST' : 'PATCH'
+    const path = key === 'create' ? '/api/mods' : `/api/mods/${modId}`
     state.session = {}
-    await assert.rejects(routes[key](event(method, '/api/mods', input)), error => status(401)(error) && /로그인/.test(error.message))
+    await assert.rejects(routes[key](event(method, path, input)), error => status(401)(error) && /로그인/.test(error.message))
     signIn('owner')
     state.accounts.delete('owner')
-    await assert.rejects(routes[key](event(method, '/api/mods', input)), status(401))
+    await assert.rejects(routes[key](event(method, path, input)), status(401))
     state.accounts.set('owner', { googleSub: 'owner', email: 'owner@example.test', handle: 'owner', role: 'user' })
   }
   assert.equal(state.snapshotCalls.length, 0)
@@ -393,10 +490,11 @@ test('mutation handlers enforce same-origin JSON request security for owners and
     signIn(userId)
     for (const key of ['create', 'update']) {
       const method = key === 'create' ? 'POST' : 'PATCH'
-      await assert.rejects(routes[key](event(method, '/api/mods', input, { origin: 'https://evil.test' })), error => status(403)(error) && /같은 사이트/.test(error.message))
-      await assert.rejects(routes[key](event(method, '/api/mods', input, { 'sec-fetch-site': 'cross-site' })), status(403))
-      await assert.rejects(routes[key](event(method, '/api/mods', input, { 'content-type': 'text/plain' })), status(415))
-      await assert.rejects(routes[key](event(method, '/api/mods', [], {})), error => status(400)(error) && /JSON 객체/.test(error.message))
+      const path = key === 'create' ? '/api/mods' : `/api/mods/${modId}`
+      await assert.rejects(routes[key](event(method, path, input, { origin: 'https://evil.test' })), error => status(403)(error) && /같은 사이트/.test(error.message))
+      await assert.rejects(routes[key](event(method, path, input, { 'sec-fetch-site': 'cross-site' })), status(403))
+      await assert.rejects(routes[key](event(method, path, input, { 'content-type': 'text/plain' })), status(415))
+      await assert.rejects(routes[key](event(method, path, [], {})), error => status(400)(error) && /JSON 객체/.test(error.message))
     }
   }
   assert.equal(state.snapshotCalls.length, 0)
@@ -404,9 +502,9 @@ test('mutation handlers enforce same-origin JSON request security for owners and
 
 test('mutation routes ignore forged owner/admin flags and allow valid owner saves', async () => {
   signIn('admin')
-  await assert.rejects(routes.update(event('PATCH', '/api/mods', { ...input, created_by: 'admin', canEdit: true })), status(403))
+  await assert.rejects(routes.update(event('PATCH', `/api/mods/${modId}`, { ...input, created_by: 'admin', canEdit: true })), status(403))
   signIn('owner')
-  const updated = await routes.update(event('PATCH', '/api/mods', { name: 'API 수정' }))
+  const updated = await routes.update(event('PATCH', `/api/mods/${modId}`, { name: 'API 수정' }))
   assert.equal(updated.name, 'API 수정')
   const created = await routes.create(event('POST', '/api/mods', { ...input, repository: 'owner/new', created_by: 'admin' }))
   assert.equal(state.mods.get(created.id).createdBy, 'owner')
