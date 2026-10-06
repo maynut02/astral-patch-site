@@ -39,9 +39,9 @@ watch(() => mod.value.id, () => {
             <UIcon name="i-tabler-package" class="size-6 text-muted" />
           </div>
           <div class="flex min-w-0 flex-col gap-1.5">
-            <h2 class="wrap-break-word text-xl font-semibold">
+            <h1 class="wrap-break-word text-xl font-semibold">
               {{ mod.name }}
-            </h2>
+            </h1>
             <p class="wrap-break-word text-sm text-muted">
               {{ mod.summary || github?.description || '등록된 소개가 없습니다.' }}
             </p>

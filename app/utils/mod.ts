@@ -9,6 +9,10 @@ export function getModPlatformLabel(platform: ModPlatform): string {
   return MOD_PLATFORM_ITEMS.find(item => item.value === platform)?.label ?? platform
 }
 
+export function getModPlatformIcon(platform: ModPlatform): string {
+  return MOD_PLATFORM_ITEMS.find(item => item.value === platform)?.icon ?? 'i-tabler-device-desktop'
+}
+
 export function formatModDate(value: string | null): string {
   if (!value) return '—'
   const date = new Date(value)

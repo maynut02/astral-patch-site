@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import type { ModDetailResponse, ModEntry, ModListResponse, ModPlatform, ModReleasePageResponse, ModSaveInput } from '#shared/types/mod'
 import { MOD_PLATFORMS } from '#shared/types/mod'
 import { createError } from 'h3'
@@ -6,9 +5,10 @@ import type { DatabaseClient } from './database'
 import { getDatabase } from './database'
 import { getModGitHubReleases, getModGitHubSnapshot, normalizeModRepository } from './mod-github'
 import { isRateLimited } from './rate-limiter'
-import { getTextLength, parseUuid } from './validation'
+import { getTextLength } from './validation'
 
 export const MOD_LIST_LIMIT = 200
+const MAX_MOD_ID = '9223372036854775807'
 
 const MOD_MUTATION_RATE_LIMITS = [
   { name: 'minute', limit: 10, windowMs: 60_000 },
@@ -43,7 +43,11 @@ type ModRow = Omit<ModEntry, 'createdAt' | 'updatedAt'> & {
 }
 
 export function parseModId(value: unknown): string {
-  return parseUuid(value, '올바른 모드 ID가 아닙니다.')
+  if (typeof value !== 'string' || value !== value.trim() || !/^[1-9][0-9]{0,18}$/.test(value)
+    || (value.length === MAX_MOD_ID.length && value > MAX_MOD_ID)) {
+    throw createError({ statusCode: 400, statusMessage: '올바른 모드 ID가 아닙니다.' })
+  }
+  return value
 }
 
 function parseText(value: unknown, label: string, maxLength: number, required = false): string {
@@ -197,14 +201,19 @@ export async function createMod(userId: string, inputValue: unknown): Promise<Mo
   await assertMutationRateLimit(database, userId)
   const github = await getModGitHubSnapshot(input.repository)
   const repository = normalizeModRepository(github.repository)
-  const modId = randomUUID()
+  let modId: string
 
   try {
-    await database`
-      INSERT INTO mods (id, name, summary, description, repository, platforms, created_by)
-      VALUES (${modId}, ${input.name}, ${input.summary}, ${input.description}, ${repository},
+    const [created] = await database<{ id: string }[]>`
+      INSERT INTO mods (name, summary, description, repository, platforms, created_by)
+      VALUES (${input.name}, ${input.summary}, ${input.description}, ${repository},
         ${database.array(input.platforms)}::text[], ${userId})
+      RETURNING id
     `
+    if (!created) {
+      throw createError({ statusCode: 500, statusMessage: '모드를 등록하지 못했습니다.' })
+    }
+    modId = created.id
   } catch (error) {
     rethrowSaveError(error)
   }
