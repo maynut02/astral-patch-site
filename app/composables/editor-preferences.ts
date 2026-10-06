@@ -12,7 +12,7 @@ const DIFF_MODE_STORAGE_KEY = 'astral-editor-diff-mode'
 // 에디터 표시 언어와 비교 방식을 브라우저에 저장하고 복원한다.
 export function useEditorPreferences() {
   const displayLanguages = ref<EditorLanguage[]>(EDITOR_SOURCE_LANGUAGE_OPTIONS.map(option => option.key))
-  const diffMode = ref<EditorDiffMode>('unified')
+  const diffMode = ref<EditorDiffMode>('split')
   const ready = ref(false)
 
   onMounted(() => {

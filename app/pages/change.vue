@@ -12,7 +12,11 @@ import type {
 } from '#shared/types/editor'
 import type { EditorOverviewResponse } from '#shared/types/editor-overview'
 import type { AstralWebSocketMessage } from '#shared/types/websocket'
-import { EDITOR_SOURCE_LANGUAGE_OPTIONS } from '~/utils/editor-options'
+import {
+  EDITOR_DIFF_MODE_OPTIONS,
+  EDITOR_SOURCE_LANGUAGE_OPTIONS,
+  isEditorDiffMode
+} from '~/utils/editor-options'
 import {
   formatEditorCount,
   formatEditorDate,
@@ -24,6 +28,7 @@ import {
 } from '~/utils/editor-helpers'
 import {
   getEditorDiffParts,
+  getEditorSideDiffParts,
   type EditorDiffPart
 } from '~/utils/editor-diff'
 
@@ -36,6 +41,8 @@ interface LogDiffValue {
   label: string
   lang: string
   parts: EditorDiffPart[]
+  beforeParts: EditorDiffPart[]
+  afterParts: EditorDiffPart[]
 }
 
 interface TranslationStatusMeta {
@@ -100,6 +107,25 @@ const tabItems = [
   { label: '번역 수정', value: 'translations' },
   { label: '원문 변경', value: 'source' }
 ]
+
+const { diffMode } = useEditorPreferences()
+const diffModeIcons: Record<string, string> = {
+  split: 'i-tabler-layout-columns',
+  unified: 'i-tabler-arrows-diff'
+}
+const diffModeItems = [...EDITOR_DIFF_MODE_OPTIONS]
+  .sort((left, right) => Number(right.key === 'split') - Number(left.key === 'split'))
+  .map(option => ({
+    label: option.label,
+    value: option.key,
+    icon: diffModeIcons[option.key]
+  }))
+
+function updateDiffMode(value: string | number | undefined) {
+  if (isEditorDiffMode(value)) {
+    diffMode.value = value
+  }
+}
 
 const statusItems = [
   { label: '모든 상태', value: ALL_STATUS_VALUE },
@@ -765,16 +791,27 @@ function makeUnifiedDiffValue(
   before: string | null,
   after: string | null
 ): LogDiffValue {
+  const parts = getEditorDiffParts(before ?? '', after ?? '')
+
   return {
     key,
     label,
     lang,
-    parts: getEditorDiffParts(before ?? '', after ?? '')
+    parts,
+    beforeParts: getEditorSideDiffParts(parts, 'before'),
+    afterParts: getEditorSideDiffParts(parts, 'after')
   }
 }
 
 function getTranslationDiffParts(entry: EditorTranslationLogEntry): EditorDiffPart[] {
   return getEditorDiffParts(entry.previousText ?? '', entry.proposedText)
+}
+
+function getTranslationSideDiffParts(
+  entry: EditorTranslationLogEntry,
+  side: 'before' | 'after'
+): EditorDiffPart[] {
+  return getEditorSideDiffParts(getTranslationDiffParts(entry), side)
 }
 
 function getSourceDiffValues(entry: EditorSourceChangeEntry): LogDiffValue[] {
@@ -1034,6 +1071,26 @@ async function retryActiveLog() {
             @update:model-value="selectSourceRevision"
           />
         </div>
+
+        <UTabs
+          :model-value="diffMode"
+          :items="diffModeItems"
+          :content="false"
+          size="sm"
+          color="neutral"
+          class="w-fit md:ml-auto"
+          :ui="{ trigger: 'h-7 leading-4 px-2', list: 'h-9 bg-elevated/50 p-1', label: 'sr-only' }"
+          @update:model-value="updateDiffMode"
+        >
+          <template #leading="{ item }">
+            <UTooltip :text="item.label">
+              <UIcon
+                :name="item.icon ?? ''"
+                class="size-4"
+              />
+            </UTooltip>
+          </template>
+        </UTabs>
       </div>
     </header>
 
@@ -1108,7 +1165,10 @@ async function retryActiveLog() {
             class="flex flex-col border-l-2 border-r border-r-default max-md:-ml-0.5"
             :class="getTranslationStatusMeta(entry.status).borderClass"
           >
-            <p class="min-h-5 whitespace-pre-wrap wrap-break-word p-3 md:px-5 md:py-4 text-sm leading-6 bg-muted border-y border-default">
+            <p
+              v-if="diffMode === 'unified'"
+              class="min-h-5 whitespace-pre-wrap wrap-break-word p-3 md:px-5 md:py-4 text-sm leading-6 bg-muted border-y border-default"
+            >
               <template
                 v-for="(part, partIndex) in getTranslationDiffParts(entry)"
                 :key="`${part.type}-${partIndex}`"
@@ -1122,6 +1182,34 @@ async function retryActiveLog() {
                 >{{ part.text }}</span>
               </template>
             </p>
+
+            <div
+              v-else
+              class="grid gap-3 p-3 md:grid-cols-2 md:gap-5 md:px-5 md:py-4 bg-muted border-y border-default"
+            >
+              <div class="flex min-w-0 flex-col gap-0.5">
+                <span class="block text-[10px] text-error">수정 전</span>
+                <p class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6">
+                  <template
+                    v-for="(part, partIndex) in getTranslationSideDiffParts(entry, 'before')"
+                    :key="`before-${part.type}-${partIndex}`"
+                  >
+                    <span :class="part.type === 'removed' ? 'bg-error/10 text-error' : 'text-toned'">{{ part.text }}</span>
+                  </template>
+                </p>
+              </div>
+              <div class="flex min-w-0 flex-col gap-0.5">
+                <span class="block text-[10px] text-success">수정 후</span>
+                <p class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6">
+                  <template
+                    v-for="(part, partIndex) in getTranslationSideDiffParts(entry, 'after')"
+                    :key="`after-${part.type}-${partIndex}`"
+                  >
+                    <span :class="part.type === 'added' ? 'bg-success/10 text-success' : 'text-toned'">{{ part.text }}</span>
+                  </template>
+                </p>
+              </div>
+            </div>
 
             <div class="flex flex-col gap-2 p-3 md:px-5 md:py-4 border-b border-default text-xs">
               <div
@@ -1321,6 +1409,7 @@ async function retryActiveLog() {
               >
                 <span class="block text-[10px] text-dimmed">{{ value.label }}</span>
                 <p
+                  v-if="diffMode === 'unified'"
                   :lang="value.lang"
                   class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6"
                 >
@@ -1337,6 +1426,39 @@ async function retryActiveLog() {
                     >{{ part.text }}</span>
                   </template>
                 </p>
+                <div
+                  v-else
+                  class="grid gap-2 md:grid-cols-2 md:gap-5"
+                >
+                  <div class="flex min-w-0 flex-col gap-0.5">
+                    <span class="block text-[10px] text-error">수정 전</span>
+                    <p
+                      :lang="value.lang"
+                      class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6"
+                    >
+                      <template
+                        v-for="(part, partIndex) in value.beforeParts"
+                        :key="`before-${part.type}-${partIndex}`"
+                      >
+                        <span :class="part.type === 'removed' ? 'bg-error/10 text-error' : 'text-toned'">{{ part.text }}</span>
+                      </template>
+                    </p>
+                  </div>
+                  <div class="flex min-w-0 flex-col gap-0.5">
+                    <span class="block text-[10px] text-success">수정 후</span>
+                    <p
+                      :lang="value.lang"
+                      class="min-h-5 whitespace-pre-wrap wrap-break-word text-sm leading-6"
+                    >
+                      <template
+                        v-for="(part, partIndex) in value.afterParts"
+                        :key="`after-${part.type}-${partIndex}`"
+                      >
+                        <span :class="part.type === 'added' ? 'bg-success/10 text-success' : 'text-toned'">{{ part.text }}</span>
+                      </template>
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
 

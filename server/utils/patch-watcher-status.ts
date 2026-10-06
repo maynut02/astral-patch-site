@@ -13,7 +13,7 @@ import type {
 } from '#shared/types/status'
 import { withDatabaseRetry } from './database'
 
-const ROUTES: PatchWatcherRoute[] = ['INT_STEAM', 'CN_STEAM', 'INT_ANDROID', 'CN_ANDROID', 'INT_IOS']
+const ROUTES: PatchWatcherRoute[] = ['INT_STEAM', 'CN_STEAM', 'INT_ANDROID', 'CN_ANDROID']
 const WATCH_INTERVAL_MINUTES = 5
 const DELAYED_AFTER_MINUTES = 10
 const OUTAGE_AFTER_MINUTES = 20
@@ -259,13 +259,13 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
         ORDER BY history.started_at DESC
         LIMIT 1
       ) AS latest ON true
+      WHERE state.route <> 'INT_IOS'
       ORDER BY CASE state.route
         WHEN 'INT_STEAM' THEN 1
         WHEN 'CN_STEAM' THEN 2
         WHEN 'INT_ANDROID' THEN 3
         WHEN 'CN_ANDROID' THEN 4
-        WHEN 'INT_IOS' THEN 5
-        ELSE 6
+        ELSE 5
       END
     `),
     withDatabaseRetry<HourlyStatRow[]>(database => database<HourlyStatRow[]>`
@@ -277,7 +277,7 @@ export async function getPatchWatcherStatus(): Promise<PatchWatcherStatusRespons
         ) AS hour
       ),
       routes(route) AS (
-        VALUES ('INT_STEAM'), ('CN_STEAM'), ('INT_ANDROID'), ('CN_ANDROID'), ('INT_IOS')
+        VALUES ('INT_STEAM'), ('CN_STEAM'), ('INT_ANDROID'), ('CN_ANDROID')
       ),
       route_stats AS (
         SELECT
@@ -423,7 +423,9 @@ export async function getPatchWatcherHistory(
         '[]'::json
       ) AS routes
     FROM patch_watch_runs AS run
-    LEFT JOIN patch_watch_run_routes AS route ON route.run_id = run.id
+    LEFT JOIN patch_watch_run_routes AS route
+      ON route.run_id = run.id
+      AND route.route <> 'INT_IOS'
     WHERE ${!failuresOnly} OR run.status IN ('partial_failure', 'failed')
     GROUP BY run.id
     ORDER BY run.started_at DESC
