@@ -7,3 +7,24 @@ allowBuilds:
 overrides:
   'fontless>esbuild': 0.28.2
   '@tiptap/core': 3.31.3
+  'brace-expansion@>=2.0.0 <2.1.6': 2.1.6
+  'prosemirror-view@<1.42.3': 1.42.3
+  'source-map-js@>=1.0.0 <1.2.2': 1.2.2
+  'undici@>=8.0.0 <8.10.2': 8.10.2
+  # DevTools 3 still imports the removed simple-git 3 default export.
+  # Keep its import patch together with this security upgrade to simple-git 4.
+  '@nuxt/devtools>simple-git': 4.0.2
+
+patchedDependencies:
+  '@nuxt/devtools@3.4.2': patches/@nuxt__devtools@3.4.2.patch
+  'node-forge@1.4.0': patches/node-forge@1.4.0.patch
+  'braces@3.0.3': patches/braces@3.0.3.patch
+
+# No fixed npm releases exist for these advisories as of 2026-10-06.
+# Local patches fix the affected code; CI requires test:security before audit.
+# Remove each exception and patch when a fixed release is available.
+# See docs/security-patches.md for sources and verification.
+audit:
+  ignore:
+    - GHSA-86w9-cpqp-85rv
+    - GHSA-vfj7-8cjw-p6xm
