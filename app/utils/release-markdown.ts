@@ -53,6 +53,20 @@ function resolveMarkdownHref(value: string, baseUrl?: string, image = false): st
   return href
 }
 
+function gitHubReleaseCommitBaseUrl(baseUrl?: string): string | null {
+  if (!baseUrl) return null
+
+  try {
+    const url = new URL(baseUrl)
+    const repository = url.pathname.match(/^\/([^/]+\/[^/]+)\/releases(?:\/|$)/)?.[1]
+    return url.origin === 'https://github.com' && !url.username && !url.password && repository
+      ? `${url.origin}/${repository}/commit/`
+      : null
+  } catch {
+    return null
+  }
+}
+
 function findClosingMarker(text: string, marker: string, start: number): number {
   let index = start
   while (index < text.length) {
@@ -65,6 +79,32 @@ function findClosingMarker(text: string, marker: string, start: number): number 
       return found
     }
     index = found + marker.length
+  }
+  return -1
+}
+
+function findClosingDelimiter(text: string, opening: '[' | '(', start: number): number {
+  const closing = opening === '[' ? ']' : ')'
+  let depth = 1
+
+  for (let index = start; index < text.length; index++) {
+    if (text[index] === '\\') {
+      index++
+      continue
+    }
+
+    // Brackets in code labels are literal, and must not close the surrounding link.
+    if (opening === '[' && text[index] === '`') {
+      const marker = text.slice(index).match(/^`+/)?.[0] ?? '`'
+      const end = findClosingMarker(text, marker, index + marker.length)
+      if (end !== -1) {
+        index = end + marker.length - 1
+        continue
+      }
+    }
+
+    if (text[index] === opening) depth++
+    else if (text[index] === closing && --depth === 0) return index
   }
   return -1
 }
@@ -82,8 +122,9 @@ function pushText(nodes: ReleaseMarkdownInlineNode[], text: string): void {
   }
 }
 
-export function parseReleaseMarkdownInline(text: string, baseUrl?: string, imageBaseUrl = baseUrl): ReleaseMarkdownInlineNode[] {
+export function parseReleaseMarkdownInline(text: string, baseUrl?: string, imageBaseUrl = baseUrl, insideLink = false): ReleaseMarkdownInlineNode[] {
   const nodes: ReleaseMarkdownInlineNode[] = []
+  const commitBaseUrl = insideLink ? null : gitHubReleaseCommitBaseUrl(baseUrl)
   let index = 0
   let plainStart = 0
 
@@ -93,12 +134,29 @@ export function parseReleaseMarkdownInline(text: string, baseUrl?: string, image
   }
 
   while (index < text.length) {
+    if (text[index] === '\\' && index + 1 < text.length) {
+      index += 2
+      continue
+    }
+
     if (text[index] === '`') {
       const end = findClosingMarker(text, '`', index + 1)
       if (end !== -1) {
         flushPlain(index)
         nodes.push({ type: 'code', text: text.slice(index + 1, end) })
         index = end + 1
+        plainStart = index
+        continue
+      }
+    }
+
+    // Some GitHub release bodies contain only a parenthesized hash, without link syntax.
+    if (commitBaseUrl && text[index] === '(' && text[index - 1] !== '\\') {
+      const hash = text.slice(index).match(/^\(([0-9a-f]{7,40})\)/i)?.[1]
+      if (hash) {
+        flushPlain(index + 1)
+        nodes.push({ type: 'link', href: `${commitBaseUrl}${hash}`, children: [{ type: 'text', text: hash }] })
+        index += hash.length + 1
         plainStart = index
         continue
       }
@@ -111,7 +169,7 @@ export function parseReleaseMarkdownInline(text: string, baseUrl?: string, image
         flushPlain(index)
         nodes.push({
           type: 'strong',
-          children: parseReleaseMarkdownInline(text.slice(index + 2, end), baseUrl, imageBaseUrl)
+          children: parseReleaseMarkdownInline(text.slice(index + 2, end), baseUrl, imageBaseUrl, insideLink)
         })
         index = end + 2
         plainStart = index
@@ -125,7 +183,7 @@ export function parseReleaseMarkdownInline(text: string, baseUrl?: string, image
         flushPlain(index)
         nodes.push({
           type: 'delete',
-          children: parseReleaseMarkdownInline(text.slice(index + 2, end), baseUrl, imageBaseUrl)
+          children: parseReleaseMarkdownInline(text.slice(index + 2, end), baseUrl, imageBaseUrl, insideLink)
         })
         index = end + 2
         plainStart = index
@@ -140,7 +198,7 @@ export function parseReleaseMarkdownInline(text: string, baseUrl?: string, image
         flushPlain(index)
         nodes.push({
           type: 'emphasis',
-          children: parseReleaseMarkdownInline(text.slice(index + 1, end), baseUrl, imageBaseUrl)
+          children: parseReleaseMarkdownInline(text.slice(index + 1, end), baseUrl, imageBaseUrl, insideLink)
         })
         index = end + 1
         plainStart = index
@@ -149,9 +207,9 @@ export function parseReleaseMarkdownInline(text: string, baseUrl?: string, image
     }
 
     if (text[index] === '!' && text[index + 1] === '[') {
-      const labelEnd = findClosingMarker(text, ']', index + 2)
+      const labelEnd = findClosingDelimiter(text, '[', index + 2)
       if (labelEnd !== -1 && text[labelEnd + 1] === '(') {
-        const hrefEnd = findClosingMarker(text, ')', labelEnd + 2)
+        const hrefEnd = findClosingDelimiter(text, '(', labelEnd + 2)
         if (hrefEnd !== -1) {
           const src = resolveMarkdownHref(text.slice(labelEnd + 2, hrefEnd).trim().split(/\s+/)[0] ?? '', imageBaseUrl, true)
           flushPlain(index)
@@ -167,10 +225,10 @@ export function parseReleaseMarkdownInline(text: string, baseUrl?: string, image
       }
     }
 
-    if (text[index] === '[') {
-      const labelEnd = findClosingMarker(text, ']', index + 1)
+    if (!insideLink && text[index] === '[') {
+      const labelEnd = findClosingDelimiter(text, '[', index + 1)
       if (labelEnd !== -1 && text[labelEnd + 1] === '(') {
-        const hrefEnd = findClosingMarker(text, ')', labelEnd + 2)
+        const hrefEnd = findClosingDelimiter(text, '(', labelEnd + 2)
         if (hrefEnd !== -1) {
           const href = resolveMarkdownHref(text.slice(labelEnd + 2, hrefEnd).trim().split(/\s+/)[0] ?? '', baseUrl)
           if (href) {
@@ -178,7 +236,7 @@ export function parseReleaseMarkdownInline(text: string, baseUrl?: string, image
             nodes.push({
               type: 'link',
               href,
-              children: parseReleaseMarkdownInline(text.slice(index + 1, labelEnd), baseUrl, imageBaseUrl)
+              children: parseReleaseMarkdownInline(text.slice(index + 1, labelEnd), baseUrl, imageBaseUrl, true)
             })
             index = hrefEnd + 1
             plainStart = index
@@ -188,7 +246,7 @@ export function parseReleaseMarkdownInline(text: string, baseUrl?: string, image
       }
     }
 
-    if (text[index] === '<') {
+    if (!insideLink && text[index] === '<') {
       const end = text.indexOf('>', index + 1)
       if (end !== -1) {
         const href = text.slice(index + 1, end).trim()
@@ -206,7 +264,7 @@ export function parseReleaseMarkdownInline(text: string, baseUrl?: string, image
       }
     }
 
-    if (text.startsWith('http://', index) || text.startsWith('https://', index)) {
+    if (!insideLink && (text.startsWith('http://', index) || text.startsWith('https://', index))) {
       const match = text.slice(index).match(/^https?:\/\/[^\s<]+/)
       const rawHref = match?.[0] ?? ''
       const href = rawHref.replace(/[),.;!?]+$/, '')

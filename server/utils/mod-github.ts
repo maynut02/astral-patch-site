@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { createError } from 'h3'
-import type { ModCommit, ModGitHubSnapshot, ModReleasePageResponse } from '#shared/types/mod'
+import type { ModCommit, ModCommitResponse, ModGitHubSnapshot, ModReleasePageResponse } from '#shared/types/mod'
 import type { ReleaseAssetInfo, ReleaseNoteEntry } from '#shared/types/releases'
 
 const RELEASE_PAGE_SIZE = 20
@@ -35,6 +35,18 @@ export function normalizeModRepository(value: unknown): string {
   }
 
   return `${owner}/${repo}`.toLowerCase()
+}
+
+export function parseModBranch(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.length > 1024 || value === '@'
+    || /[~^:?*\\]/.test(value) || value.includes('[') || value.startsWith('-')
+    || [...value].some(character => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127)
+    || value.startsWith('/') || value.endsWith('/') || value.endsWith('.')
+    || value.includes('..') || value.includes('@{') || value.includes('//')
+    || value.split('/').some(part => part.startsWith('.') || part.endsWith('.lock'))) {
+    throw createError({ statusCode: 400, statusMessage: '올바른 브랜치 이름을 입력해 주세요.' })
+  }
+  return value
 }
 
 function getGitHubHeaders(): Record<string, string> {
@@ -157,12 +169,27 @@ function normalizeCommit(value: unknown): ModCommit | null {
   }
 }
 
-async function fetchCommits(repository: string, defaultBranch: string): Promise<ModCommit[]> {
+async function fetchBranches(repository: string): Promise<string[]> {
+  const branches = new Set<string>()
+  for (let page = 1; ; page++) {
+    const response = await fetchGitHub(repository, '/branches', { per_page: 100, page })
+    if (!Array.isArray(response._data)) throw new Error('Invalid GitHub branches response')
+    for (const branch of response._data) {
+      if (isRecord(branch) && asString(branch.name)) branches.add(asString(branch.name))
+    }
+    // Only inspect pagination; all requests stay on our fixed GitHub API URL.
+    if (!response._data.length || !/;\s*rel="next"/.test(response.headers.get('link') || '')) {
+      return [...branches]
+    }
+  }
+}
+
+async function fetchCommits(repository: string, branch: string): Promise<ModCommit[]> {
   let data: unknown
   try {
     data = (await fetchGitHub(repository, '/commits', {
       per_page: 10,
-      ...(defaultBranch ? { sha: defaultBranch } : {})
+      ...(branch ? { sha: branch } : {})
     }))._data
   } catch (error) {
     // 빈 저장소의 커밋 목록에 대한 GitHub의 409 응답은 빈 목록으로 처리한다.
@@ -215,17 +242,44 @@ async function fetchReleasePage(repository: string, page: number): Promise<ModRe
   }
 }
 
+const getCachedAbout = defineCachedFunction(async (repository: string): Promise<string> => {
+  const storage = useStorage('cache')
+  // Keep the last successful About separately, beyond the five-minute response cache.
+  const key = `mod-github-about:last-success:${repository}`
+  let description: string
+  try {
+    const repo = await fetchPublicRepository(repository)
+    description = asString(repo.description)
+  } catch (error) {
+    const status = getErrorDetails(error).status
+    if (status === 403 || status === 404) {
+      await storage.removeItem(key).catch(() => {})
+      return ''
+    }
+    return asString(await storage.getItem(key).catch(() => null))
+  }
+
+  await storage.setItem(key, description).catch(() => {})
+  return description
+}, {
+  name: 'mod-github-about',
+  maxAge: CACHE_MAX_AGE,
+  swr: false,
+  getKey: (repository: string) => repository
+})
+
 const getCachedSnapshot = defineCachedFunction(async (repository: string): Promise<ModGitHubSnapshot> => {
   const repo = await fetchPublicRepository(repository)
   const defaultBranch = asString(repo.default_branch)
-  const [readme, commits, releases] = await Promise.allSettled([
+  const [readme, commits, releases, branches] = await Promise.allSettled([
     fetchReadme(repository, defaultBranch),
     fetchCommits(repository, defaultBranch),
-    fetchReleasePage(repository, 1)
+    fetchReleasePage(repository, 1),
+    fetchBranches(repository)
   ])
   const warnings: string[] = []
   for (const [label, result] of [
-    ['README', readme], ['커밋', commits], ['릴리스', releases]
+    ['README', readme], ['커밋', commits], ['릴리스', releases], ['브랜치', branches]
   ] as const) {
     if (result.status === 'rejected') warnings.push(`${label}: ${toGitHubError(result.reason).statusMessage}`)
   }
@@ -241,6 +295,7 @@ const getCachedSnapshot = defineCachedFunction(async (repository: string): Promi
     url: `https://github.com/${repository}`,
     description: asString(repo.description),
     defaultBranch,
+    branches: [...new Set([...(defaultBranch ? [defaultBranch] : []), ...(branches.status === 'fulfilled' ? branches.value : [])])],
     stars: asNumber(repo.stargazers_count),
     license: (asString(license.spdx_id) !== 'NOASSERTION' && asString(license.spdx_id)) || asString(license.name) || null,
     archived: repo.archived === true,
@@ -272,6 +327,32 @@ const getCachedReleases = defineCachedFunction(async (repository: string, page: 
   swr: false,
   getKey: (repository: string, page: number) => `${repository}:${page}`
 })
+
+const getCachedCommits = defineCachedFunction(async (repository: string, branch?: string): Promise<ModCommitResponse> => {
+  const repo = await fetchPublicRepository(repository)
+  const selectedBranch = branch ?? asString(repo.default_branch)
+  try {
+    return { branch: selectedBranch, commits: await fetchCommits(repository, selectedBranch) }
+  } catch (error) {
+    if ([404, 422].includes(getErrorDetails(error).status)) {
+      throw createError({ statusCode: 404, statusMessage: '브랜치를 찾을 수 없습니다. GitHub 정보를 다시 확인해 주세요.' })
+    }
+    throw toGitHubError(error)
+  }
+}, {
+  name: 'mod-github-commits',
+  maxAge: CACHE_MAX_AGE,
+  swr: false,
+  getKey: (repository: string, branch?: string) => `${repository}:${branch === undefined ? 'default' : `branch:${encodeURIComponent(branch)}`}`
+})
+
+export async function getModGitHubCommits(repository: string, branch?: string): Promise<ModCommitResponse> {
+  return getCachedCommits(normalizeModRepository(repository), branch === undefined ? undefined : parseModBranch(branch))
+}
+
+export async function getModGitHubAbout(repository: string): Promise<string> {
+  return getCachedAbout(normalizeModRepository(repository))
+}
 
 export async function getModGitHubSnapshot(repository: string): Promise<ModGitHubSnapshot> {
   return getCachedSnapshot(normalizeModRepository(repository))

@@ -48,7 +48,7 @@ async function loadMore(): Promise<void> {
         아직 공개된 릴리즈가 없습니다.
       </p>
       <p class="text-xs">
-        저장소에 릴리즈와 파일이 올라오면 여기에 표시됩니다.
+        GitHub에 릴리즈와 파일이 올라오면 여기에 표시됩니다.
       </p>
     </div>
 
@@ -65,7 +65,7 @@ async function loadMore(): Promise<void> {
               variant="soft"
               size="sm"
             >
-              사전 릴리즈
+              Pre-release
             </UBadge>
           </div>
           <div class="flex flex-wrap items-center gap-2 text-xs text-muted">

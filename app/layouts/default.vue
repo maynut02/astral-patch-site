@@ -15,7 +15,7 @@ const publicNavItems: NavItem[] = [
   { link: '/translate', icon: 'i-tabler-language', label: '번역 대시보드' },
   { link: '/change', icon: 'i-tabler-history-toggle', label: '변경 기록' },
   { link: '/status', icon: 'i-tabler-activity-heartbeat', label: '서비스 상태' },
-  // { link: '/mod', icon: 'i-tabler-package', label: '모드 허브' },
+  { link: '/mod', icon: 'i-tabler-package', label: '모드 허브' },
   { link: '/party', icon: 'i-tabler-users-group', label: '파티 채팅' },
   { link: '/notice', icon: 'i-tabler-speakerphone', label: '공지사항' },
   { link: '/contributor', icon: 'i-tabler-user-heart', label: '기여자' }

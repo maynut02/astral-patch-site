@@ -8,20 +8,18 @@ const props = defineProps<{ mod?: ModEntry | null }>()
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ saved: [mod: ModEntry] }>()
 const { loggedIn } = useUserSession()
-const form = reactive<ModSaveInput>({ name: '', summary: '', description: '', repository: '', platforms: ['windows'] })
+const form = reactive<Pick<ModSaveInput, 'repository' | 'name' | 'platforms'>>({ name: '', repository: '', platforms: ['windows'] })
 const submitting = ref(false)
 const error = ref('')
-const preview = ref(false)
 const isEditing = computed(() => Boolean(props.mod))
 const canSubmit = computed(() => loggedIn.value && Boolean(form.name.trim() && form.repository.trim() && form.platforms.length))
 
 watch(open, (isOpen) => {
   if (!isOpen) return
   Object.assign(form, props.mod
-    ? { name: props.mod.name, summary: props.mod.summary, description: props.mod.description, repository: props.mod.repository, platforms: [...props.mod.platforms] }
-    : { name: '', summary: '', description: '', repository: '', platforms: ['windows'] })
+    ? { name: props.mod.name, repository: props.mod.repository, platforms: [...props.mod.platforms] }
+    : { name: '', repository: '', platforms: ['windows'] })
   error.value = ''
-  preview.value = false
 })
 
 async function save(): Promise<void> {
@@ -60,8 +58,21 @@ async function save(): Promise<void> {
           :title="error"
         />
 
+        <UFormField label="모드 이름" name="name" required>
+          <UInput
+            v-model="form.name"
+            placeholder="모드 이름"
+            class="w-full"
+            color="neutral"
+            variant="soft"
+            :maxlength="120"
+            :disabled="submitting"
+            required
+          />
+        </UFormField>
+
         <UFormField
-          label="GitHub 저장소"
+          label="GitHub 저장소 URL"
           name="repository"
           required
         >
@@ -78,32 +89,6 @@ async function save(): Promise<void> {
           />
         </UFormField>
 
-        <UFormField label="모드 이름" name="name" required>
-          <UInput
-            v-model="form.name"
-            placeholder="모드 이름"
-            class="w-full"
-            color="neutral"
-            variant="soft"
-            :maxlength="120"
-            :disabled="submitting"
-            required
-          />
-        </UFormField>
-
-        <UFormField label="한 줄 소개" name="summary" hint="최대 300자">
-          <UTextarea
-            v-model="form.summary"
-            placeholder="어떤 기능을 제공하는 모드인가요?"
-            class="w-full"
-            color="neutral"
-            variant="soft"
-            :rows="2"
-            :maxlength="300"
-            :disabled="submitting"
-          />
-        </UFormField>
-
         <UFormField label="지원 플랫폼" name="platforms" required>
           <UCheckboxGroup
             v-model="form.platforms"
@@ -112,36 +97,6 @@ async function save(): Promise<void> {
             color="neutral"
             :disabled="submitting"
           />
-        </UFormField>
-
-        <UFormField label="추가 상세정보" name="description" description="설치 방법, 요구사항, 호환 버전 등을 Markdown으로 작성할 수 있습니다.">
-          <div class="relative">
-            <div v-if="preview" class="min-h-36 border border-default bg-muted p-4 pt-12">
-              <ReleaseMarkdown :source="form.description" empty-text="작성한 상세정보가 여기에 표시됩니다." />
-            </div>
-            <UTextarea
-              v-else
-              v-model="form.description"
-              placeholder="## 설치 방법&#10;1. 릴리즈 파일을 다운로드하세요.&#10;2. …"
-              class="w-full"
-              color="neutral"
-              variant="soft"
-              :rows="7"
-              :maxlength="20000"
-              :disabled="submitting"
-            />
-            <UButton
-              type="button"
-              color="neutral"
-              variant="soft"
-              size="xs"
-              class="absolute right-2 top-2 z-10"
-              :icon="preview ? 'i-tabler-pencil' : 'i-tabler-eye'"
-              @click="preview = !preview"
-            >
-              {{ preview ? '작성' : '미리보기' }}
-            </UButton>
-          </div>
         </UFormField>
       </form>
     </template>
@@ -158,7 +113,8 @@ async function save(): Promise<void> {
         <UButton
           type="submit"
           form="mod-editor-form"
-          color="neutral"
+          color="info"
+          variant="soft"
           :loading="submitting"
           :disabled="!canSubmit"
         >
