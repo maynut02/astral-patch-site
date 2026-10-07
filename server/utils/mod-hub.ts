@@ -1,13 +1,14 @@
-import type { ModDetailResponse, ModEntry, ModListResponse, ModPlatform, ModReleasePageResponse, ModSaveInput } from '#shared/types/mod'
+import type { ModCommitResponse, ModDeleteResponse, ModDetailResponse, ModEntry, ModListEntry, ModListResponse, ModPlatform, ModReleasePageResponse, ModSaveInput } from '#shared/types/mod'
 import { MOD_PLATFORMS } from '#shared/types/mod'
 import { createError } from 'h3'
 import type { DatabaseClient } from './database'
 import { getDatabase } from './database'
-import { getModGitHubReleases, getModGitHubSnapshot, normalizeModRepository } from './mod-github'
+import { getModGitHubAbout, getModGitHubCommits, getModGitHubReleases, getModGitHubSnapshot, normalizeModRepository, parseModBranch } from './mod-github'
 import { isRateLimited } from './rate-limiter'
 import { getTextLength } from './validation'
 
 export const MOD_LIST_LIMIT = 200
+const MOD_ABOUT_CONCURRENCY = 6
 const MAX_MOD_ID = '9223372036854775807'
 
 const MOD_MUTATION_RATE_LIMITS = [
@@ -16,12 +17,12 @@ const MOD_MUTATION_RATE_LIMITS = [
 ] as const
 
 const MOD_REQUEST_ERROR_MESSAGES = new Map([
-  ['Authentication is required', '모드를 저장하려면 로그인이 필요합니다.'],
+  ['Authentication is required', '모드를 변경하려면 로그인이 필요합니다.'],
   ['Invalid request body length', '요청 본문의 길이가 올바르지 않습니다.'],
   ['Request body is too large', '요청 본문이 너무 큽니다.'],
   ['JSON request body is required', '모드 정보를 JSON 형식으로 전송해 주세요.'],
   ['Request body must be a JSON object', '모드 정보를 JSON 객체로 입력해 주세요.'],
-  ['Cross-origin request is not allowed', '같은 사이트에서 모드 저장을 요청해 주세요.'],
+  ['Cross-origin request is not allowed', '같은 사이트에서 모드 변경을 요청해 주세요.'],
   ['Invalid request origin', '요청 출처가 올바르지 않습니다.'],
   ['Bad Request', '올바른 JSON 요청을 전송해 주세요.']
 ])
@@ -37,7 +38,7 @@ export function rethrowModRequestError(error: unknown): never {
   throw error
 }
 
-type ModRow = Omit<ModEntry, 'createdAt' | 'updatedAt'> & {
+type ModRow = Omit<ModEntry, 'createdAt' | 'updatedAt' | 'canDelete'> & {
   createdAt: Date | string
   updatedAt: Date | string
 }
@@ -101,7 +102,9 @@ function toMod(row: ModRow): ModEntry {
     platforms: row.platforms,
     authorHandle: row.authorHandle,
     authorRole: row.authorRole,
+    isOwner: row.isOwner,
     canEdit: row.canEdit,
+    canDelete: row.canEdit,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt
   }
@@ -113,10 +116,12 @@ async function findMod(database: DatabaseClient, modId: string, viewerId: string
       m.id, m.name, m.summary, m.description, m.repository, m.platforms,
       NULLIF(BTRIM(author.handle), '') AS "authorHandle",
       author."role" AS "authorRole",
-      COALESCE(m.created_by = ${viewerId}, false) AS "canEdit",
+      COALESCE(m.created_by = viewer.google_sub, false) AS "isOwner",
+      COALESCE(m.created_by = viewer.google_sub OR viewer."role" = 'admin', false) AS "canEdit",
       m.created_at AS "createdAt", m.updated_at AS "updatedAt"
     FROM mods m
     JOIN app_users author ON author.google_sub = m.created_by
+    LEFT JOIN app_users viewer ON viewer.google_sub = ${viewerId}
     WHERE m.id = ${modId}
   `
 
@@ -133,7 +138,7 @@ async function requireMod(database: DatabaseClient, modId: string, viewerId: str
 
 async function assertMutationRateLimit(database: DatabaseClient, userId: string): Promise<void> {
   if (await isRateLimited(database, `mod-mutation:${userId}`, MOD_MUTATION_RATE_LIMITS)) {
-    throw createError({ statusCode: 429, statusMessage: '모드 저장 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' })
+    throw createError({ statusCode: 429, statusMessage: '모드 변경 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' })
   }
 }
 
@@ -151,15 +156,31 @@ export async function getMods(viewerId: string | null = null): Promise<ModListRe
       m.id, m.name, m.summary, m.description, m.repository, m.platforms,
       NULLIF(BTRIM(author.handle), '') AS "authorHandle",
       author."role" AS "authorRole",
-      COALESCE(m.created_by = ${viewerId}, false) AS "canEdit",
+      COALESCE(m.created_by = viewer.google_sub, false) AS "isOwner",
+      COALESCE(m.created_by = viewer.google_sub OR viewer."role" = 'admin', false) AS "canEdit",
       m.created_at AS "createdAt", m.updated_at AS "updatedAt"
     FROM mods m
     JOIN app_users author ON author.google_sub = m.created_by
+    LEFT JOIN app_users viewer ON viewer.google_sub = ${viewerId}
     ORDER BY m.updated_at DESC, m.id DESC
     LIMIT ${MOD_LIST_LIMIT}
   `
 
-  return { mods: rows.map(toMod) }
+  const mods: ModListEntry[] = rows.map(row => ({ ...toMod(row), githubDescription: '' }))
+  let nextIndex = 0
+  await Promise.all(Array.from({ length: Math.min(MOD_ABOUT_CONCURRENCY, mods.length) }, async () => {
+    while (nextIndex < mods.length) {
+      const mod = mods[nextIndex++]
+      if (!mod) return
+      try {
+        mod.githubDescription = await getModGitHubAbout(mod.repository)
+      } catch {
+        mod.githubDescription = ''
+      }
+    }
+  }))
+
+  return { mods }
 }
 
 export async function getModDetail(modIdValue: unknown, viewerId: string | null = null): Promise<ModDetailResponse> {
@@ -175,6 +196,18 @@ export async function getModDetail(modIdValue: unknown, viewerId: string | null 
       : 'GitHub 저장소 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'
     return { mod, github: null, githubError }
   }
+}
+
+export async function getModCommits(modIdValue: unknown, branchValue: unknown): Promise<ModCommitResponse> {
+  const modId = parseModId(modIdValue)
+  const branch = branchValue === undefined ? undefined : parseModBranch(branchValue)
+  const [mod] = await getDatabase()<{ repository: string }[]>`
+    SELECT repository FROM mods WHERE id = ${modId}
+  `
+  if (!mod) {
+    throw createError({ statusCode: 404, statusMessage: '모드를 찾을 수 없습니다.' })
+  }
+  return getModGitHubCommits(mod.repository, branch)
 }
 
 export async function getModReleases(modIdValue: unknown, pageValue: unknown): Promise<ModReleasePageResponse> {
@@ -226,7 +259,7 @@ export async function updateMod(userId: string, modIdValue: unknown, inputValue:
   const database = getDatabase()
   const current = await requireMod(database, modId, userId)
   if (!current.canEdit) {
-    throw createError({ statusCode: 403, statusMessage: '모드는 등록한 사용자만 수정할 수 있습니다.' })
+    throw createError({ statusCode: 403, statusMessage: '모드는 등록자나 관리자만 수정할 수 있습니다.' })
   }
 
   const input = parseModSaveInput(inputValue, current)
@@ -239,18 +272,45 @@ export async function updateMod(userId: string, modIdValue: unknown, inputValue:
 
   try {
     const [updated] = await database<{ id: string }[]>`
-      UPDATE mods
+      UPDATE mods AS m
       SET name = ${input.name}, summary = ${input.summary}, description = ${input.description},
         repository = ${repository}, platforms = ${database.array(input.platforms)}::text[], updated_at = now()
-      WHERE id = ${modId} AND created_by = ${userId}
-      RETURNING id
+      WHERE m.id = ${modId} AND EXISTS (
+        SELECT 1 FROM app_users actor
+        WHERE actor.google_sub = ${userId}
+          AND (m.created_by = actor.google_sub OR actor."role" = 'admin')
+      )
+      RETURNING m.id
     `
     if (!updated) {
-      throw createError({ statusCode: 403, statusMessage: '모드는 등록한 사용자만 수정할 수 있습니다.' })
+      throw createError({ statusCode: 403, statusMessage: '모드는 등록자나 관리자만 수정할 수 있습니다.' })
     }
   } catch (error) {
     rethrowSaveError(error)
   }
 
   return requireMod(database, modId, userId)
+}
+
+export async function deleteMod(userId: string, modIdValue: unknown): Promise<ModDeleteResponse> {
+  const modId = parseModId(modIdValue)
+  const database = getDatabase()
+  const current = await requireMod(database, modId, userId)
+  if (!current.canDelete) {
+    throw createError({ statusCode: 403, statusMessage: '모드는 등록자나 관리자만 삭제할 수 있습니다.' })
+  }
+  await assertMutationRateLimit(database, userId)
+  const [deleted] = await database<{ id: string }[]>`
+    DELETE FROM mods AS m
+    WHERE m.id = ${modId} AND EXISTS (
+      SELECT 1 FROM app_users actor
+      WHERE actor.google_sub = ${userId}
+        AND (m.created_by = actor.google_sub OR actor."role" = 'admin')
+    )
+    RETURNING m.id
+  `
+  if (!deleted) {
+    throw createError({ statusCode: 403, statusMessage: '모드는 등록자나 관리자만 삭제할 수 있습니다.' })
+  }
+  return { id: deleted.id, deleted: true }
 }

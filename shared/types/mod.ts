@@ -14,13 +14,19 @@ export interface ModEntry {
   platforms: ModPlatform[]
   authorHandle: string | null
   authorRole: UserRole
+  isOwner: boolean
   canEdit: boolean
+  canDelete: boolean
   createdAt: string
   updatedAt: string
 }
 
+export interface ModListEntry extends ModEntry {
+  githubDescription: string
+}
+
 export interface ModListResponse {
-  mods: ModEntry[]
+  mods: ModListEntry[]
 }
 
 export interface ModCommit {
@@ -31,11 +37,17 @@ export interface ModCommit {
   url: string
 }
 
+export interface ModCommitResponse {
+  branch: string
+  commits: ModCommit[]
+}
+
 export interface ModGitHubSnapshot {
   repository: string
   url: string
   description: string
   defaultBranch: string
+  branches: string[]
   stars: number
   license: string | null
   archived: boolean
@@ -52,6 +64,11 @@ export interface ModDetailResponse {
   mod: ModEntry
   github: ModGitHubSnapshot | null
   githubError: string | null
+}
+
+export interface ModDeleteResponse {
+  id: string
+  deleted: true
 }
 
 export interface ModReleasePageResponse {

@@ -6,37 +6,86 @@ const route = useRoute()
 const { loggedIn, user } = useUserSession()
 const { showToast } = useAppToast()
 const editorOpen = ref(false)
+const deleteOpen = ref(false)
+const editorTarget = ref<{ id: string, session: string } | null>(null)
+const deletedId = ref('')
+const sessionKey = computed(() => JSON.stringify([loggedIn.value, user.value?.id, user.value?.role]))
+const permissionSession = ref<string | null>(sessionKey.value)
 const modId = computed(() => typeof route.params.id === 'string' ? route.params.id : '')
 const { data, status, error, refresh } = await useFetch<ModDetailResponse>(() => `/api/mods/${encodeURIComponent(modId.value)}`)
 const detail = computed(() => data.value?.mod.id === modId.value ? data.value : null)
+const managementEnabled = computed(() => permissionSession.value === sessionKey.value && deletedId.value !== modId.value)
 
 useAstralPageSeo(
   () => detail.value?.mod.name ?? '모드 상세',
-  () => detail.value?.mod.summary || '모드의 소개, GitHub README, 최근 커밋과 버전별 다운로드를 확인하세요.'
+  () => detail.value?.github?.description || '모드의 소개, GitHub README, 최근 커밋과 버전별 다운로드를 확인하세요.'
 )
 
 function openEditor(): void {
-  if (!loggedIn.value || !detail.value?.mod.canEdit) return
+  if (!managementEnabled.value || !loggedIn.value || !detail.value?.mod.canEdit) return
+  deleteOpen.value = false
+  editorTarget.value = { id: modId.value, session: sessionKey.value }
   editorOpen.value = true
 }
 
-async function handleSaved(mod: ModEntry): Promise<void> {
-  if (data.value?.mod.id === mod.id) data.value = { ...data.value, mod }
-  await Promise.allSettled([
-    refresh(),
-    refreshNuxtData('mod-hub-list')
-  ])
-  showToast({ id: `mod-saved-${mod.id}`, title: '모드 정보를 수정했습니다.' })
+function openDelete(): void {
+  if (!managementEnabled.value || !loggedIn.value || !detail.value?.mod.canDelete) return
+  editorOpen.value = false
+  editorTarget.value = null
+  deleteOpen.value = true
 }
 
-watch(() => user.value?.id, async () => {
-  editorOpen.value = false
+async function refreshDetail(): Promise<void> {
+  const session = sessionKey.value
   await refresh()
-})
+  if (sessionKey.value === session && !error.value) permissionSession.value = session
+}
+
+async function handleSaved(mod: ModEntry): Promise<void> {
+  const target = editorTarget.value
+  if (!target || target.id !== mod.id || target.session !== sessionKey.value
+    || !managementEnabled.value || !loggedIn.value || !detail.value?.mod.canEdit || modId.value !== mod.id) return
+  editorTarget.value = null
+  if (data.value?.mod.id === mod.id) data.value = { ...data.value, mod }
+  await Promise.allSettled([
+    refreshDetail(),
+    refreshNuxtData('mod-hub-list')
+  ])
+  if (modId.value === target.id && sessionKey.value === target.session) {
+    showToast({ id: `mod-saved-${mod.id}`, title: '모드 정보를 수정했습니다.' })
+  }
+}
+
+async function handleDeleted(id: string): Promise<void> {
+  if (!managementEnabled.value || !loggedIn.value || !detail.value?.mod.canDelete || modId.value !== id) return
+  deletedId.value = id
+  deleteOpen.value = false
+  editorOpen.value = false
+  clearNuxtData('mod-hub-list')
+  showToast({ id: `mod-deleted-${id}`, title: '모드를 삭제했습니다.' })
+  await navigateTo('/mod')
+}
+
+watch([
+  modId,
+  sessionKey,
+  () => detail.value?.mod.canEdit,
+  () => detail.value?.mod.canDelete
+], () => {
+  editorOpen.value = false
+  deleteOpen.value = false
+  editorTarget.value = null
+}, { flush: 'sync' })
 
 watch(modId, () => {
-  editorOpen.value = false
-})
+  deletedId.value = ''
+}, { flush: 'sync' })
+
+watch(sessionKey, async (session) => {
+  if (permissionSession.value === session) return
+  permissionSession.value = null
+  await refreshDetail()
+}, { immediate: true, flush: 'sync' })
 </script>
 
 <template>
@@ -66,7 +115,7 @@ watch(modId, () => {
           color="error"
           variant="outline"
           size="xs"
-          @click="refresh()"
+          @click="refreshDetail()"
         >
           다시 시도
         </UButton>
@@ -76,10 +125,24 @@ watch(modId, () => {
       v-else-if="detail"
       :detail="detail"
       :refreshing="status === 'pending'"
+      :management-enabled="managementEnabled"
       @edit="openEditor"
-      @refresh="refresh()"
+      @delete="openDelete"
+      @refresh="refreshDetail()"
     />
 
-    <ModEditor v-model:open="editorOpen" :mod="detail?.mod" @saved="handleSaved" />
+    <ModEditor
+      v-if="managementEnabled && loggedIn && detail?.mod.canEdit"
+      :key="`${modId}:${sessionKey}`"
+      v-model:open="editorOpen"
+      :mod="detail.mod"
+      @saved="handleSaved"
+    />
+    <ModDeleteConfirm
+      v-if="managementEnabled && loggedIn && detail?.mod.canDelete"
+      v-model:open="deleteOpen"
+      :mod="detail.mod"
+      @deleted="handleDeleted"
+    />
   </div>
 </template>
