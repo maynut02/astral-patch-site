@@ -13,4 +13,6 @@ pnpm 11의 JSON `metadata.vulnerabilities`에는 예외 처리한 항목도 남�
 
 `@nuxt/devtools@3.4.2`의 패치는 보안 수정 버전인 `simple-git@4.0.2`의 named export를 사용하도록 import 한 줄을 바꾼다. 기존 3.x default export가 4.x에서 제거돼 버전 갱신에 이 호환성 수정이 필요하다.
 
+2026-10-07 CI에서 `@nuxt/devtools → launch-editor → shell-quote@1.10.0`의 [GHSA-pqg4-j6r4-53mv](https://github.com/advisories/GHSA-pqg4-j6r4-53mv)가 감지됐다. 공식 수정 버전 `1.11.0`이 있으므로 영향받는 `>=1.8.4 <1.11.0` 버전만 `pnpm overrides`로 `1.11.0`에 고정하고 lockfile을 갱신했다. 이 항목은 보안 검사 예외에 추가하지 않는다.
+
 공식 수정 릴리스가 나오면 해당 버전으로 갱신하고 로컬 패치, GHSA 예외, 관련 회귀 테스트를 함께 검토한다. 새 advisory나 다른 High·Critical 취약점에는 이 예외가 적용되지 않는다.
