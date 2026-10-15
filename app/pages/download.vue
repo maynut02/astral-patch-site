@@ -77,7 +77,6 @@ function findAssetInRelease(release: ReleaseNoteEntry | null, assetName: string)
   return asset ? { asset, release } : null
 }
 
-const windowsPatcher = computed(() => releaseFeed.value?.distribution.windowsPatcher ?? null)
 const windowsPlugin = computed(() => releaseFeed.value?.distribution.windowsPlugin ?? null)
 const androidPatcher = computed(() => releaseFeed.value?.distribution.androidPatcher ?? null)
 const latestPatchRelease = computed(() =>
@@ -302,60 +301,6 @@ function reloadReleases(): void {
         <article class="flex flex-col gap-1 border border-default bg-muted">
           <div class="flex flex-col gap-5 p-5">
             <div class="flex flex-col">
-              <UIcon name="i-tabler-app-window" class="size-7 md:size-8" />
-              <span class="text-xs text-muted mt-3">AstralWindowsPatcher.exe</span>
-              <span class="text-xl font-medium mt-1">Windows 패치 프로그램</span>
-            </div>
-
-            <div class="grid grid-cols-2 gap-x-2 gap-y-4">
-              <div class="flex min-w-0 flex-col">
-                <span class="text-xs text-dimmed">버전</span>
-                <span class="truncate text-sm">{{ windowsPatcher ? `v${windowsPatcher.index.version}` : '확인 중' }}</span>
-              </div>
-              <div class="flex min-w-0 flex-col">
-                <span class="text-xs text-dimmed">릴리즈 시각</span>
-                <span class="truncate text-sm">{{ windowsPatcher?.release ? formatDate(windowsPatcher.release.publishedAt) : '—' }}</span>
-              </div>
-              <div class="flex min-w-0 flex-col">
-                <span class="text-xs text-dimmed">크기</span>
-                <span class="text-sm">{{ windowsPatcher ? formatFileSize(windowsPatcher.index.size) : '—' }}</span>
-              </div>
-              <div class="flex min-w-0 flex-col">
-                <span class="text-xs text-dimmed">다운로드</span>
-                <span class="text-sm">{{ windowsPatcher?.asset ? formatCount(windowsPatcher.asset.downloadCount) : '—' }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex flex-col p-2 bg-default/75 h-full">
-            <UButton
-              :href="windowsPatcher?.index.downloadUrl"
-              :disabled="!windowsPatcher"
-              external
-              icon="i-tabler-download"
-              color="info"
-              variant="ghost"
-              size="md"
-              class="gap-2 py-2.5"
-            >
-              Windows 패치 프로그램 다운로드
-            </UButton>
-            <UButton
-              icon="i-tabler-settings"
-              color="neutral"
-              variant="ghost"
-              size="md"
-              class="gap-2 py-2.5"
-              @click="launchWindowsPatcher('settings')"
-            >
-              프로그램 설정 열기
-            </UButton>
-          </div>
-        </article>
-
-        <article class="flex flex-col gap-1 border border-default bg-muted">
-          <div class="flex flex-col gap-5 p-5">
-            <div class="flex flex-col">
               <UIcon name="i-tabler-device-mobile" class="size-7 md:size-8" />
               <span class="text-xs text-muted mt-3">AstralAndroidPatcher.apk</span>
               <span class="text-xl font-medium mt-1">Android 패치 앱</span>
@@ -407,6 +352,8 @@ function reloadReleases(): void {
             </UButton>
           </div>
         </article>
+
+        <article />
       </div>
     </section>
 
