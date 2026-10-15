@@ -9,8 +9,6 @@ useAstralPageSeo('릴리즈 노트')
 
 const releaseTabs: Array<{ label: string, value: ReleaseFeedKey, icon: string }> = [
   { label: '한글패치', value: 'patch', icon: 'i-tabler-package' },
-  { label: '패치 플러그인', value: 'windowsPlugin', icon: 'i-tabler-plug' },
-  { label: '패치 프로그램', value: 'windowsPatcher', icon: 'i-tabler-brand-windows' },
   { label: '패치 앱', value: 'androidPatcher', icon: 'i-tabler-brand-android' }
 ]
 
