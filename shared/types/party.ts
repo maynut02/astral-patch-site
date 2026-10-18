@@ -30,6 +30,12 @@ export function getPartyCharacterImage(id: PartyCharacterId): string {
 export const PARTY_ROOM_ID_PATTERN = /^[0-9]{6}$/
 export const PARTY_HISTORY_MAX_MESSAGES = 300
 export const PARTY_HISTORY_MAX_BYTES = 256 * 1024
+export const PARTY_MAX_NICKNAME_LENGTH = 20
+export const PARTY_MAX_TEXT_LENGTH = 1_000
+
+export function getPartyTextLength(value: string): number {
+  return Array.from(value).length
+}
 
 export interface PartyRoomSummary {
   roomId: string
@@ -75,6 +81,7 @@ export interface PartyJoinClientMessage {
   nickname: string
   characterId: PartyCharacterId
   order: PartyOrder | null
+  reconnectToken?: string
 }
 
 export interface PartyChatClientMessage {
@@ -114,6 +121,7 @@ export interface PartyJoinedServerMessage {
   type: 'JOINED'
   sessionId: string
   participantId: string
+  reconnectToken: string
   room: PartyRoomSummary
   messages: PartyRoomMessage[]
   participants: PartyParticipant[]

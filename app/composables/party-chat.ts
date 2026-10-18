@@ -1,4 +1,14 @@
-import { PARTY_HISTORY_MAX_MESSAGES, type PartyCharacterId, type PartyChatMessage, type PartyOrder, type PartyParticipant, type PartyRoomMessage, type PartyServerMessage } from '#shared/types/party'
+import {
+  PARTY_HISTORY_MAX_MESSAGES,
+  PARTY_MAX_TEXT_LENGTH,
+  getPartyTextLength,
+  type PartyCharacterId,
+  type PartyChatMessage,
+  type PartyOrder,
+  type PartyParticipant,
+  type PartyRoomMessage,
+  type PartyServerMessage
+} from '#shared/types/party'
 
 interface PartyCredentials {
   nickname: string
@@ -13,8 +23,49 @@ interface LocalPartyChatMessage extends PartyChatMessage {
 
 type PartyDisplayMessage = PartyRoomMessage | LocalPartyChatMessage
 
+const MAX_EXPANDED_MESSAGES = PARTY_HISTORY_MAX_MESSAGES * 2
+const FATAL_JOIN_ERROR_CODES = new Set([
+  'INVALID_ROOM_ID',
+  'INVALID_NICKNAME',
+  'INVALID_CHARACTER',
+  'INVALID_ORDER',
+  'SPECTATOR_ORDER_DISABLED',
+  'ROOM_NOT_FOUND',
+  'NICKNAME_TAKEN'
+])
+
 function isLocalMessage(message: PartyDisplayMessage): message is LocalPartyChatMessage {
   return message.kind === 'chat' && 'delivery' in message
+}
+
+function normalizeNicknameKey(value: string): string {
+  return value.trim().normalize('NFKC').toLowerCase()
+}
+
+function mergeSessionMessages(
+  existing: PartyRoomMessage[],
+  incoming: PartyRoomMessage[]
+): PartyRoomMessage[] {
+  if (existing.length === 0) return [...incoming]
+  if (incoming.length === 0) return [...existing]
+
+  const incomingById = new Map(incoming.map(message => [message.id, message]))
+  const firstIncomingId = incoming[0]?.id
+  const firstOverlapIndex = firstIncomingId
+    ? existing.findIndex(message => message.id === firstIncomingId)
+    : -1
+
+  const prefix = firstOverlapIndex >= 0
+    ? existing.slice(0, firstOverlapIndex).filter(message => !incomingById.has(message.id))
+    : existing.filter(message => !incomingById.has(message.id))
+
+  const merged = [...prefix, ...incoming]
+  const seen = new Set<string>()
+  return merged.filter((message) => {
+    if (seen.has(message.id)) return false
+    seen.add(message.id)
+    return true
+  })
 }
 
 export function usePartyChat(roomId: string) {
@@ -34,6 +85,7 @@ export function usePartyChat(roomId: string) {
   let loadedHistory = false
   let socket: WebSocket | undefined
   let activeSessionId: string | undefined
+  let activeReconnectToken: string | undefined
   let credentials: PartyCredentials | undefined
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined
@@ -41,14 +93,20 @@ export function usePartyChat(roomId: string) {
   const sendTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let historyTimer: ReturnType<typeof setTimeout> | undefined
   let stopped = false
+  let disposed = false
   let attempt = 0
   let unansweredPings = 0
+  let lastReceivedAt = 0
 
   function clearTimers() {
     clearTimeout(reconnectTimer)
     clearTimeout(connectionTimer)
     clearInterval(heartbeatTimer)
     clearTimeout(historyTimer)
+    reconnectTimer = undefined
+    connectionTimer = undefined
+    heartbeatTimer = undefined
+    historyTimer = undefined
   }
 
   function clearSendTimer(clientMessageId: string) {
@@ -67,11 +125,21 @@ export function usePartyChat(roomId: string) {
     for (const clientMessageId of [...sendTimers.keys()]) failMessage(clientMessageId, reason)
   }
 
+  function trimDisplayMessages(next: PartyDisplayMessage[]): PartyDisplayMessage[] {
+    const limit = loadedHistory ? MAX_EXPANDED_MESSAGES : PARTY_HISTORY_MAX_MESSAGES
+    if (next.length <= limit) return next
+
+    const removed = next.slice(0, next.length - limit)
+    if (removed.some(message => !isLocalMessage(message))) {
+      hasOlder.value = true
+    }
+    return next.slice(-limit)
+  }
+
   function appendMessage(message: PartyRoomMessage) {
     const index = messages.value.findIndex(existing => existing.id === message.id || (message.kind === 'chat'
       && isLocalMessage(existing)
-      && existing.clientMessageId === message.clientMessageId
-      && existing.participant.id === message.participant.id))
+      && existing.clientMessageId === message.clientMessageId))
     if (index >= 0) {
       if (isLocalMessage(messages.value[index]!)) {
         messages.value = messages.value.map((existing, position) => position === index ? message : existing)
@@ -79,25 +147,39 @@ export function usePartyChat(roomId: string) {
       if (message.kind === 'chat') clearSendTimer(message.clientMessageId)
       return
     }
-    const next = [...messages.value, message]
-    messages.value = loadedHistory ? next : next.slice(-PARTY_HISTORY_MAX_MESSAGES)
+    messages.value = trimDisplayMessages([...messages.value, message])
     if (message.kind === 'chat') clearSendTimer(message.clientMessageId)
   }
 
+  function scheduleReconnect() {
+    if (stopped || disposed || !credentials) return
+    clearTimers()
+    const baseDelay = Math.min(1000 * 2 ** attempt++, 15_000)
+    const jitter = Math.floor(Math.random() * 300)
+    reconnectTimer = setTimeout(connect, baseDelay + jitter)
+  }
+
   function connect() {
-    if (stopped || !credentials) return
+    if (stopped || disposed || !credentials) return
     clearTimers()
     status.value = joined.value ? 'reconnecting' : 'connecting'
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/party`)
     socket = ws
-    connectionTimer = setTimeout(() => ws.close(), 10_000)
+    connectionTimer = setTimeout(() => ws.close(), 20_000)
     ws.onopen = () => {
-      if (socket !== ws || stopped) return
+      if (socket !== ws || stopped || disposed) return
       unansweredPings = 0
-      ws.send(JSON.stringify({ type: 'JOIN', roomId, ...credentials }))
+      lastReceivedAt = Date.now()
+      ws.send(JSON.stringify({
+        type: 'JOIN',
+        roomId,
+        ...credentials,
+        ...(activeReconnectToken ? { reconnectToken: activeReconnectToken } : {})
+      }))
       heartbeatTimer = setInterval(() => {
         if (ws.readyState !== WebSocket.OPEN) return
-        if (unansweredPings >= 2) {
+        const now = Date.now()
+        if (unansweredPings >= 2 && now - lastReceivedAt >= 55_000) {
           ws.close()
           return
         }
@@ -106,8 +188,9 @@ export function usePartyChat(roomId: string) {
       }, 20_000)
     }
     ws.onmessage = (event) => {
-      if (socket !== ws || stopped) return
+      if (socket !== ws || stopped || disposed) return
       unansweredPings = 0
+      lastReceivedAt = Date.now()
       let data: PartyServerMessage
       try {
         data = JSON.parse(event.data) as PartyServerMessage
@@ -116,27 +199,43 @@ export function usePartyChat(roomId: string) {
       }
       if (data.type === 'JOINED') {
         clearTimeout(connectionTimer)
+        connectionTimer = undefined
         attempt = 0
         status.value = 'connected'
         joined.value = true
         error.value = ''
         errorCode.value = ''
         participantId.value = data.participantId
+        activeReconnectToken = data.reconnectToken
+        const sameSession = Boolean(activeSessionId && activeSessionId === data.sessionId)
         const confirmedIds = new Set(data.messages.filter((message): message is PartyChatMessage => message.kind === 'chat')
           .map(message => message.clientMessageId))
-        const unresolved = activeSessionId && activeSessionId !== data.sessionId
+        const existingConfirmed = sameSession
+          ? messages.value.filter((message): message is PartyRoomMessage => !isLocalMessage(message))
+          : []
+        const mergedHistory = sameSession
+          ? mergeSessionMessages(existingConfirmed, data.messages)
+          : [...data.messages]
+        const allConfirmedIds = new Set([
+          ...confirmedIds,
+          ...mergedHistory.filter((message): message is PartyChatMessage => message.kind === 'chat').map(message => message.clientMessageId)
+        ])
+        const unresolved = activeSessionId && !sameSession
           ? []
-          : messages.value.filter(isLocalMessage).filter(message => !confirmedIds.has(message.clientMessageId))
+          : messages.value.filter(isLocalMessage).filter(message => !allConfirmedIds.has(message.clientMessageId))
         activeSessionId = data.sessionId
-        messages.value = [...data.messages, ...unresolved]
-        for (const clientMessageId of confirmedIds) clearSendTimer(clientMessageId)
+        if (!sameSession) loadedHistory = false
+        hasOlder.value = sameSession
+          ? (hasOlder.value || data.messages.length > 0)
+          : data.messages.length > 0
+        messages.value = trimDisplayMessages([...mergedHistory, ...unresolved])
+        for (const clientMessageId of allConfirmedIds) clearSendTimer(clientMessageId)
         failPendingMessages('전송 결과를 확인하지 못했습니다. 다시 보내면 중복될 수 있습니다.')
-        hasOlder.value = data.messages.length > 0
         loadingOlder.value = false
         clearTimeout(historyTimer)
+        historyTimer = undefined
         historyError.value = ''
         requestedBefore = ''
-        loadedHistory = false
         participants.value = data.participants
         const self = data.participants.find(participant => participant.id === data.participantId)
         activeCharacterId.value = self?.characterId ?? credentials?.characterId ?? null
@@ -156,12 +255,18 @@ export function usePartyChat(roomId: string) {
         const known = new Set(messages.value.map(message => message.id))
         const older = data.messages.filter(message => !known.has(message.id))
         const confirmedIds = new Set(older.filter((message): message is PartyChatMessage => message.kind === 'chat').map(message => message.clientMessageId))
-        messages.value = [...older, ...messages.value.filter(message => !isLocalMessage(message) || !confirmedIds.has(message.clientMessageId))]
+        if (older.length > 0) {
+          loadedHistory = true
+        }
+        const combined = [...older, ...messages.value.filter(message => !isLocalMessage(message) || !confirmedIds.has(message.clientMessageId))]
+        messages.value = combined.length > MAX_EXPANDED_MESSAGES
+          ? combined.slice(0, MAX_EXPANDED_MESSAGES)
+          : combined
         for (const clientMessageId of confirmedIds) clearSendTimer(clientMessageId)
-        loadedHistory = true
         hasOlder.value = data.hasMore
         loadingOlder.value = false
         clearTimeout(historyTimer)
+        historyTimer = undefined
         requestedBefore = ''
         historyError.value = ''
       } else if (data.type === 'PARTICIPANTS') {
@@ -187,6 +292,7 @@ export function usePartyChat(roomId: string) {
         if (loadingOlder.value && (data.code === 'HISTORY_UNAVAILABLE' || data.code === 'INVALID_CURSOR')) {
           loadingOlder.value = false
           clearTimeout(historyTimer)
+          historyTimer = undefined
           requestedBefore = ''
           historyError.value = data.message
           return
@@ -195,9 +301,15 @@ export function usePartyChat(roomId: string) {
         errorCode.value = data.code
         if (data.clientMessageId) failMessage(data.clientMessageId, data.message, 'failed')
         if (status.value !== 'connected') {
+          const shouldRetry = joined.value && !FATAL_JOIN_ERROR_CODES.has(data.code)
+          if (shouldRetry) {
+            ws.close()
+            return
+          }
           stopped = true
           status.value = 'error'
           joined.value = false
+          activeReconnectToken = undefined
           activeCharacterId.value = null
           activeOrder.value = null
           messages.value = []
@@ -210,25 +322,30 @@ export function usePartyChat(roomId: string) {
     }
     ws.onerror = () => { /* The close handler retries failed connections. */ }
     ws.onclose = () => {
-      if (socket !== ws || stopped) return
+      if (socket !== ws || stopped || disposed) return
       failPendingMessages('연결이 끊겨 전송 결과를 확인하지 못했습니다. 다시 보내면 중복될 수 있습니다.')
       clearTimers()
       loadingOlder.value = false
       clearTimeout(historyTimer)
+      historyTimer = undefined
       requestedBefore = ''
       status.value = 'reconnecting'
       error.value = '연결이 끊어졌습니다. 자동으로 다시 연결하고 있습니다.'
-      reconnectTimer = setTimeout(connect, Math.min(1000 * 2 ** attempt++, 15_000))
+      scheduleReconnect()
     }
   }
 
   function join(value: PartyCredentials) {
+    if (disposed) return
     failPendingMessages('전송 결과를 확인하지 못했습니다. 다시 보내면 중복될 수 있습니다.')
     clearTimers()
     const previous = socket
     socket = undefined
     previous?.close()
     stopped = false
+    if (!credentials || normalizeNicknameKey(credentials.nickname) !== normalizeNicknameKey(value.nickname)) {
+      activeReconnectToken = undefined
+    }
     credentials = { ...value }
     error.value = ''
     errorCode.value = ''
@@ -258,7 +375,15 @@ export function usePartyChat(roomId: string) {
 
   function send(text: string): boolean {
     const currentSocket = socket
-    if (status.value !== 'connected' || currentSocket?.readyState !== WebSocket.OPEN || !text.trim() || text.trim().length > 1000) return false
+    const trimmed = text.trim()
+    if (
+      status.value !== 'connected'
+      || currentSocket?.readyState !== WebSocket.OPEN
+      || !trimmed
+      || getPartyTextLength(trimmed) > PARTY_MAX_TEXT_LENGTH
+    ) {
+      return false
+    }
     const self = participants.value.find(participant => participant.id === participantId.value)
     if (!self) return false
     const clientMessageId = crypto.randomUUID()
@@ -267,12 +392,11 @@ export function usePartyChat(roomId: string) {
       id: clientMessageId,
       clientMessageId,
       participant: { ...self },
-      text: text.trim(),
+      text: trimmed,
       createdAt: new Date().toISOString(),
       delivery: 'sending'
     }
-    const next = [...messages.value, optimisticMessage]
-    messages.value = loadedHistory ? next : next.slice(-PARTY_HISTORY_MAX_MESSAGES)
+    messages.value = trimDisplayMessages([...messages.value, optimisticMessage])
     error.value = ''
     try {
       currentSocket.send(JSON.stringify({ type: 'CHAT', text, clientMessageId }))
@@ -285,9 +409,8 @@ export function usePartyChat(roomId: string) {
     sendTimers.set(clientMessageId, setTimeout(() => {
       if (!sendTimers.has(clientMessageId)) return
       failMessage(clientMessageId, '전송 확인이 지연되었습니다. 다시 보내면 중복될 수 있습니다.')
-      error.value = '전송 확인이 지연되어 다시 연결합니다.'
-      currentSocket.close()
-    }, 10_000))
+      error.value = '전송 확인이 지연되었습니다. 잠시 후 다시 확인해 주세요.'
+    }, 15_000))
     return true
   }
 
@@ -322,9 +445,40 @@ export function usePartyChat(roomId: string) {
     }
   }
 
+  function handleVisibilityOrOnline() {
+    if (disposed || stopped || !credentials) return
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+
+    if (socket?.readyState === WebSocket.OPEN) {
+      lastReceivedAt = Date.now()
+      unansweredPings = 0
+      try {
+        socket.send(JSON.stringify({ type: 'PING' }))
+      } catch {
+        socket.close()
+      }
+      return
+    }
+
+    if (status.value === 'reconnecting' && reconnectTimer) {
+      attempt = 0
+      connect()
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', handleVisibilityOrOnline)
+    document.addEventListener('visibilitychange', handleVisibilityOrOnline)
+  }
+
   onBeforeUnmount(() => {
+    disposed = true
     stopped = true
     clearTimers()
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', handleVisibilityOrOnline)
+      document.removeEventListener('visibilitychange', handleVisibilityOrOnline)
+    }
     for (const clientMessageId of sendTimers.keys()) clearSendTimer(clientMessageId)
     socket?.close(1000, 'leave-room')
     credentials = undefined

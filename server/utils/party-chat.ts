@@ -3,10 +3,13 @@ import {
   PARTY_CHARACTER_IDS,
   PARTY_HISTORY_MAX_BYTES,
   PARTY_HISTORY_MAX_MESSAGES,
+  PARTY_MAX_NICKNAME_LENGTH,
+  PARTY_MAX_TEXT_LENGTH,
   PARTY_ORDERS,
   PARTY_ROOM_ID_PATTERN,
   PARTY_SPECTATOR_ID,
   PARTY_UNSELECTED_ID,
+  getPartyTextLength,
   type PartyCharacterId,
   type PartyChatMessage,
   type PartyJoinNotice,
@@ -32,9 +35,10 @@ export const PARTY_LIMITS = Object.freeze({
   emptyRoomTtlMs: 3 * 60_000,
   heartbeatIntervalMs: 30_000,
   heartbeatTimeoutMs: 90_000,
-  maxNicknameLength: 20,
-  maxTextLength: 1_000,
+  maxNicknameLength: PARTY_MAX_NICKNAME_LENGTH,
+  maxTextLength: PARTY_MAX_TEXT_LENGTH,
   maxClientMessageIdLength: 128,
+  maxReconnectTokenLength: 128,
   historyLimit: PARTY_HISTORY_MAX_MESSAGES,
   historyMaxBytes: PARTY_HISTORY_MAX_BYTES
 })
@@ -62,8 +66,17 @@ interface PartyConnection {
   messageWindowStartedAt: number
   messageCount: number
   closed: boolean
+  joining: boolean
+  replaced: boolean
+  suppressJoinNotice: boolean
+  reconnectToken?: string
   room?: PartyRoom
   participant?: PartyParticipant
+}
+
+interface ReconnectableParticipant {
+  participant: PartyParticipant
+  reconnectToken: string
 }
 
 interface PartyRoom {
@@ -71,6 +84,8 @@ interface PartyRoom {
   sessionId: string
   createdAt: string
   participants: Map<PartyPeer, PartyConnection>
+  reconnectTokens: Map<string, ReconnectableParticipant>
+  clientMessages: Map<string, PartyChatMessage>
   messages: PartyRoomMessage[]
   messageSizes: number[]
   historyBytes: number
@@ -113,12 +128,15 @@ export interface PartyJoinInput {
   nickname: unknown
   characterId: unknown
   order?: unknown
+  reconnectToken?: unknown
 }
 
 export interface PartyJoinSuccess {
   ok: true
   sessionId: string
   participantId: string
+  reconnectToken: string
+  resumed: boolean
   room: PartyRoomSummary
   messages: PartyRoomMessage[]
   participants: PartyParticipant[]
@@ -180,7 +198,7 @@ export function getRetainedPartySessionIds(): string[] {
 }
 
 function getTextLength(value: string): number {
-  return Array.from(value).length
+  return getPartyTextLength(value)
 }
 
 export function normalizePartyRoomId(value: unknown): string | null {
@@ -205,13 +223,26 @@ function nicknameKey(value: string): string {
   return value.normalize('NFKC').toLowerCase()
 }
 
-export function isPartyNicknameTaken(roomId: string, nickname: string): boolean {
+export function isPartyNicknameTaken(
+  roomId: string,
+  nickname: string,
+  excludeParticipantId?: string
+): boolean {
   const room = rooms.get(roomId)
   if (!room) return false
 
   const key = nicknameKey(nickname)
   return [...room.participants.values()]
-    .some(connection => connection.participant && nicknameKey(connection.participant.nickname) === key)
+    .some(connection => connection.participant
+      && connection.participant.id !== excludeParticipantId
+      && nicknameKey(connection.participant.nickname) === key)
+}
+
+function normalizeReconnectToken(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  if (!normalized || normalized.length > PARTY_LIMITS.maxReconnectTokenLength) return null
+  return normalized
 }
 
 export function normalizePartyChatText(value: unknown): string | null {
@@ -260,6 +291,13 @@ function appendRoomMessage(room: PartyRoom, message: PartyRoomMessage): void {
   room.messages.push(message)
   room.messageSizes.push(bytes)
   room.historyBytes += bytes
+  if (message.kind === 'chat' && message.clientMessageId) {
+    room.clientMessages.set(`${message.participant.id}:${message.clientMessageId}`, message)
+    if (room.clientMessages.size > PARTY_LIMITS.historyLimit * 2) {
+      const oldestKey = room.clientMessages.keys().next().value
+      if (oldestKey) room.clientMessages.delete(oldestKey)
+    }
+  }
   trimRoomHistory(room)
 }
 
@@ -285,6 +323,11 @@ function syncParticipantMessages(room: PartyRoom, participant: PartyParticipant)
     const bytes = Buffer.byteLength(JSON.stringify(message), 'utf8') + 1
     room.historyBytes += bytes - (room.messageSizes[index] ?? 0)
     room.messageSizes[index] = bytes
+  }
+  for (const cached of room.clientMessages.values()) {
+    if (cached.participant.id !== participant.id) continue
+    cached.participant.characterId = participant.characterId
+    cached.participant.order = participant.order
   }
   trimRoomHistory(room)
 }
@@ -412,6 +455,8 @@ function hydrateRoom(roomId: string, stored: Awaited<ReturnType<PartyChatStore['
     sessionId: stored.sessionId,
     createdAt: stored.createdAt,
     participants: new Map(),
+    reconnectTokens: new Map(),
+    clientMessages: new Map(),
     messages: [],
     messageSizes: [],
     historyBytes: 0,
@@ -506,7 +551,10 @@ export function registerPartyConnection(peer: PartyPeer, ipAddress: string): boo
     lastSeenAt: now,
     messageWindowStartedAt: now,
     messageCount: 0,
-    closed: false
+    closed: false,
+    joining: false,
+    replaced: false,
+    suppressJoinNotice: false
   })
   activeConnectionsByIp.set(normalizedIpAddress, activeForIp + 1)
   ensureMaintenance()
@@ -549,7 +597,7 @@ export async function joinPartyRoom(
     }
   }
 
-  if (connection.room || connection.participant) {
+  if (connection.joining || connection.room || connection.participant) {
     return {
       ok: false,
       code: 'ALREADY_JOINED',
@@ -590,8 +638,12 @@ export async function joinPartyRoom(
     return { ok: false, code: 'INVALID_ORDER', message: '올바른 순서를 선택해 주세요.' }
   }
 
+  const providedToken = normalizeReconnectToken(input.reconnectToken)
+  const existingMemoryRoom = rooms.get(roomId)
+  const knownReconnect = Boolean(providedToken && existingMemoryRoom?.reconnectTokens.has(providedToken))
+
   const now = Date.now()
-  if (!consumeJoinAttempt(connection.ipAddress, now)) {
+  if (!knownReconnect && !consumeJoinAttempt(connection.ipAddress, now)) {
     return {
       ok: false,
       code: 'JOIN_RATE_LIMITED',
@@ -599,68 +651,155 @@ export async function joinPartyRoom(
     }
   }
 
-  const room = await findPartyRoom(roomId)
-  if (!room) {
-    return {
-      ok: false,
-      code: 'ROOM_NOT_FOUND',
-      message: '방을 찾을 수 없습니다.'
+  connection.joining = true
+  try {
+    const room = await findPartyRoom(roomId)
+    if (!room) {
+      return {
+        ok: false,
+        code: 'ROOM_NOT_FOUND',
+        message: '방을 찾을 수 없습니다.'
+      }
     }
-  }
 
-  if (isPartyNicknameTaken(roomId, nickname)) {
-    return {
-      ok: false,
-      code: 'NICKNAME_TAKEN',
-      message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
+    if (connection.closed || connection.room || connection.participant) {
+      return {
+        ok: false,
+        code: 'CONNECTION_CLOSED',
+        message: '웹소켓 연결을 사용할 수 없습니다.'
+      }
     }
-  }
 
-  const participant: PartyParticipant = {
-    id: randomUUID(),
-    nickname,
-    characterId: input.characterId,
-    order: input.characterId === PARTY_SPECTATOR_ID ? null : (input.order ?? PARTY_ORDERS[0]) as PartyOrder
-  }
-  const admitted = await queueRoomWrite(room, async () => {
-    if (isPartyNicknameTaken(roomId, nickname) || connection.closed) return false
-    await partyChatStore.addParticipant(room.sessionId, participant)
-    await partyChatStore.extendRoom(room.sessionId, new Date(Date.now() + PARTY_LIMITS.emptyRoomTtlMs).toISOString())
-    if (connection.closed) return false
-    connection.room = room
-    connection.participant = participant
-    room.participants.set(peer, connection)
-    setEmptySince(room, Date.now())
-    return true
-  })
-  if (!admitted) {
-    return connection.closed
-      ? { ok: false, code: 'CONNECTION_CLOSED', message: '웹소켓 연결을 사용할 수 없습니다.' }
-      : { ok: false, code: 'NICKNAME_TAKEN', message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.' }
-  }
+    const candidateReconnect = providedToken ? room.reconnectTokens.get(providedToken) : undefined
+    const matchedReconnect = candidateReconnect && nicknameKey(candidateReconnect.participant.nickname) === nicknameKey(nickname)
+      ? candidateReconnect
+      : undefined
+    if (isPartyNicknameTaken(roomId, nickname, matchedReconnect?.participant.id)) {
+      return {
+        ok: false,
+        code: 'NICKNAME_TAKEN',
+        message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
+      }
+    }
 
-  return {
-    ok: true,
-    sessionId: room.sessionId,
-    participantId: participant.id,
-    room: getRoomSummary(room),
-    messages: room.messages.map(cloneMessage),
-    participants: getParticipants(room)
+    const desiredOrder = input.characterId === PARTY_SPECTATOR_ID
+      ? null
+      : (input.order ?? PARTY_ORDERS[0]) as PartyOrder
+    const desiredCharacterId = input.characterId
+    let participant: PartyParticipant = {
+      id: matchedReconnect?.participant.id ?? randomUUID(),
+      nickname,
+      characterId: desiredCharacterId,
+      order: desiredOrder
+    }
+    let reconnectToken = matchedReconnect?.reconnectToken ?? randomUUID()
+    let replacedPeer: PartyPeer | undefined
+    let resumed = false
+    let suppressJoinNotice = false
+
+    const admitted = await queueRoomWrite(room, async () => {
+      if (connection.closed || connection.room || connection.participant) return false
+      const rawReconnect = providedToken ? room.reconnectTokens.get(providedToken) : undefined
+      const currentReconnect = rawReconnect && nicknameKey(rawReconnect.participant.nickname) === nicknameKey(nickname)
+        ? rawReconnect
+        : undefined
+      if (isPartyNicknameTaken(roomId, nickname, currentReconnect?.participant.id)) return false
+
+      if (currentReconnect) {
+        resumed = true
+        reconnectToken = currentReconnect.reconnectToken
+        participant = {
+          id: currentReconnect.participant.id,
+          nickname,
+          characterId: desiredCharacterId,
+          order: desiredOrder
+        }
+        await partyChatStore.addParticipant(room.sessionId, participant)
+        if (
+          currentReconnect.participant.characterId !== participant.characterId
+          || currentReconnect.participant.order !== participant.order
+        ) {
+          await partyChatStore.updateParticipant(participant)
+        }
+      } else {
+        await partyChatStore.addParticipant(room.sessionId, participant)
+      }
+
+      await partyChatStore.extendRoom(room.sessionId, new Date(Date.now() + PARTY_LIMITS.emptyRoomTtlMs).toISOString())
+      if (connection.closed || connection.room || connection.participant) return false
+
+      for (const [activePeer, activeConn] of room.participants) {
+        if (activeConn.participant?.id === participant.id && activePeer !== peer) {
+          activeConn.replaced = true
+          activeConn.room = undefined
+          activeConn.participant = undefined
+          room.participants.delete(activePeer)
+          replacedPeer = activePeer
+          suppressJoinNotice = true
+          break
+        }
+      }
+
+      connection.room = room
+      connection.participant = participant
+      connection.reconnectToken = reconnectToken
+      connection.suppressJoinNotice = suppressJoinNotice
+      room.participants.set(peer, connection)
+      room.reconnectTokens.set(reconnectToken, {
+        participant: cloneParticipant(participant),
+        reconnectToken
+      })
+      syncParticipantMessages(room, participant)
+      setEmptySince(room, Date.now())
+      return true
+    })
+
+    if (replacedPeer) {
+      try {
+        replacedPeer.close(1000, 'replaced-by-reconnect')
+      } catch {
+        // The previous socket may already be closed.
+      }
+    }
+
+    if (!admitted) {
+      return connection.closed
+        ? { ok: false, code: 'CONNECTION_CLOSED', message: '웹소켓 연결을 사용할 수 없습니다.' }
+        : { ok: false, code: 'NICKNAME_TAKEN', message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.' }
+    }
+
+    return {
+      ok: true,
+      sessionId: room.sessionId,
+      participantId: participant.id,
+      reconnectToken,
+      resumed,
+      room: getRoomSummary(room),
+      messages: room.messages.map(cloneMessage),
+      participants: getParticipants(room)
+    }
+  } finally {
+    connection.joining = false
   }
 }
 
 export async function recordPartyJoin(peer: PartyPeer): Promise<{ notice: PartyJoinNotice, peers: PartyPeer[] } | null> {
   const connection = connections.get(peer)
   if (!connection || connection.closed || !connection.room || !connection.participant) return null
+  if (connection.suppressJoinNotice) {
+    connection.suppressJoinNotice = false
+    return null
+  }
 
+  const room = connection.room
   const notice: PartyJoinNotice = {
     kind: 'join',
     id: randomUUID(),
     nickname: connection.participant.nickname,
     createdAt: new Date().toISOString()
   }
-  await persistRoomMessage(connection.room, notice)
-  return { notice: { ...notice }, peers: [...connection.room.participants.keys()] }
+  await persistRoomMessage(room, notice)
+  return { notice: { ...notice }, peers: [...room.participants.keys()] }
 }
 
 export async function changePartyCharacter(peer: PartyPeer, characterId: unknown): Promise<PartyCharacterChangeResult> {
@@ -673,20 +812,33 @@ export async function changePartyCharacter(peer: PartyPeer, characterId: unknown
   }
 
   connection.lastSeenAt = Date.now()
-  const updated = cloneParticipant(connection.participant)
-  updated.characterId = characterId
-  if (characterId === PARTY_SPECTATOR_ID) updated.order = null
-  else if (!updated.order) updated.order = PARTY_ORDERS[0]
-  await queueRoomWrite(connection.room, () => partyChatStore.updateParticipant(updated))
-  connection.participant.characterId = updated.characterId
-  connection.participant.order = updated.order
-  syncParticipantMessages(connection.room, connection.participant)
-
-  return {
-    ok: true,
-    roomId: connection.room.roomId,
-    participants: getParticipants(connection.room)
-  }
+  const room = connection.room
+  return queueRoomWrite(room, async (): Promise<PartyCharacterChangeResult> => {
+    if (connection.closed || connection.room !== room || !connection.participant) {
+      return { ok: false, code: 'NOT_IN_ROOM', message: '방에 입장한 후 캐릭터를 변경할 수 있습니다.' }
+    }
+    const updated = cloneParticipant(connection.participant)
+    updated.characterId = characterId
+    if (characterId === PARTY_SPECTATOR_ID) updated.order = null
+    else if (!updated.order) updated.order = PARTY_ORDERS[0]
+    await partyChatStore.updateParticipant(updated)
+    if (connection.participant && connection.room === room) {
+      connection.participant.characterId = updated.characterId
+      connection.participant.order = updated.order
+    }
+    if (connection.reconnectToken && room.reconnectTokens.has(connection.reconnectToken)) {
+      room.reconnectTokens.set(connection.reconnectToken, {
+        participant: cloneParticipant(updated),
+        reconnectToken: connection.reconnectToken
+      })
+    }
+    syncParticipantMessages(room, updated)
+    return {
+      ok: true,
+      roomId: room.roomId,
+      participants: getParticipants(room)
+    }
+  })
 }
 
 export async function changePartyOrder(peer: PartyPeer, order: unknown): Promise<PartyOrderChangeResult> {
@@ -702,15 +854,32 @@ export async function changePartyOrder(peer: PartyPeer, order: unknown): Promise
   }
 
   connection.lastSeenAt = Date.now()
-  const updated = { ...connection.participant, order }
-  await queueRoomWrite(connection.room, () => partyChatStore.updateParticipant(updated))
-  connection.participant.order = order
-  syncParticipantMessages(connection.room, connection.participant)
-  return {
-    ok: true,
-    roomId: connection.room.roomId,
-    participants: getParticipants(connection.room)
-  }
+  const room = connection.room
+  return queueRoomWrite(room, async (): Promise<PartyOrderChangeResult> => {
+    if (connection.closed || connection.room !== room || !connection.participant) {
+      return { ok: false, code: 'NOT_IN_ROOM', message: '방에 입장한 후 순서를 변경할 수 있습니다.' }
+    }
+    if (connection.participant.characterId === PARTY_SPECTATOR_ID) {
+      return { ok: false, code: 'SPECTATOR_ORDER_DISABLED', message: '관전 중에는 순서를 선택할 수 없습니다.' }
+    }
+    const updated = { ...cloneParticipant(connection.participant), order }
+    await partyChatStore.updateParticipant(updated)
+    if (connection.participant && connection.room === room) {
+      connection.participant.order = order
+    }
+    if (connection.reconnectToken && room.reconnectTokens.has(connection.reconnectToken)) {
+      room.reconnectTokens.set(connection.reconnectToken, {
+        participant: cloneParticipant(updated),
+        reconnectToken: connection.reconnectToken
+      })
+    }
+    syncParticipantMessages(room, updated)
+    return {
+      ok: true,
+      roomId: room.roomId,
+      participants: getParticipants(room)
+    }
+  })
 }
 
 export async function sendPartyChat(
@@ -764,18 +933,35 @@ export async function sendPartyChat(
   }
 
   connection.lastSeenAt = Date.now()
-  const createdAt = new Date(connection.lastSeenAt).toISOString()
-  const message: PartyChatMessage = {
-    kind: 'chat',
-    id: randomUUID(),
-    clientMessageId: clientMessageId || randomUUID(),
-    participant: cloneParticipant(connection.participant),
-    text,
-    createdAt
-  }
-
   const room = connection.room
-  await persistRoomMessage(room, message)
+  const participantId = connection.participant.id
+  const effectiveClientMessageId = clientMessageId || randomUUID()
+  const dedupeKey = clientMessageId ? `${participantId}:${clientMessageId}` : ''
+  const createdAt = new Date(connection.lastSeenAt).toISOString()
+
+  const message = await queueRoomWrite(room, async () => {
+    if (dedupeKey) {
+      const existing = room.clientMessages.get(dedupeKey)
+      if (existing) return existing
+    }
+    const currentParticipant = connection.participant ?? {
+      id: participantId,
+      nickname: '',
+      characterId: PARTY_SPECTATOR_ID,
+      order: null
+    }
+    const created: PartyChatMessage = {
+      kind: 'chat',
+      id: randomUUID(),
+      clientMessageId: effectiveClientMessageId,
+      participant: cloneParticipant(currentParticipant),
+      text,
+      createdAt
+    }
+    await partyChatStore.appendMessage(room.sessionId, created)
+    appendRoomMessage(room, created)
+    return created
+  })
 
   return {
     ok: true,
@@ -827,7 +1013,7 @@ export async function removePartyConnection(
 
   const room = connection.room
   const roomId = room?.roomId
-  if (!room || !roomId || !connection.participant) {
+  if (connection.replaced || !room || !roomId || !connection.participant) {
     maybeStopMaintenance()
     return null
   }

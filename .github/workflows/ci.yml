@@ -60,6 +60,9 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
+      - name: Run party room tests
+        run: pnpm run test:party:rooms
+
       - name: Typecheck
         run: pnpm run typecheck
 

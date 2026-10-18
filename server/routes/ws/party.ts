@@ -191,6 +191,7 @@ async function handleJoin(peer: PartyPeer, data: Record<string, unknown>): Promi
     type: 'JOINED',
     sessionId: result.sessionId,
     participantId: result.participantId,
+    reconnectToken: result.reconnectToken,
     room: result.room,
     messages: result.messages,
     participants: result.participants

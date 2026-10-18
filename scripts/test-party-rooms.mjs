@@ -433,3 +433,181 @@ test('a failed database write does not add a chat message to the room', async (t
   assert.equal(joined.ok, true)
   assert.equal(joined.messages.some(message => message.kind === 'chat' && message.text === '저장 실패'), false)
 })
+
+test('reconnectToken takes over a half-open connection, preserves participantId, and suppresses duplicate notices', async (t) => {
+  let firstClosed = false
+  const first = {
+    id: 'reconnect-first',
+    send() {},
+    close() {
+      firstClosed = true
+    }
+  }
+  const second = { id: 'reconnect-second', send() {}, close() {} }
+  const third = { id: 'reconnect-third', send() {}, close() {} }
+  const attacker = { id: 'reconnect-attacker', send() {}, close() {} }
+  for (const peer of [first, second, third, attacker]) {
+    assert.equal(registerPartyConnection(peer, 'reconnect-ip'), true)
+    t.after(() => removePartyConnection(peer))
+  }
+
+  assert.equal((await createPartyRoom('556677')).ok, true)
+  const initial = await joinPartyRoom(first, { roomId: '556677', nickname: '별붕이', characterId: '101', order: 'P2' })
+  assert.equal(initial.ok, true)
+  assert.equal(typeof initial.reconnectToken, 'string')
+  assert.ok(initial.reconnectToken.length > 0)
+  const initialNotice = await recordPartyJoin(first)
+  assert.equal(initialNotice?.notice.kind, 'join')
+
+  const firstChat = await sendPartyChat(first, { text: '끊기기 전 메시지', clientMessageId: 'msg-1' })
+  assert.equal(firstChat.ok, true)
+
+  // Without the token, a concurrent connection with the same nickname is rejected.
+  const rejected = await joinPartyRoom(attacker, { roomId: '556677', nickname: '별붕이', characterId: '101', reconnectToken: 'wrong-token' })
+  assert.equal(rejected.ok, false)
+  assert.equal(rejected.code, 'NICKNAME_TAKEN')
+
+  // With the valid reconnectToken, the new connection takes over while the first socket is still open.
+  const resumed = await joinPartyRoom(second, {
+    roomId: '556677',
+    nickname: '별붕이',
+    characterId: '101',
+    order: 'P2',
+    reconnectToken: initial.reconnectToken
+  })
+  assert.equal(resumed.ok, true)
+  assert.equal(resumed.participantId, initial.participantId)
+  assert.equal(resumed.reconnectToken, initial.reconnectToken)
+  assert.equal(resumed.participants.length, 1)
+  assert.equal(firstClosed, true)
+  assert.equal(await recordPartyJoin(second), null)
+  assert.equal(await removePartyConnection(first), null)
+  assert.equal(getPartyRoom('556677')?.participantCount, 1)
+
+  // Updating character on the resumed connection also updates messages sent before reconnecting.
+  const changed = await changePartyCharacter(second, '306')
+  assert.equal(changed.ok, true)
+
+  // Clean disconnect followed by reconnect with the same token also preserves participantId.
+  const leaveResult = await removePartyConnection(second)
+  assert.equal(leaveResult?.notice.kind, 'leave')
+  const rejoinedAfterClose = await joinPartyRoom(third, {
+    roomId: '556677',
+    nickname: '별붕이',
+    characterId: '306',
+    order: 'P2',
+    reconnectToken: initial.reconnectToken
+  })
+  assert.equal(rejoinedAfterClose.ok, true)
+  assert.equal(rejoinedAfterClose.participantId, initial.participantId)
+  const chatMessages = rejoinedAfterClose.messages.filter(message => message.kind === 'chat')
+  assert.equal(chatMessages.length, 1)
+  assert.equal(chatMessages[0].participant.id, initial.participantId)
+  assert.equal(chatMessages[0].participant.characterId, '306')
+})
+
+test('concurrent JOIN requests on the same socket cannot leave ghost participants in multiple rooms', async (t) => {
+  const peer = { id: 'concurrent-join-peer', send() {}, close() {} }
+  assert.equal(registerPartyConnection(peer, 'concurrent-join-ip'), true)
+  t.after(() => removePartyConnection(peer))
+
+  assert.equal((await createPartyRoom('667788')).ok, true)
+  assert.equal((await createPartyRoom('667789')).ok, true)
+
+  const results = await Promise.all([
+    joinPartyRoom(peer, { roomId: '667788', nickname: '동시입장', characterId: '101' }),
+    joinPartyRoom(peer, { roomId: '667789', nickname: '동시입장', characterId: '101' })
+  ])
+  const successes = results.filter(result => result.ok)
+  const failures = results.filter(result => !result.ok)
+  assert.equal(successes.length, 1)
+  assert.equal(failures.length, 1)
+  assert.equal(failures[0].code, 'ALREADY_JOINED')
+
+  await removePartyConnection(peer)
+  assert.equal(getPartyRoom('667788')?.participantCount, 0)
+  assert.equal(getPartyRoom('667789')?.participantCount, 0)
+})
+
+test('concurrent character and order updates are serialized and preserve spectator constraints', async (t) => {
+  const peer = { id: 'concurrent-state-peer', send() {}, close() {} }
+  assert.equal(registerPartyConnection(peer, 'concurrent-state-ip'), true)
+  t.after(async () => {
+    setPartyChatStore(memoryStore)
+    await removePartyConnection(peer)
+  })
+
+  assert.equal((await createPartyRoom('667790')).ok, true)
+  const joined = await joinPartyRoom(peer, { roomId: '667790', nickname: '상태변경', characterId: '101', order: 'P1' })
+  assert.equal(joined.ok, true)
+
+  let releaseUpdate
+  const gate = new Promise((resolve) => {
+    releaseUpdate = resolve
+  })
+  let firstUpdate = true
+  setPartyChatStore({
+    ...memoryStore,
+    async updateParticipant(participant) {
+      if (firstUpdate) {
+        firstUpdate = false
+        await gate
+      }
+      await memoryStore.updateParticipant(participant)
+    }
+  })
+
+  const charPromise = changePartyCharacter(peer, 'spectator')
+  const orderPromise = changePartyOrder(peer, 'P2')
+  releaseUpdate()
+  const [charResult, orderResult] = await Promise.all([charPromise, orderPromise])
+  assert.equal(charResult.ok, true)
+  assert.equal(orderResult.ok, false)
+  assert.equal(orderResult.code, 'SPECTATOR_ORDER_DISABLED')
+  assert.equal(storedParticipants.get(joined.participantId).characterId, 'spectator')
+  assert.equal(storedParticipants.get(joined.participantId).order, null)
+})
+
+test('disconnecting while recordPartyJoin is persisting does not throw and deduplicates clientMessageId', async (t) => {
+  const peer = { id: 'join-persist-peer', send() {}, close() {} }
+  assert.equal(registerPartyConnection(peer, 'join-persist-ip'), true)
+  t.after(async () => {
+    setPartyChatStore(memoryStore)
+    await removePartyConnection(peer)
+  })
+
+  assert.equal((await createPartyRoom('667791')).ok, true)
+  const joined = await joinPartyRoom(peer, { roomId: '667791', nickname: '공지경합', characterId: '101' })
+  assert.equal(joined.ok, true)
+
+  // Duplicate clientMessageId from the same participant is idempotent.
+  const firstSend = await sendPartyChat(peer, { text: '중복 방지 메시지', clientMessageId: 'dedupe-id-1' })
+  const secondSend = await sendPartyChat(peer, { text: '중복 방지 메시지', clientMessageId: 'dedupe-id-1' })
+  assert.equal(firstSend.ok, true)
+  assert.equal(secondSend.ok, true)
+  assert.equal(firstSend.message.id, secondSend.message.id)
+  assert.equal(storedSessions.get(joined.sessionId).messages.filter(m => m.kind === 'chat').length, 1)
+
+  let releaseJoinNotice
+  const noticeGate = new Promise((resolve) => {
+    releaseJoinNotice = resolve
+  })
+  let blockJoinNotice = true
+  setPartyChatStore({
+    ...memoryStore,
+    async appendMessage(sessionId, message) {
+      if (blockJoinNotice && message.kind === 'join') {
+        blockJoinNotice = false
+        await noticeGate
+      }
+      await memoryStore.appendMessage(sessionId, message)
+    }
+  })
+
+  const joinNoticePromise = recordPartyJoin(peer)
+  const leavePromise = removePartyConnection(peer)
+  releaseJoinNotice()
+  const [joinNoticeResult, leaveResult] = await Promise.all([joinNoticePromise, leavePromise])
+  assert.equal(joinNoticeResult?.notice.kind, 'join')
+  assert.equal(leaveResult?.notice.kind, 'leave')
+})

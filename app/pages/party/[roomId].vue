@@ -1,5 +1,18 @@
 <script setup lang="ts">
-import { PARTY_ORDERS, PARTY_ROOM_ID_PATTERN, PARTY_SPECTATOR_ID, PARTY_UNSELECTED_ID, getPartyCharacterImage, type PartyCharacter, type PartyCharacterId, type PartyOrder, type PartyRoomSummary } from '#shared/types/party'
+import {
+  PARTY_MAX_NICKNAME_LENGTH,
+  PARTY_MAX_TEXT_LENGTH,
+  PARTY_ORDERS,
+  PARTY_ROOM_ID_PATTERN,
+  PARTY_SPECTATOR_ID,
+  PARTY_UNSELECTED_ID,
+  getPartyCharacterImage,
+  getPartyTextLength,
+  type PartyCharacter,
+  type PartyCharacterId,
+  type PartyOrder,
+  type PartyRoomSummary
+} from '#shared/types/party'
 import { readBrowserStorage, writeBrowserStorage } from '~/utils/browser-storage'
 import { getRequestErrorMessage } from '~/utils/request-error'
 
@@ -15,14 +28,9 @@ enteredRoom.value = null
 const enteredNickname = useState<string | null>('party-nickname-handoff', () => null)
 const providedNickname = enteredNickname.value
 enteredNickname.value = null
-const { data: room, error: roomError, status: roomStatus, refresh: refreshRoom } = await useFetch<PartyRoomSummary>('/api/party/rooms', {
-  key: `party-room-${roomId}`,
-  method: 'POST',
-  body: { roomId },
-  server: false,
-  immediate: false
-})
-if (handoff) room.value = handoff
+const room = ref<PartyRoomSummary | null>(handoff)
+const roomError = ref<{ statusCode?: number, message?: string } | null>(null)
+const roomStatus = ref<'idle' | 'pending' | 'success' | 'error'>(handoff ? 'success' : 'idle')
 const { data: characters, error: charactersError, status: charactersStatus, refresh: refreshCharacters } = await useFetch<PartyCharacter[]>('/api/party/characters', { default: () => [] })
 const { status, messages, participants, participantId, activeCharacterId, activeOrder, error, errorCode, joined, loadingOlder, hasOlder, historyError, join, send, takeLocalMessage, loadOlder, changeCharacter, changeOrder } = usePartyChat(roomId)
 const nickname = ref(providedNickname || '')
@@ -40,20 +48,95 @@ const draft = ref('')
 const formError = ref('')
 const copied = ref(false)
 const showParticipants = ref(false)
-const messageList = useTemplateRef('messageList')
-const input = useTemplateRef('chatInput')
+const messageList = useTemplateRef<HTMLElement>('messageList')
+const input = useTemplateRef<HTMLTextAreaElement>('chatInput')
 const { supported: pipSupported, target: pipTarget, opening: pipOpening, error: pipError, open: openPip, close: closePip } = usePartyPictureInPicture()
 const { showToast } = useAppToast()
 // The default portal uses the main page. Disable it while chat is in the PiP document.
 const useDefaultOverlayPortal = computed(() => !pipTarget.value)
 const nearBottom = ref(true)
 const unread = ref(0)
-const keyboardInset = ref(0)
 const isComposerFocused = ref(false)
-const KEYBOARD_INSET_THRESHOLD = 80
+const isComposingInput = ref(false)
 let visualViewport: VisualViewport | null = null
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 let historyScrollAnchor: { before: string, top: number, height: number } | null = null
+let isPageUnmounted = false
+let roomRequestGeneration = 0
+let roomRequestController: AbortController | undefined
+let nicknameRequestController: AbortController | undefined
+
+function focusComposer() {
+  input.value?.focus()
+}
+
+function resizeComposer() {
+  const el = input.value
+  if (!el || isComposingInput.value) return
+  el.style.height = 'auto'
+  const view = el.ownerDocument.defaultView ?? window
+  const styles = view.getComputedStyle(el)
+  const lineHeight = Number.parseFloat(styles.lineHeight) || 20
+  const paddingTop = Number.parseFloat(styles.paddingTop) || 0
+  const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0
+  const maxHeight = lineHeight * 6 + paddingTop + paddingBottom
+  const nextHeight = Math.min(el.scrollHeight, maxHeight)
+  el.style.height = `${Math.max(nextHeight, lineHeight + paddingTop + paddingBottom)}px`
+  el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
+}
+
+function onComposerInput() {
+  if (!isComposingInput.value) {
+    resizeComposer()
+  }
+}
+
+function onComposerCompositionStart() {
+  isComposingInput.value = true
+}
+
+function onComposerCompositionEnd() {
+  isComposingInput.value = false
+  requestAnimationFrame(resizeComposer)
+}
+
+watch(draft, (value) => {
+  if (!value && input.value && !isComposingInput.value) {
+    input.value.style.height = 'auto'
+    input.value.style.overflowY = 'hidden'
+  }
+})
+
+async function refreshRoom() {
+  if (isPageUnmounted) return
+  const generation = ++roomRequestGeneration
+  roomRequestController?.abort()
+  const controller = new AbortController()
+  roomRequestController = controller
+  roomStatus.value = 'pending'
+  roomError.value = null
+  try {
+    const fetched = await $fetch<PartyRoomSummary>('/api/party/rooms', {
+      method: 'POST',
+      body: { roomId },
+      signal: controller.signal
+    })
+    if (isPageUnmounted || generation !== roomRequestGeneration) return
+    room.value = fetched
+    roomError.value = null
+    roomStatus.value = 'success'
+  } catch (cause) {
+    if (isPageUnmounted || controller.signal.aborted || generation !== roomRequestGeneration) return
+    if (room.value || joined.value) return
+    const statusCode = (cause as { statusCode?: number, data?: { statusCode?: number } })?.statusCode
+      ?? (cause as { data?: { statusCode?: number } })?.data?.statusCode
+    roomError.value = {
+      statusCode,
+      message: getRequestErrorMessage(cause, '채팅방을 열지 못했습니다.')
+    }
+    roomStatus.value = 'error'
+  }
+}
 
 const orderColors: Record<PartyOrder, string> = {
   P1: 'bg-error/15 text-error',
@@ -85,7 +168,10 @@ const statusLabel = computed(() => status.value === 'idle'
 const statusColor = computed(() => status.value === 'idle'
   ? 'bg-warning'
   : status.value === 'connected' ? 'bg-success' : status.value === 'error' ? 'bg-error' : 'bg-warning')
-const canSend = computed(() => status.value === 'connected' && Boolean(draft.value.trim()) && draft.value.trim().length <= 1000)
+const canSend = computed(() => {
+  const trimmed = draft.value.trim()
+  return status.value === 'connected' && Boolean(trimmed) && getPartyTextLength(trimmed) <= PARTY_MAX_TEXT_LENGTH
+})
 const pipButtonLabel = computed(() => pipTarget.value ? '원래 페이지로 돌아가기' : '항상 위에 표시 (PiP)')
 
 watch([room, profileReady], ([value, ready]) => {
@@ -107,66 +193,60 @@ watch(nickname, () => {
 watch(pipTarget, async () => {
   showParticipants.value = false
   showCharacterPicker.value = false
-  keyboardInset.value = 0
   const scrollTop = messageList.value?.scrollTop ?? 0
   await nextTick()
   if (messageList.value) messageList.value.scrollTop = scrollTop
-  if (pipTarget.value) input.value?.textareaRef?.focus()
-  else updateKeyboardInset()
+  resizeComposer()
+  if (pipTarget.value) focusComposer()
+  else handleViewportResize()
 })
 
 onMounted(() => {
   visualViewport = window.visualViewport
-  window.addEventListener('resize', updateKeyboardInset)
-  visualViewport?.addEventListener('resize', updateKeyboardInset)
-  visualViewport?.addEventListener('scroll', updateKeyboardInset)
-  updateKeyboardInset()
+  window.addEventListener('resize', handleViewportResize)
+  visualViewport?.addEventListener('resize', handleViewportResize)
 
   if (!providedNickname) nickname.value = readBrowserStorage('party-nickname') || ''
-  if (providedNickname && nickname.value.trim() && nickname.value.trim().length <= 20) profileReady.value = true
+  const trimmedNickname = nickname.value.trim()
+  if (providedNickname && trimmedNickname && getPartyTextLength(trimmedNickname) <= PARTY_MAX_NICKNAME_LENGTH) profileReady.value = true
   else showNicknameModal.value = PARTY_ROOM_ID_PATTERN.test(roomId)
   if (!room.value) void refreshRoom()
 })
 onBeforeUnmount(() => {
+  isPageUnmounted = true
+  roomRequestController?.abort()
+  nicknameRequestController?.abort()
   clearTimeout(copyTimer)
-  window.removeEventListener('resize', updateKeyboardInset)
-  visualViewport?.removeEventListener('resize', updateKeyboardInset)
-  visualViewport?.removeEventListener('scroll', updateKeyboardInset)
+  window.removeEventListener('resize', handleViewportResize)
+  visualViewport?.removeEventListener('resize', handleViewportResize)
 })
 
-function updateKeyboardInset() {
-  if (!isComposerFocused.value || pipTarget.value || !visualViewport || visualViewport.scale !== 1) {
-    keyboardInset.value = 0
-    return
+function handleViewportResize() {
+  if (isComposerFocused.value && nearBottom.value && !isComposingInput.value) {
+    void scrollToBottom()
   }
-
-  const viewportBottom = visualViewport.offsetTop + visualViewport.height
-  const nextInset = Math.max(0, window.innerHeight - viewportBottom)
-  const inset = nextInset >= KEYBOARD_INSET_THRESHOLD ? Math.round(nextInset) : 0
-  if (keyboardInset.value === inset) return
-
-  keyboardInset.value = inset
-  if (nearBottom.value) void scrollToBottom()
 }
 
 function handleComposerFocus() {
   isComposerFocused.value = true
-  requestAnimationFrame(updateKeyboardInset)
+  if (nearBottom.value && !isComposingInput.value) {
+    requestAnimationFrame(() => void scrollToBottom())
+  }
 }
 
 function handleComposerBlur() {
   isComposerFocused.value = false
-  keyboardInset.value = 0
 }
 
 function enterRoom() {
-  if (connecting.value) return
+  if (isPageUnmounted || connecting.value) return
   formError.value = ''
-  if (!nickname.value.trim() || nickname.value.trim().length > 20) {
+  const trimmed = nickname.value.trim()
+  if (!trimmed || getPartyTextLength(trimmed) > PARTY_MAX_NICKNAME_LENGTH) {
     formError.value = '20자 이내의 닉네임을 입력해 주세요.'
     return
   }
-  nickname.value = nickname.value.trim()
+  nickname.value = trimmed
   join({ nickname: nickname.value, characterId: PARTY_SPECTATOR_ID, order: null })
 }
 
@@ -177,9 +257,9 @@ function isNicknameTakenResponse(cause: unknown): boolean {
 }
 
 async function submitNickname() {
-  if (submittingNickname.value) return
+  if (submittingNickname.value || isPageUnmounted) return
   const name = nickname.value.trim()
-  if (!name || name.length > 20) {
+  if (!name || getPartyTextLength(name) > PARTY_MAX_NICKNAME_LENGTH) {
     nicknameError.value = '20자 이내의 닉네임을 입력해 주세요.'
     return
   }
@@ -187,23 +267,36 @@ async function submitNickname() {
   nicknameError.value = ''
   formError.value = ''
   submittingNickname.value = true
+  const generation = ++roomRequestGeneration
+  roomRequestController?.abort()
+  nicknameRequestController?.abort()
+  const controller = new AbortController()
+  nicknameRequestController = controller
   try {
-    room.value = await $fetch<PartyRoomSummary>('/api/party/rooms', {
+    const fetched = await $fetch<PartyRoomSummary>('/api/party/rooms', {
       method: 'POST',
-      body: { roomId, nickname: name }
+      body: { roomId, nickname: name },
+      signal: controller.signal
     })
+    if (isPageUnmounted || controller.signal.aborted || generation !== roomRequestGeneration) return
+    room.value = fetched
+    roomError.value = null
+    roomStatus.value = 'success'
     nickname.value = name
     showNicknameModal.value = false
     profileReady.value = true
     enterRoom()
   } catch (cause) {
+    if (isPageUnmounted || controller.signal.aborted) return
     if (isNicknameTakenResponse(cause)) {
       nicknameError.value = '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
     } else {
       formError.value = getRequestErrorMessage(cause, '채팅방에 들어가지 못했습니다. 다시 시도해 주세요.')
     }
   } finally {
-    submittingNickname.value = false
+    if (nicknameRequestController === controller) {
+      submittingNickname.value = false
+    }
   }
 }
 
@@ -221,7 +314,7 @@ watch(joined, async (value) => {
   }
   writeBrowserStorage('party-nickname', nickname.value)
   await scrollToBottom()
-  input.value?.textareaRef?.focus()
+  focusComposer()
 })
 
 watch(activeCharacterId, (value) => {
@@ -265,11 +358,15 @@ function toggleCharacterPicker() {
 function submitMessage() {
   if (!canSend.value || !send(draft.value)) return
   draft.value = ''
-  void scrollToBottom().then(() => input.value?.textareaRef?.focus())
+  if (input.value) {
+    input.value.style.height = 'auto'
+    input.value.style.overflowY = 'hidden'
+  }
+  void scrollToBottom().then(() => focusComposer())
 }
 
 function onInputKeydown(event: KeyboardEvent) {
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+  if (event.key === 'Enter' && !event.shiftKey && !isComposingInput.value && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault()
     submitMessage()
   }
@@ -280,7 +377,10 @@ function restoreLocalMessage(clientMessageId: string) {
   const text = takeLocalMessage(clientMessageId)
   if (text === null) return
   draft.value = text
-  input.value?.textareaRef?.focus()
+  nextTick(() => {
+    resizeComposer()
+    focusComposer()
+  })
 }
 
 function onScroll() {
@@ -475,7 +575,7 @@ function togglePip() {
             />
           </UTooltip>
           <UTooltip
-            v-if="joined && pipSupported"
+            v-if="(joined || pipTarget) && pipSupported"
             :text="pipButtonLabel"
             :portal="useDefaultOverlayPortal"
             :delay-duration="0"
@@ -642,12 +742,12 @@ function togglePip() {
           </p>
         </div>
 
-        <div v-if="!room && !roomError && (roomStatus === 'idle' || roomStatus === 'pending')" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" role="status">
+        <div v-if="!joined && !room && !roomError && (roomStatus === 'idle' || roomStatus === 'pending')" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" role="status">
           <p class="text-sm text-muted">
             채팅방을 여는 중입니다…
           </p>
         </div>
-        <div v-else-if="!room" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+        <div v-else-if="!joined && !room" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <UIcon name="i-tabler-message-off" class="size-8 text-dimmed" />
           <h2 class="font-semibold">
             {{ roomError?.statusCode === 400 ? '올바르지 않은 방 ID입니다.' : '채팅방을 열지 못했습니다.' }}
@@ -778,7 +878,6 @@ function togglePip() {
                 </div>
                 <form
                   class="sticky bottom-0 mt-auto flex flex-col pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-                  :style="keyboardInset ? { bottom: `${keyboardInset}px`, marginBottom: `${keyboardInset}px`, paddingBottom: '0px' } : undefined"
                   @submit.prevent="submitMessage"
                 >
                   <UButton
@@ -795,19 +894,17 @@ function togglePip() {
                   <div class="mx-auto w-full max-w-4xl bg-muted/80 backdrop-blur-md border border-default">
                     <div class="flex items-end gap-2">
                       <UFormField name="message" class="min-w-0 flex-1">
-                        <UTextarea
+                        <textarea
                           ref="chatInput"
                           v-model="draft"
                           aria-label="채팅 메시지"
                           :placeholder="status === 'connected' ? '메시지 입력...' : '다시 연결되면 메시지를 보낼 수 있습니다.'"
-                          :maxlength="1000"
-                          color="neutral"
-                          variant="none"
-                          autoresize
+                          :maxlength="2000"
                           :rows="1"
-                          :maxrows="6"
-                          class="w-full"
-                          :ui="{ base: 'p-4' }"
+                          class="block w-full resize-none appearance-none border-0 bg-transparent p-4 text-base/5 text-highlighted placeholder:text-dimmed focus:outline-none md:text-sm"
+                          @input="onComposerInput"
+                          @compositionstart="onComposerCompositionStart"
+                          @compositionend="onComposerCompositionEnd"
                           @focus="handleComposerFocus"
                           @blur="handleComposerBlur"
                           @keydown="onInputKeydown"
@@ -829,57 +926,58 @@ function togglePip() {
             </div>
           </div>
         </template>
+        <UModal
+          v-model:open="showNicknameModal"
+          :title="`채팅방 입장 - ${roomId}`"
+          :portal="useDefaultOverlayPortal"
+          :dismissible="false"
+          :close="false"
+          :ui="{ overlay: 'z-50', content: 'z-50', footer: 'justify-end' }"
+        >
+          <template #body>
+            <form id="party-nickname-form" class="space-y-4" @submit.prevent="submitNickname">
+              <UFormField
+                label="닉네임"
+                name="nickname"
+                :error="nicknameError || undefined"
+                required
+              >
+                <UInput
+                  v-model="nickname"
+                  placeholder="파티원에게 표시할 이름"
+                  :maxlength="40"
+                  required
+                  autofocus
+                  autocomplete="nickname"
+                  color="neutral"
+                  :disabled="submittingNickname"
+                  class="w-full"
+                />
+              </UFormField>
+              <p v-if="formError" role="alert" class="text-sm text-error">
+                {{ formError }}
+              </p>
+            </form>
+          </template>
+          <template #footer>
+            <UButton
+              :to="{ path: '/party', query: { roomId } }"
+              label="돌아가기"
+              color="neutral"
+              variant="ghost"
+            />
+            <UButton
+              type="submit"
+              form="party-nickname-form"
+              label="입장"
+              color="info"
+              variant="soft"
+              :loading="submittingNickname"
+              :disabled="submittingNickname || !nickname.trim() || getPartyTextLength(nickname.trim()) > PARTY_MAX_NICKNAME_LENGTH"
+            />
+          </template>
+        </UModal>
       </div>
     </Teleport>
-    <UModal
-      v-model:open="showNicknameModal"
-      :title="`채팅방 입장 - ${roomId}`"
-      :dismissible="false"
-      :close="false"
-      :ui="{ footer: 'justify-end' }"
-    >
-      <template #body>
-        <form id="party-nickname-form" class="space-y-4" @submit.prevent="submitNickname">
-          <UFormField
-            label="닉네임"
-            name="nickname"
-            :error="nicknameError || undefined"
-            required
-          >
-            <UInput
-              v-model="nickname"
-              placeholder="파티원에게 표시할 이름"
-              :maxlength="20"
-              required
-              autofocus
-              autocomplete="nickname"
-              color="neutral"
-              :disabled="submittingNickname"
-              class="w-full"
-            />
-          </UFormField>
-          <p v-if="formError" role="alert" class="text-sm text-error">
-            {{ formError }}
-          </p>
-        </form>
-      </template>
-      <template #footer>
-        <UButton
-          :to="{ path: '/party', query: { roomId } }"
-          label="돌아가기"
-          color="neutral"
-          variant="ghost"
-        />
-        <UButton
-          type="submit"
-          form="party-nickname-form"
-          label="입장"
-          color="info"
-          variant="soft"
-          :loading="submittingNickname"
-          :disabled="submittingNickname || !nickname.trim() || nickname.trim().length > 20"
-        />
-      </template>
-    </UModal>
   </div>
 </template>
