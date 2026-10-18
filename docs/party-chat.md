@@ -39,7 +39,7 @@ API를 지원하지 않는 브라우저에서는 PiP 버튼을 숨긴다. PiP �
 클라이언트 이벤트:
 
 ```json
-{ "type": "JOIN", "roomId": "001234", "nickname": "닉네임", "characterId": "spectator", "order": null }
+{ "type": "JOIN", "roomId": "001234", "nickname": "닉네임", "characterId": "spectator", "order": null, "reconnectToken": "optional-token" }
 { "type": "JOIN", "roomId": "001234", "nickname": "미선택 플레이어", "characterId": "unselected", "order": "P3" }
 { "type": "SET_CHARACTER", "characterId": "unselected" }
 { "type": "SET_CHARACTER", "characterId": "306" }
@@ -56,13 +56,14 @@ API를 지원하지 않는 브라우저에서는 PiP 버튼을 숨긴다. PiP �
   "type": "JOINED",
   "sessionId": "uuid",
   "participantId": "uuid",
+  "reconnectToken": "uuid",
   "room": { "roomId": "001234", "participantCount": 1, "createdAt": "..." },
   "messages": [],
   "participants": []
 }
 ```
 
-입장에 성공하면 `{ "type": "JOIN_NOTICE", "notice": { "kind": "join", "id": "uuid", "nickname": "닉네임", "createdAt": "..." } }`가 같은 방의 모든 참가자에게 전달되고 최근 기록에 남는다. 연결이 종료되면 `{ "type": "LEAVE_NOTICE", "notice": { "kind": "leave", "id": "uuid", "nickname": "닉네임", "createdAt": "..." } }`가 남은 참가자에게 전달되고 기록에 남는다. 화면에는 각각 `닉네임님이 채팅방에 입장했습니다.`, `닉네임님이 채팅방에서 나갔습니다.`로 표시한다. `JOINED.messages`에는 이전 채팅과 입·퇴장 알림이 시간순으로 들어간다. 채팅은 `{ "type": "CHAT", "message": { "kind": "chat", "id": "uuid", "clientMessageId": "local-id", "participant": { "characterId": "spectator", "order": null }, "text": "...", "createdAt": "..." } }`로 전달된다. `clientMessageId`는 선택사항이며 생략하면 서버가 생성한다. 입장·퇴장·캐릭터·순서 변경 때 `PARTICIPANTS`가 전달되고, 변경 시 해당 참가자의 최근 채팅 캐릭터와 순서도 갱신된다. `PING`에는 `PONG`으로 응답한다. 연결이 끊기면 클라이언트는 새 연결에서 같은 `JOIN` 정보를 다시 보내야 한다.
+입장에 성공하면 `{ "type": "JOIN_NOTICE", "notice": { "kind": "join", "id": "uuid", "nickname": "닉네임", "createdAt": "..." } }`가 같은 방의 모든 참가자에게 전달되고 최근 기록에 남는다. 연결이 종료되면 `{ "type": "LEAVE_NOTICE", "notice": { "kind": "leave", "id": "uuid", "nickname": "닉네임", "createdAt": "..." } }`가 남은 참가자에게 전달되고 기록에 남는다. 화면에는 각각 `닉네임님이 채팅방에 입장했습니다.`, `닉네임님이 채팅방에서 나갔습니다.`로 표시한다. `JOINED.messages`에는 이전 채팅과 입·퇴장 알림이 시간순으로 들어간다. 채팅은 `{ "type": "CHAT", "message": { "kind": "chat", "id": "uuid", "clientMessageId": "local-id", "participant": { "characterId": "spectator", "order": null }, "text": "...", "createdAt": "..." } }`로 전달된다. `clientMessageId`는 선택사항이며 생략하면 서버가 생성한다. 같은 참가자가 동일한 `clientMessageId`로 다시 보낸 메시지는 중복 저장하지 않고 기존 메시지를 반환한다. 입장·퇴장·캐릭터·순서 변경 때 `PARTICIPANTS`가 전달되고, 변경 시 해당 참가자의 최근 채팅 캐릭터와 순서도 갱신된다. `PING`에는 `PONG`으로 응답한다. 연결이 끊기면 클라이언트는 새 연결에서 `JOINED`로 받은 `reconnectToken`을 함께 보내 기존 참가자 ID를 승계하고 남아 있는 이전 소켓을 정리한다.
 
 메시지 텍스트는 trim 후 비어 있지 않아야 하며 최대 1,000자다. JSON 문자열만 받으므로 HTML을 실행하지 않고, 화면에서는 텍스트로 렌더링해야 한다. 서버는 채팅과 입·퇴장 알림을 합쳐 최근 최대 300개, 직렬화된 메시지 크기 합계 최대 256KiB만 메모리에 보관한다. 클라이언트는 전송 직후 입력칸을 비우고 메시지를 임시로 표시한다. 전송 중에는 메시지 텍스트의 밝기가 변하며, 서버에서 DB 저장을 마친 뒤 돌아온 `clientMessageId`가 같은 메시지로 교체된다. 실패하면 임시 메시지에 오류와 다시 입력 버튼을 표시한다. 연결이 끊겨 결과를 확인할 수 없는 경우에는 중복 전송 가능성을 알려준다. 화면에서 위로 스크롤하면 이미 입장한 웹소켓 연결에서 `HISTORY`를 요청해 세션의 이전 기록을 50개씩 가져온다. 서버는 `{ "type": "HISTORY", "before": "요청한 UUID", "messages": [], "hasMore": false }` 형태로 응답한다. 캐릭터·순서 변경은 DB의 참여자 정보에도 반영하므로 과거 메시지에 최신 설정이 표시된다.
 

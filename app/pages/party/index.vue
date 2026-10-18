@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { PARTY_ROOM_ID_PATTERN, type PartyRoomSummary } from '#shared/types/party'
+import {
+  PARTY_MAX_NICKNAME_LENGTH,
+  PARTY_ROOM_ID_PATTERN,
+  getPartyTextLength,
+  type PartyRoomSummary
+} from '#shared/types/party'
 import { readBrowserStorage } from '~/utils/browser-storage'
 import { getRequestErrorMessage } from '~/utils/request-error'
 import { pastePartyNumber, sanitizePartyNumberInput } from '~/utils/party-number-input'
@@ -39,7 +44,7 @@ async function enterRoom() {
     return
   }
   const name = nickname.value.trim()
-  if (!name || name.length > 20) {
+  if (!name || getPartyTextLength(name) > PARTY_MAX_NICKNAME_LENGTH) {
     nicknameError.value = '20자 이내의 닉네임을 입력해 주세요.'
     return
   }
@@ -106,7 +111,7 @@ async function enterRoom() {
         <UInput
           v-model="nickname"
           placeholder="파티원에게 표시할 이름"
-          :maxlength="20"
+          :maxlength="40"
           required
           autocomplete="nickname"
           color="neutral"
@@ -121,7 +126,7 @@ async function enterRoom() {
         color="info"
         variant="soft"
         :loading="submitting"
-        :disabled="submitting || !PARTY_ROOM_ID_PATTERN.test(roomId) || !nickname.trim() || nickname.trim().length > 20"
+        :disabled="submitting || !PARTY_ROOM_ID_PATTERN.test(roomId) || !nickname.trim() || getPartyTextLength(nickname.trim()) > PARTY_MAX_NICKNAME_LENGTH"
         block
         class="py-2"
       />

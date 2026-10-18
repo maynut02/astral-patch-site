@@ -177,6 +177,8 @@ test('Party HTTP and WebSocket integration', { timeout: 60_000 }, async (t) => {
     alice.send({ type: 'JOIN', roomId, ...profile, nickname: '앨리스' })
     const aliceJoined = await alice.wait(message => message.type === 'JOINED')
     aliceId = aliceJoined.participantId
+    assert.equal(typeof aliceJoined.reconnectToken, 'string')
+    assert.ok(aliceJoined.reconnectToken.length > 0)
     assertRoomSummary(aliceJoined.room, roomId)
     const aliceNotice = await alice.wait(message => message.type === 'JOIN_NOTICE')
     assert.equal(aliceNotice.notice.kind, 'join')
