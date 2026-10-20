@@ -32,7 +32,7 @@ const room = ref<PartyRoomSummary | null>(handoff)
 const roomError = ref<{ statusCode?: number, message?: string } | null>(null)
 const roomStatus = ref<'idle' | 'pending' | 'success' | 'error'>(handoff ? 'success' : 'idle')
 const { data: characters, error: charactersError, status: charactersStatus, refresh: refreshCharacters } = await useFetch<PartyCharacter[]>('/api/party/characters', { default: () => [] })
-const { status, messages, participants, participantId, activeCharacterId, activeOrder, error, errorCode, joined, loadingOlder, hasOlder, historyError, join, send, takeLocalMessage, loadOlder, changeCharacter, changeOrder } = usePartyChat(roomId)
+const { status, messages, participants, participantId, activeCharacterId, activeOrder, error, admissionErrorCode, recovering, joined, loadingOlder, hasOlder, historyError, join, send, takeLocalMessage, loadOlder, changeCharacter, changeOrder, getResumeContext, clearResumeContext, retryAdmission } = usePartyChat(roomId)
 const nickname = ref(providedNickname || '')
 const nicknameError = ref('')
 const submittingNickname = ref(false)
@@ -113,12 +113,15 @@ async function refreshRoom() {
   roomRequestController?.abort()
   const controller = new AbortController()
   roomRequestController = controller
+  // 재개 기록이 있으면 HTTP 사전 확인에도 토큰을 붙여 소유권을 확인받는다.
+  const resumeName = nickname.value.trim()
+  const resume = resumeName ? getResumeContext(resumeName) : null
   roomStatus.value = 'pending'
   roomError.value = null
   try {
     const fetched = await $fetch<PartyRoomSummary>('/api/party/rooms', {
       method: 'POST',
-      body: { roomId },
+      body: { roomId, ...(resume ? { nickname: resumeName, reconnectToken: resume.reconnectToken } : {}) },
       signal: controller.signal
     })
     if (isPageUnmounted || generation !== roomRequestGeneration) return
@@ -127,6 +130,16 @@ async function refreshRoom() {
     roomStatus.value = 'success'
   } catch (cause) {
     if (isPageUnmounted || controller.signal.aborted || generation !== roomRequestGeneration) return
+    if (resume && isNicknameTakenResponse(cause)) {
+      // 소유권이 확인되지 않은 재개 기록만 버리고, 새로 고침 복구에서는 모달을 강제하지 않는다.
+      clearResumeContext()
+      roomError.value = {
+        statusCode: 409,
+        message: '이전 채팅 세션을 이어갈 수 없습니다. 다시 입장하거나 다른 닉네임을 입력해 주세요.'
+      }
+      roomStatus.value = 'error'
+      return
+    }
     if (room.value || joined.value) return
     const statusCode = (cause as { statusCode?: number, data?: { statusCode?: number } })?.statusCode
       ?? (cause as { data?: { statusCode?: number } })?.data?.statusCode
@@ -178,8 +191,9 @@ watch([room, profileReady], ([value, ready]) => {
   if (value && ready && !joined.value && status.value === 'idle') enterRoom()
 }, { immediate: true })
 
-watch(errorCode, (code) => {
-  if (code !== 'NICKNAME_TAKEN') return
+watch(admissionErrorCode, (code) => {
+  // 복구 중 지속 충돌은 모달 대신 채팅 화면의 재시도/닉네임 변경 버튼으로 처리한다.
+  if (code !== 'NICKNAME_TAKEN' || recovering.value || joined.value) return
   profileReady.value = false
   nicknameError.value = error.value || '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
   showNicknameModal.value = true
@@ -208,8 +222,16 @@ onMounted(() => {
 
   if (!providedNickname) nickname.value = readBrowserStorage('party-nickname') || ''
   const trimmedNickname = nickname.value.trim()
-  if (providedNickname && trimmedNickname && getPartyTextLength(trimmedNickname) <= PARTY_MAX_NICKNAME_LENGTH) profileReady.value = true
-  else showNicknameModal.value = PARTY_ROOM_ID_PATTERN.test(roomId)
+  const validNickname = Boolean(trimmedNickname) && getPartyTextLength(trimmedNickname) <= PARTY_MAX_NICKNAME_LENGTH
+  const storedResume = validNickname ? getResumeContext(trimmedNickname) : null
+  if (providedNickname && validNickname) profileReady.value = true
+  if (storedResume) {
+    // 새로 고침은 닉네임 입력을 다시 요구하지 않고 저장된 세션으로 이어간다.
+    showNicknameModal.value = false
+    profileReady.value = true
+  } else if (!(providedNickname && validNickname)) {
+    showNicknameModal.value = PARTY_ROOM_ID_PATTERN.test(roomId)
+  }
   if (!room.value) void refreshRoom()
 })
 onBeforeUnmount(() => {
@@ -247,7 +269,8 @@ function enterRoom() {
     return
   }
   nickname.value = trimmed
-  join({ nickname: nickname.value, characterId: PARTY_SPECTATOR_ID, order: null })
+  // 저장된 재개 컨텍스트가 현재 방/닉네임과 맞을 때만 토큰을 붙여 세션을 이어간다.
+  join({ nickname: nickname.value, characterId: PARTY_SPECTATOR_ID, order: null }, getResumeContext(nickname.value) ?? undefined)
 }
 
 function isNicknameTakenResponse(cause: unknown): boolean {
@@ -267,6 +290,7 @@ async function submitNickname() {
   nicknameError.value = ''
   formError.value = ''
   submittingNickname.value = true
+  const resume = getResumeContext(name)
   const generation = ++roomRequestGeneration
   roomRequestController?.abort()
   nicknameRequestController?.abort()
@@ -275,7 +299,7 @@ async function submitNickname() {
   try {
     const fetched = await $fetch<PartyRoomSummary>('/api/party/rooms', {
       method: 'POST',
-      body: { roomId, nickname: name },
+      body: { roomId, nickname: name, ...(resume ? { reconnectToken: resume.reconnectToken } : {}) },
       signal: controller.signal
     })
     if (isPageUnmounted || controller.signal.aborted || generation !== roomRequestGeneration) return
@@ -750,15 +774,21 @@ function togglePip() {
         <div v-else-if="!joined && !room" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <UIcon name="i-tabler-message-off" class="size-8 text-dimmed" />
           <h2 class="font-semibold">
-            {{ roomError?.statusCode === 400 ? '올바르지 않은 방 ID입니다.' : '채팅방을 열지 못했습니다.' }}
+            {{ roomError?.statusCode === 400 ? '올바르지 않은 방 ID입니다.' : roomError?.statusCode === 409 ? '채팅 세션을 이어가지 못했습니다.' : '채팅방을 열지 못했습니다.' }}
           </h2>
           <p class="text-sm text-muted">
-            방 ID를 확인하거나 잠시 후 다시 시도해 주세요.
+            {{ roomError?.message || '방 ID를 확인하거나 잠시 후 다시 시도해 주세요.' }}
           </p>
           <UButton
             label="다시 시도"
             variant="outline"
             @click="refreshRoom()"
+          />
+          <UButton
+            v-if="roomError?.statusCode === 409"
+            label="닉네임 변경"
+            variant="outline"
+            @click="openNicknameModal"
           />
           <UButton :to="{ path: '/party', query: { roomId } }" label="방 ID와 닉네임 입력" variant="outline" />
         </div>
@@ -775,18 +805,43 @@ function togglePip() {
             {{ formError || error }}
           </p>
           <UButton
-            v-if="(status === 'error' || formError) && errorCode !== 'NICKNAME_TAKEN'"
+            v-if="(status === 'error' || formError) && admissionErrorCode !== 'NICKNAME_TAKEN'"
             label="다시 입장"
             color="info"
             variant="soft"
             @click="enterRoom"
+          />
+          <UButton
+            v-if="recovering && status === 'error'"
+            label="다시 연결"
+            color="info"
+            variant="soft"
+            @click="retryAdmission"
           />
           <UButton label="닉네임 변경" variant="outline" @click="openNicknameModal" />
         </div>
 
         <template v-else>
           <div v-if="error" role="alert" class="shrink-0 border-b border-default bg-muted px-4 py-2 text-xs text-warning">
-            {{ error }}
+            <div class="flex flex-wrap items-center gap-2">
+              <span>{{ error }}</span>
+              <UButton
+                v-if="status === 'error'"
+                label="다시 연결"
+                size="xs"
+                color="neutral"
+                variant="outline"
+                @click="retryAdmission"
+              />
+              <UButton
+                v-if="status === 'error' && admissionErrorCode === 'NICKNAME_TAKEN'"
+                label="닉네임 변경"
+                size="xs"
+                color="neutral"
+                variant="outline"
+                @click="openNicknameModal"
+              />
+            </div>
           </div>
           <div class="relative min-h-0 flex-1">
             <div

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { changePartyCharacter, changePartyOrder, createPartyRoom, getPartyHistory, getPartyRoom, isPartyCharacterId, isPartyNicknameTaken, joinPartyRoom, normalizePartyRoomId, PARTY_LIMITS, recordPartyJoin, registerPartyConnection, removePartyConnection, sendPartyChat, setPartyChatStore, touchPartyConnection } from '../server/utils/party-chat.ts'
+import { canResumePartyParticipant, changePartyCharacter, changePartyOrder, createPartyRoom, getPartyHistory, getPartyRoom, isPartyCharacterId, isPartyNicknameTaken, joinPartyRoom, normalizePartyRoomId, PARTY_LIMITS, recordPartyJoin, registerPartyConnection, removePartyConnection, sendPartyChat, setPartyChatStore, setPartyPresenceListener, touchPartyConnection } from '../server/utils/party-chat.ts'
 import { PARTY_CHARACTER_IDS, PARTY_ORDERS, PARTY_UNSELECTED_ID, getPartyCharacterImage } from '../shared/types/party.ts'
 
 // node --experimental-strip-types scripts/test-party-rooms.mjs
@@ -52,6 +52,17 @@ const memoryStore = {
   async deleteExpiredRooms() {}
 }
 setPartyChatStore(memoryStore)
+
+const presenceUpdates = []
+setPartyPresenceListener(update => presenceUpdates.push(update))
+
+function takePresence() {
+  return presenceUpdates.splice(0, presenceUpdates.length)
+}
+
+function leaveNotices(updates) {
+  return updates.flatMap(update => update.notice ? [update.notice] : [])
+}
 
 test('room IDs require six ASCII digits and preserve leading zeros', async () => {
   for (const value of ['000000', '001234', '123456', '999999']) {
@@ -212,16 +223,19 @@ test('room history respects message and byte limits', async (t) => {
   assert.ok(olderPage.messages.some(message => message.text === 'short-304'))
 })
 
-test('nicknames are unique within a room and released when the user leaves', async (t) => {
+test('nicknames are unique within a room and released by an intentional leave', async (t) => {
   const first = { id: 'nickname-first', send() {}, close() {} }
   const second = { id: 'nickname-second', send() {}, close() {} }
   const third = { id: 'nickname-third', send() {}, close() {} }
   for (const peer of [first, second, third]) {
     assert.equal(registerPartyConnection(peer, peer.id), true)
-    t.after(() => removePartyConnection(peer))
+    t.after(async () => {
+      await removePartyConnection(peer, Date.now(), 'leave')
+    })
   }
   assert.equal((await createPartyRoom('334455')).ok, true)
   assert.equal((await createPartyRoom('334456')).ok, true)
+  takePresence()
 
   assert.equal((await joinPartyRoom(first, { roomId: '334455', nickname: 'Alice', characterId: '101' })).ok, true)
   assert.equal(isPartyNicknameTaken('334455', 'ａｌｉｃｅ'), true)
@@ -229,14 +243,18 @@ test('nicknames are unique within a room and released when the user leaves', asy
   assert.equal(isPartyNicknameTaken('334456', 'Alice'), false)
   const duplicate = await joinPartyRoom(second, { roomId: '334455', nickname: 'ＡＬＩＣＥ', characterId: '101' })
   assert.equal(duplicate.code, 'NICKNAME_TAKEN')
+  assert.equal(duplicate.retryAfterMs, undefined)
   assert.equal(getPartyRoom('334455')?.participantCount, 1)
   assert.equal((await joinPartyRoom(second, { roomId: '334456', nickname: 'alice', characterId: '101' })).ok, true)
 
-  const departure = await removePartyConnection(first)
-  assert.equal(departure?.notice.kind, 'leave')
-  assert.equal(departure?.notice.nickname, 'Alice')
+  await removePartyConnection(first, Date.now(), 'leave')
+  const notices = leaveNotices(takePresence())
+  assert.equal(notices.length, 1)
+  assert.equal(notices[0].kind, 'leave')
+  assert.equal(notices[0].nickname, 'Alice')
   assert.equal(isPartyNicknameTaken('334455', 'alice'), false)
-  assert.equal(await removePartyConnection(first), null)
+  await removePartyConnection(first, Date.now(), 'leave')
+  assert.equal(leaveNotices(takePresence()).length, 0)
   const reclaimed = await joinPartyRoom(third, { roomId: '334455', nickname: 'alice', characterId: '101' })
   assert.equal(reclaimed.ok, true)
   assert.deepEqual(reclaimed.messages.map(message => message.kind), ['leave'])
@@ -448,7 +466,9 @@ test('reconnectToken takes over a half-open connection, preserves participantId,
   const attacker = { id: 'reconnect-attacker', send() {}, close() {} }
   for (const peer of [first, second, third, attacker]) {
     assert.equal(registerPartyConnection(peer, 'reconnect-ip'), true)
-    t.after(() => removePartyConnection(peer))
+    t.after(async () => {
+      await removePartyConnection(peer, Date.now(), 'leave')
+    })
   }
 
   assert.equal((await createPartyRoom('556677')).ok, true)
@@ -458,6 +478,7 @@ test('reconnectToken takes over a half-open connection, preserves participantId,
   assert.ok(initial.reconnectToken.length > 0)
   const initialNotice = await recordPartyJoin(first)
   assert.equal(initialNotice?.notice.kind, 'join')
+  takePresence()
 
   const firstChat = await sendPartyChat(first, { text: '끊기기 전 메시지', clientMessageId: 'msg-1' })
   assert.equal(firstChat.ok, true)
@@ -466,6 +487,7 @@ test('reconnectToken takes over a half-open connection, preserves participantId,
   const rejected = await joinPartyRoom(attacker, { roomId: '556677', nickname: '별붕이', characterId: '101', reconnectToken: 'wrong-token' })
   assert.equal(rejected.ok, false)
   assert.equal(rejected.code, 'NICKNAME_TAKEN')
+  assert.equal(rejected.retryAfterMs, undefined)
 
   // With the valid reconnectToken, the new connection takes over while the first socket is still open.
   const resumed = await joinPartyRoom(second, {
@@ -476,30 +498,40 @@ test('reconnectToken takes over a half-open connection, preserves participantId,
     reconnectToken: initial.reconnectToken
   })
   assert.equal(resumed.ok, true)
+  assert.equal(resumed.resumed, true)
   assert.equal(resumed.participantId, initial.participantId)
   assert.equal(resumed.reconnectToken, initial.reconnectToken)
   assert.equal(resumed.participants.length, 1)
   assert.equal(firstClosed, true)
   assert.equal(await recordPartyJoin(second), null)
-  assert.equal(await removePartyConnection(first), null)
+  // The replaced socket is already detached, so its close is a no-op and must not emit a notice.
+  await removePartyConnection(first, Date.now(), 'loss')
+  assert.equal(leaveNotices(takePresence()).length, 0)
   assert.equal(getPartyRoom('556677')?.participantCount, 1)
 
   // Updating character on the resumed connection also updates messages sent before reconnecting.
   const changed = await changePartyCharacter(second, '306')
   assert.equal(changed.ok, true)
+  takePresence()
 
-  // Clean disconnect followed by reconnect with the same token also preserves participantId.
-  const leaveResult = await removePartyConnection(second)
-  assert.equal(leaveResult?.notice.kind, 'leave')
+  // A socket loss during the grace window keeps the identity resumable.
+  const resumedToken = resumed.reconnectToken
+  await removePartyConnection(second, Date.now(), 'loss')
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  assert.equal(canResumePartyParticipant('556677', '별붕이', resumedToken), true)
+
   const rejoinedAfterClose = await joinPartyRoom(third, {
     roomId: '556677',
     nickname: '별붕이',
     characterId: '306',
     order: 'P2',
-    reconnectToken: initial.reconnectToken
+    reconnectToken: resumedToken
   })
   assert.equal(rejoinedAfterClose.ok, true)
+  assert.equal(rejoinedAfterClose.resumed, true)
   assert.equal(rejoinedAfterClose.participantId, initial.participantId)
+  assert.equal(rejoinedAfterClose.reconnectToken, resumedToken)
+  assert.equal(await recordPartyJoin(third), null)
   const chatMessages = rejoinedAfterClose.messages.filter(message => message.kind === 'chat')
   assert.equal(chatMessages.length, 1)
   assert.equal(chatMessages[0].participant.id, initial.participantId)
@@ -573,7 +605,7 @@ test('disconnecting while recordPartyJoin is persisting does not throw and dedup
   assert.equal(registerPartyConnection(peer, 'join-persist-ip'), true)
   t.after(async () => {
     setPartyChatStore(memoryStore)
-    await removePartyConnection(peer)
+    await removePartyConnection(peer, Date.now(), 'leave')
   })
 
   assert.equal((await createPartyRoom('667791')).ok, true)
@@ -587,6 +619,7 @@ test('disconnecting while recordPartyJoin is persisting does not throw and dedup
   assert.equal(secondSend.ok, true)
   assert.equal(firstSend.message.id, secondSend.message.id)
   assert.equal(storedSessions.get(joined.sessionId).messages.filter(m => m.kind === 'chat').length, 1)
+  takePresence()
 
   let releaseJoinNotice
   const noticeGate = new Promise((resolve) => {
@@ -605,9 +638,658 @@ test('disconnecting while recordPartyJoin is persisting does not throw and dedup
   })
 
   const joinNoticePromise = recordPartyJoin(peer)
-  const leavePromise = removePartyConnection(peer)
+  const leavePromise = removePartyConnection(peer, Date.now(), 'leave')
   releaseJoinNotice()
-  const [joinNoticeResult, leaveResult] = await Promise.all([joinNoticePromise, leavePromise])
+  const [joinNoticeResult] = await Promise.all([joinNoticePromise, leavePromise])
   assert.equal(joinNoticeResult?.notice.kind, 'join')
-  assert.equal(leaveResult?.notice.kind, 'leave')
+  const notices = leaveNotices(takePresence())
+  assert.equal(notices.length, 1)
+  assert.equal(notices[0].kind, 'leave')
+  assert.equal(notices[0].nickname, '공지경합')
+  const stored = storedSessions.get(joined.sessionId).messages.map(message => message.kind)
+  assert.deepEqual(stored.slice(-2), ['join', 'leave'])
+})
+
+test('intentional leave publishes presence before the blocked leave write resolves, and only one notice', async (t) => {
+  const peer = { id: 'leave-blocked-peer', send() {}, close() {} }
+  assert.equal(registerPartyConnection(peer, 'leave-blocked-ip'), true)
+  t.after(async () => {
+    setPartyChatStore(memoryStore)
+    await removePartyConnection(peer, Date.now(), 'leave')
+  })
+
+  assert.equal((await createPartyRoom('667792')).ok, true)
+  const joined = await joinPartyRoom(peer, { roomId: '667792', nickname: '차단퇴장', characterId: '101' })
+  assert.equal(joined.ok, true)
+  await recordPartyJoin(peer)
+  takePresence()
+
+  let releaseLeave
+  const leaveGate = new Promise((resolve) => {
+    releaseLeave = resolve
+  })
+  let blockLeave = true
+  setPartyChatStore({
+    ...memoryStore,
+    async appendMessage(sessionId, message) {
+      if (blockLeave && message.kind === 'leave') {
+        blockLeave = false
+        await leaveGate
+      }
+      await memoryStore.appendMessage(sessionId, message)
+    }
+  })
+
+  const removal = removePartyConnection(peer, Date.now(), 'leave')
+  await new Promise(resolve => setImmediate(resolve))
+
+  // 참가자 수 변화는 저장이 막혀 있어도 즉시 관찰된다.
+  assert.equal(getPartyRoom('667792')?.participantCount, 0)
+  const immediate = takePresence()
+  assert.equal(immediate.length, 1)
+  assert.deepEqual(immediate[0].participants, [])
+  assert.equal(immediate[0].notice, undefined)
+  assert.equal(storedSessions.get(joined.sessionId).messages.some(message => message.kind === 'leave'), false)
+
+  releaseLeave()
+  await removal
+  const afterWrite = leaveNotices(takePresence())
+  assert.equal(afterWrite.length, 1)
+  assert.equal(afterWrite[0].kind, 'leave')
+})
+
+test('a failed leave write publishes no leave notice and keeps the nickname reservation released', async (t) => {
+  const peer = { id: 'leave-fail-peer', send() {}, close() {} }
+  assert.equal(registerPartyConnection(peer, 'leave-fail-ip'), true)
+  t.after(async () => {
+    setPartyChatStore(memoryStore)
+    await removePartyConnection(peer, Date.now(), 'leave')
+  })
+
+  assert.equal((await createPartyRoom('667793')).ok, true)
+  assert.equal((await joinPartyRoom(peer, { roomId: '667793', nickname: '저장실패퇴장', characterId: '101' })).ok, true)
+  takePresence()
+
+  setPartyChatStore({
+    ...memoryStore,
+    async appendMessage(sessionId, message) {
+      if (message.kind === 'leave') throw new Error('leave write failed')
+      await memoryStore.appendMessage(sessionId, message)
+    }
+  })
+
+  await removePartyConnection(peer, Date.now(), 'leave')
+  setPartyChatStore(memoryStore)
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  assert.equal(isPartyNicknameTaken('667793', '저장실패퇴장'), false)
+})
+
+test('socket loss reserves the nickname for the grace window and expiry publishes exactly one leave', async (t) => {
+  const startedAt = Date.now()
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: startedAt })
+  const peer = { id: 'grace-peer', send() {}, close() {} }
+  const rival = { id: 'grace-rival', send() {}, close() {} }
+  for (const connection of [peer, rival]) {
+    assert.equal(registerPartyConnection(connection, connection.id), true)
+    t.after(async () => {
+      setPartyChatStore(memoryStore)
+      await removePartyConnection(connection, Date.now(), 'leave')
+    })
+  }
+
+  assert.equal((await createPartyRoom('667794')).ok, true)
+  const joined = await joinPartyRoom(peer, { roomId: '667794', nickname: 'Grace', characterId: '101' })
+  assert.equal(joined.ok, true)
+  takePresence()
+
+  await removePartyConnection(peer, startedAt, 'loss')
+  const lossUpdates = takePresence()
+  // 손실은 즉시 참가자 목록만 갱신하고 퇴장 공지를 만들지 않는다.
+  assert.equal(lossUpdates.length, 1)
+  assert.equal(lossUpdates[0].notice, undefined)
+  assert.equal(getPartyRoom('667794')?.participantCount, 0)
+  assert.equal(isPartyNicknameTaken('667794', 'grace'), true)
+
+  // 다른 참가자는 유예가 끝날 때까지 같은 닉네임을 쓸 수 없다.
+  const blocked = await joinPartyRoom(rival, { roomId: '667794', nickname: 'ＧＲＡＣＥ', characterId: '101' })
+  assert.equal(blocked.ok, false)
+  assert.equal(blocked.code, 'NICKNAME_TAKEN')
+  assert.equal(blocked.retryAfterMs, PARTY_LIMITS.reconnectGraceMs)
+
+  // 유효 토큰 소유자는 예약을 무시하고 재개한다.
+  assert.equal(canResumePartyParticipant('667794', 'grace', joined.reconnectToken), true)
+  assert.equal(canResumePartyParticipant('667794', 'other', joined.reconnectToken), false)
+  assert.equal(canResumePartyParticipant('667794', 'grace', 'invalid-token'), false)
+
+  const resumed = await joinPartyRoom(rival, {
+    roomId: '667794',
+    nickname: 'grace',
+    characterId: '101',
+    reconnectToken: joined.reconnectToken
+  })
+  assert.equal(resumed.ok, true)
+  assert.equal(resumed.participantId, joined.participantId)
+  assert.equal(resumed.reconnectToken, joined.reconnectToken)
+  assert.equal(resumed.resumed, true)
+  assert.equal(getPartyRoom('667794')?.participantCount, 1)
+  assert.equal(leaveNotices(takePresence()).length, 0)
+
+  // 재개 뒤 다시 손실되면 새 유예가 시작되고, 중복 close는 아무 것도 만들지 않는다.
+  await removePartyConnection(rival, Date.now(), 'loss')
+  takePresence()
+  await removePartyConnection(rival, Date.now(), 'loss')
+  assert.equal(takePresence().length, 0)
+
+  const expiresAt = Date.now() + PARTY_LIMITS.reconnectGraceMs
+  t.mock.timers.setTime(expiresAt - 1)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(isPartyNicknameTaken('667794', 'grace'), true)
+  assert.equal(leaveNotices(takePresence()).length, 0)
+
+  t.mock.timers.tick(1)
+  await new Promise(resolve => setImmediate(resolve))
+  const expiryNotices = leaveNotices(takePresence())
+  assert.equal(expiryNotices.length, 1)
+  assert.equal(expiryNotices[0].kind, 'leave')
+  assert.equal(expiryNotices[0].nickname, 'grace')
+  assert.equal(isPartyNicknameTaken('667794', 'grace'), false)
+  assert.equal(canResumePartyParticipant('667794', 'grace', joined.reconnectToken), false)
+
+  // 만료 이후 늦게 남은 타이머는 아무 것도 만들지 않는다.
+  await new Promise(resolve => setImmediate(resolve))
+  t.mock.timers.tick(PARTY_LIMITS.reconnectGraceMs)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  assert.equal(storedSessions.get(joined.sessionId).messages.filter(message => message.kind === 'leave').length, 1)
+})
+
+test('a stale grace timer cannot expire a resumed identity, and a duplicated close is a no-op', async (t) => {
+  const first = { id: 'stale-first', send() {}, close() {} }
+  const second = { id: 'stale-second', send() {}, close() {} }
+  for (const connection of [first, second]) {
+    assert.equal(registerPartyConnection(connection, connection.id), true)
+    t.after(async () => {
+      setPartyChatStore(memoryStore)
+      await removePartyConnection(connection, Date.now(), 'leave')
+    })
+  }
+
+  assert.equal((await createPartyRoom('667795')).ok, true)
+  const joined = await joinPartyRoom(first, { roomId: '667795', nickname: 'Stale', characterId: '101' })
+  assert.equal(joined.ok, true)
+  takePresence()
+
+  const startedAt = Date.now()
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: startedAt })
+  await removePartyConnection(first, startedAt, 'loss')
+  takePresence()
+
+  // 유예 중 재개하면 이전 타이머를 취소한다.
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.reconnectGraceMs - 1)
+  const resumed = await joinPartyRoom(second, {
+    roomId: '667795',
+    nickname: 'Stale',
+    characterId: '101',
+    reconnectToken: joined.reconnectToken
+  })
+  assert.equal(resumed.ok, true)
+  assert.equal(resumed.resumed, true)
+
+  t.mock.timers.tick(PARTY_LIMITS.reconnectGraceMs * 2)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  assert.equal(getPartyRoom('667795')?.participantCount, 1)
+
+  // 두 번 호출된 close는 두 번째부터 아무 것도 하지 않는다.
+  await removePartyConnection(second, Date.now(), 'leave')
+  const notices = leaveNotices(takePresence())
+  assert.equal(notices.length, 1)
+  await removePartyConnection(second, Date.now(), 'leave')
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  assert.equal(storedSessions.get(joined.sessionId).messages.filter(message => message.kind === 'leave').length, 1)
+})
+
+test('live takeover releases the old connection IP quota immediately', async (t) => {
+  t.after(() => setPartyChatStore(memoryStore))
+  assert.equal((await createPartyRoom('667796')).ok, true)
+  const ip = 'takeover-quota-ip'
+  const original = { id: 'takeover-quota-original', send() {}, close() {} }
+  const replacement = { id: 'takeover-quota-replacement', send() {}, close() {} }
+  const blocked = { id: 'takeover-quota-blocked', send() {}, close() {} }
+  const next = { id: 'takeover-quota-next', send() {}, close() {} }
+
+  // 같은 IP의 동시 연결 한도를 정확히 채운 뒤 인계가 즉시 자리를 비우는지 본다.
+  const fillers = Array.from({ length: PARTY_LIMITS.maxConnectionsPerIp - 2 }, (_, index) => ({
+    id: `takeover-quota-filler-${index}`,
+    send() {},
+    close() {}
+  }))
+  for (const peer of [original, replacement, ...fillers]) {
+    assert.equal(registerPartyConnection(peer, ip), true)
+    t.after(async () => removePartyConnection(peer, Date.now(), 'leave'))
+  }
+  t.after(() => removePartyConnection(blocked, Date.now(), 'leave'))
+  t.after(() => removePartyConnection(next, Date.now(), 'leave'))
+  assert.equal(registerPartyConnection(blocked, ip), false)
+
+  const joined = await joinPartyRoom(original, { roomId: '667796', nickname: 'Quota', characterId: '101' })
+  assert.equal(joined.ok, true)
+
+  const resumed = await joinPartyRoom(replacement, {
+    roomId: '667796',
+    nickname: 'Quota',
+    characterId: '101',
+    reconnectToken: joined.reconnectToken
+  })
+  assert.equal(resumed.ok, true)
+  assert.equal(resumed.participantId, joined.participantId)
+  // 인계로 비워진 자리 덕분에 추가 연결을 받을 수 있다.
+  assert.equal(registerPartyConnection(next, ip), true)
+})
+
+test('rate exemption requires a normalized nickname owned by a live or pending token', async (t) => {
+  t.after(() => setPartyChatStore(memoryStore))
+  assert.equal((await createPartyRoom('667797')).ok, true)
+  const owner = { id: 'rate-owner', send() {}, close() {} }
+  const other = { id: 'rate-other', send() {}, close() {} }
+  const limiterIp = 'rate-exempt-ip'
+  for (const connection of [owner, other]) {
+    assert.equal(registerPartyConnection(connection, limiterIp), true)
+    t.after(async () => removePartyConnection(connection, Date.now(), 'leave'))
+  }
+
+  const joined = await joinPartyRoom(owner, { roomId: '667797', nickname: 'Rate', characterId: '101' })
+  assert.equal(joined.ok, true)
+  const token = joined.reconnectToken
+
+  // 예산을 모두 소진한 뒤의 제한은 남은 고정 창 시간을 알려준다.
+  let exhausted = 0
+  while (true) {
+    const guess = await joinPartyRoom(other, { roomId: '654320', nickname: '탐색', characterId: '101' })
+    if (guess.code !== 'ROOM_NOT_FOUND') {
+      assert.equal(guess.code, 'JOIN_RATE_LIMITED')
+      assert.ok(guess.retryAfterMs > 0 && guess.retryAfterMs <= PARTY_LIMITS.joinAttemptWindowMs)
+      break
+    }
+    exhausted++
+    assert.ok(exhausted <= PARTY_LIMITS.maxJoinAttemptsPerIp + 2)
+  }
+
+  // 정규화된 닉네임이 아니면 토큰만으로는 예외가 적용되지 않는다.
+  const wrongNickname = await joinPartyRoom(other, { roomId: '667797', nickname: '다른이름', characterId: '101', reconnectToken: token })
+  assert.equal(wrongNickname.code, 'JOIN_RATE_LIMITED')
+  assert.ok(wrongNickname.retryAfterMs > 0)
+
+  // 토큰이 유효하지 않아도 예외는 적용되지 않는다.
+  const wrongToken = await joinPartyRoom(other, { roomId: '667797', nickname: 'Rate', characterId: '101', reconnectToken: 'not-a-token' })
+  assert.equal(wrongToken.code, 'JOIN_RATE_LIMITED')
+  assert.ok(wrongToken.retryAfterMs > 0)
+
+  // 실제 소유자는 제한 창이 지나지 않았어도 재개할 수 있다.
+  const resumed = await joinPartyRoom(other, { roomId: '667797', nickname: 'rate', characterId: '101', reconnectToken: token })
+  assert.equal(resumed.ok, true)
+  assert.equal(resumed.resumed, true)
+})
+
+test('the join attempt fixed window resets on schedule and a lost exemption consumes exactly one attempt', async (t) => {
+  t.after(() => setPartyChatStore(memoryStore))
+  const startedAt = Date.now()
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: startedAt })
+  const peer = { id: 'window-peer', send() {}, close() {} }
+  assert.equal(registerPartyConnection(peer, 'window-ip'), true)
+  t.after(async () => {
+    await removePartyConnection(peer, Date.now(), 'leave')
+  })
+
+  const input = { roomId: '654321', nickname: '창', characterId: '101' }
+  for (let index = 0; index < PARTY_LIMITS.maxJoinAttemptsPerIp; index++) {
+    assert.equal((await joinPartyRoom(peer, input)).code, 'ROOM_NOT_FOUND')
+  }
+  const limited = await joinPartyRoom(peer, input)
+  assert.equal(limited.code, 'JOIN_RATE_LIMITED')
+  assert.equal(limited.retryAfterMs, PARTY_LIMITS.joinAttemptWindowMs)
+
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.joinAttemptWindowMs - 1)
+  const stillLimited = await joinPartyRoom(peer, input)
+  assert.equal(stillLimited.code, 'JOIN_RATE_LIMITED')
+  assert.equal(stillLimited.retryAfterMs, 1)
+
+  // 고정 창이 끝나면 새 예산이 시작된다.
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.joinAttemptWindowMs)
+  assert.equal((await joinPartyRoom(peer, input)).code, 'ROOM_NOT_FOUND')
+})
+
+test('queued CHAT keeps the accepted sender after the connection closes, and an earlier profile change lands first', async (t) => {
+  const peer = { id: 'chat-queue-peer', send() {}, close() {} }
+  assert.equal(registerPartyConnection(peer, 'chat-queue-ip'), true)
+  t.after(async () => {
+    setPartyChatStore(memoryStore)
+    await removePartyConnection(peer, Date.now(), 'leave')
+  })
+
+  assert.equal((await createPartyRoom('667798')).ok, true)
+  const joined = await joinPartyRoom(peer, { roomId: '667798', nickname: '큐발신자', characterId: '101' })
+  assert.equal(joined.ok, true)
+  await recordPartyJoin(peer)
+  takePresence()
+
+  let releaseProfile
+  const profileGate = new Promise((resolve) => {
+    releaseProfile = resolve
+  })
+  let blockProfile = true
+  setPartyChatStore({
+    ...memoryStore,
+    async updateParticipant(participant) {
+      if (blockProfile) {
+        blockProfile = false
+        await profileGate
+      }
+      await memoryStore.updateParticipant(participant)
+    }
+  })
+
+  const profilePromise = changePartyCharacter(peer, '306')
+  const chatPromise = sendPartyChat(peer, { text: '큐 대기 메시지', clientMessageId: 'queued-1' })
+  const closing = removePartyConnection(peer, Date.now(), 'leave')
+  releaseProfile()
+
+  const [profileResult, chatResult] = await Promise.all([profilePromise, chatPromise])
+  await closing
+  setPartyChatStore(memoryStore)
+
+  assert.equal(profileResult.ok, true)
+  assert.equal(chatResult.ok, true)
+  // 발신자 정보는 빈 닉네임/관전자 기본값으로 대체되지 않는다.
+  assert.equal(chatResult.message.participant.id, joined.participantId)
+  assert.equal(chatResult.message.participant.nickname, '큐발신자')
+  assert.equal(chatResult.message.participant.characterId, '306')
+  assert.equal(chatResult.message.text, '큐 대기 메시지')
+
+  const stored = storedSessions.get(joined.sessionId).messages
+  const storedChat = stored.find(message => message.kind === 'chat' && message.clientMessageId === 'queued-1')
+  assert.equal(storedChat.participant.id, joined.participantId)
+  assert.equal(storedChat.participant.nickname, '큐발신자')
+  assert.equal(storedChat.participant.characterId, '306')
+  // 저장 순서: 입장 공지 → 프로필 변경 반영된 채팅 → 퇴장
+  assert.deepEqual(stored.map(message => message.kind), ['join', 'chat', 'leave'])
+  assert.equal(storedParticipants.get(joined.participantId).characterId, '306')
+})
+
+test('a profile change queued before disconnect does not resurrect live presence or the token', async (t) => {
+  const peer = { id: 'profile-detach-peer', send() {}, close() {} }
+  assert.equal(registerPartyConnection(peer, 'profile-detach-ip'), true)
+  t.after(async () => {
+    setPartyChatStore(memoryStore)
+    await removePartyConnection(peer, Date.now(), 'leave')
+  })
+
+  assert.equal((await createPartyRoom('667799')).ok, true)
+  const joined = await joinPartyRoom(peer, { roomId: '667799', nickname: '분리프로필', characterId: '101' })
+  assert.equal(joined.ok, true)
+  takePresence()
+
+  let releaseProfile
+  const gate = new Promise((resolve) => {
+    releaseProfile = resolve
+  })
+  let block = true
+  setPartyChatStore({
+    ...memoryStore,
+    async updateParticipant(participant) {
+      if (block) {
+        block = false
+        await gate
+      }
+      await memoryStore.updateParticipant(participant)
+    }
+  })
+
+  const profilePromise = changePartyCharacter(peer, '306')
+  await new Promise(resolve => setImmediate(resolve))
+  // 퇴장 저장은 프로필 변경 뒤에 큐에서 기다리므로 완료를 기다리지 않고 먼저 확인한다.
+  const removal = removePartyConnection(peer, Date.now(), 'leave')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(getPartyRoom('667799')?.participantCount, 0)
+  takePresence()
+  releaseProfile()
+  const result = await profilePromise
+  await removal
+  setPartyChatStore(memoryStore)
+
+  assert.equal(result.ok, true)
+  // DB 갱신은 반영되지만 실시간 참가자/토큰은 되살아나지 않는다.
+  assert.equal(storedParticipants.get(joined.participantId).characterId, '306')
+  assert.equal(getPartyRoom('667799')?.participantCount, 0)
+  assert.equal(canResumePartyParticipant('667799', '분리프로필', joined.reconnectToken), false)
+})
+
+test('a stale grace deadline cannot expire a resumed identity early', async (t) => {
+  t.after(() => setPartyChatStore(memoryStore))
+  const startedAt = Date.now()
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: startedAt })
+  const first = { id: 'stale-queued-first', send() {}, close() {} }
+  const second = { id: 'stale-queued-second', send() {}, close() {} }
+  for (const connection of [first, second]) {
+    assert.equal(registerPartyConnection(connection, connection.id), true)
+    t.after(async () => {
+      setPartyChatStore(memoryStore)
+      await removePartyConnection(connection, Date.now(), 'leave')
+    })
+  }
+
+  assert.equal((await createPartyRoom('667800')).ok, true)
+  const joined = await joinPartyRoom(first, { roomId: '667800', nickname: '세대', characterId: '101' })
+  assert.equal(joined.ok, true)
+  takePresence()
+
+  // 첫 손실: 세대 1의 만료 시각은 startedAt + grace.
+  await removePartyConnection(first, startedAt, 'loss')
+  takePresence()
+
+  // 만료 직전에 재개하면 이전 세대 타이머/마감이 취소된다.
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.reconnectGraceMs - 1)
+  const resumed = await joinPartyRoom(second, {
+    roomId: '667800',
+    nickname: '세대',
+    characterId: '101',
+    reconnectToken: joined.reconnectToken
+  })
+  assert.equal(resumed.ok, true)
+  assert.equal(resumed.participantId, joined.participantId)
+  assert.equal(resumed.reconnectToken, joined.reconnectToken)
+
+  // 재개 시점에 다시 손실되면 새 세대의 유예는 그 시점부터 시작한다.
+  const lossAt = Date.now()
+  await removePartyConnection(second, lossAt, 'loss')
+  takePresence()
+
+  // 이전 세대의 마감을 지나도 새 세대는 만료되지 않는다(이전 타이머/콜백은 세대 검사로 무시).
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.reconnectGraceMs)
+  t.mock.timers.tick(1)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  assert.equal(isPartyNicknameTaken('667800', '세대'), true)
+  assert.equal(canResumePartyParticipant('667800', '세대', resumed.reconnectToken), true)
+
+  // 새 세대의 마감에만 정확히 한 건의 퇴장이 확정된다.
+  t.mock.timers.setTime(lossAt + PARTY_LIMITS.reconnectGraceMs)
+  t.mock.timers.tick(1)
+  await new Promise(resolve => setImmediate(resolve))
+  const notices = leaveNotices(takePresence())
+  assert.equal(notices.length, 1)
+  assert.equal(notices[0].nickname, '세대')
+  assert.equal(isPartyNicknameTaken('667800', '세대'), false)
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  assert.equal(storedSessions.get(joined.sessionId).messages.filter(message => message.kind === 'leave').length, 1)
+})
+
+test('a profile change accepted during the takeover await is rejected instead of desyncing the new participant', async (t) => {
+  t.after(() => setPartyChatStore(memoryStore))
+  const first = { id: 'takeover-profile-first', send() {}, close() {} }
+  const second = { id: 'takeover-profile-second', send() {}, close() {} }
+  for (const connection of [first, second]) {
+    assert.equal(registerPartyConnection(connection, connection.id), true)
+    t.after(async () => {
+      setPartyChatStore(memoryStore)
+      await removePartyConnection(connection, Date.now(), 'leave')
+    })
+  }
+
+  assert.equal((await createPartyRoom('667801')).ok, true)
+  const joined = await joinPartyRoom(first, { roomId: '667801', nickname: '인계프로필', characterId: '101', order: 'P1' })
+  assert.equal(joined.ok, true)
+  takePresence()
+
+  // 인계의 참가자 저장을 막고, 그 사이 이전 연결의 프로필 변경이 큐에 들어가게 한다.
+  let releaseAdmission
+  const admissionGate = new Promise((resolve) => {
+    releaseAdmission = resolve
+  })
+  let blockAdmission = true
+  setPartyChatStore({
+    ...memoryStore,
+    async addParticipant(sessionId, participant) {
+      if (blockAdmission) {
+        blockAdmission = false
+        await admissionGate
+      }
+      await memoryStore.addParticipant(sessionId, participant)
+    }
+  })
+
+  const takeoverPromise = joinPartyRoom(second, {
+    roomId: '667801',
+    nickname: '인계프로필',
+    characterId: '101',
+    order: 'P1',
+    reconnectToken: joined.reconnectToken
+  })
+  await new Promise(resolve => setImmediate(resolve))
+
+  // 인계 await 중 이전 연결이 수락한 프로필 작업: 인계 뒤에 실행되므로 적용되면 안 된다.
+  const staleCharacter = changePartyCharacter(first, '306')
+  const staleOrder = changePartyOrder(first, 'P4')
+  await new Promise(resolve => setImmediate(resolve))
+  releaseAdmission()
+
+  const takeover = await takeoverPromise
+  const [characterResult, orderResult] = await Promise.all([staleCharacter, staleOrder])
+  setPartyChatStore(memoryStore)
+
+  assert.equal(takeover.ok, true)
+  assert.equal(takeover.participantId, joined.participantId)
+  // 인계 뒤 도착한 낡은 작업은 거부되어 실시간 값, DB, 기록이 모두 일치한다.
+  assert.equal(characterResult.ok, false)
+  assert.equal(characterResult.code, 'NOT_IN_ROOM')
+  assert.equal(orderResult.ok, false)
+  assert.equal(orderResult.code, 'NOT_IN_ROOM')
+  assert.equal(storedParticipants.get(joined.participantId).characterId, '101')
+  assert.equal(storedParticipants.get(joined.participantId).order, 'P1')
+  assert.equal(getPartyRoom('667801')?.participantCount, 1)
+  const liveChat = await sendPartyChat(second, { text: '인계 후 메시지' })
+  assert.equal(liveChat.ok, true)
+  assert.equal(liveChat.message.participant.characterId, '101')
+  assert.equal(liveChat.message.participant.id, joined.participantId)
+
+  // 현재 연결의 프로필 변경은 정상 반영되어 DB/기록과 계속 일치한다.
+  const current = await changePartyCharacter(second, '306')
+  assert.equal(current.ok, true)
+  assert.equal(storedParticipants.get(joined.participantId).characterId, '306')
+  const afterChange = await sendPartyChat(second, { text: '변경 후' })
+  assert.equal(afterChange.message.participant.characterId, '306')
+})
+
+test('a queued admission whose pending reservation expires consumes one budget and rejects when exhausted', async (t) => {
+  t.after(() => setPartyChatStore(memoryStore))
+  const ip = 'lost-exemption-ip'
+  const startedAt = Date.now()
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: startedAt })
+  const owner = { id: 'lost-exemption-owner', send() {}, close() {} }
+  const contender = { id: 'lost-exemption-contender', send() {}, close() {} }
+  const stayer = { id: 'lost-exemption-stayer', send() {}, close() {} }
+  for (const connection of [owner, contender, stayer]) {
+    assert.equal(registerPartyConnection(connection, ip), true)
+    t.after(async () => {
+      setPartyChatStore(memoryStore)
+      await removePartyConnection(connection, Date.now(), 'leave')
+    })
+  }
+
+  assert.equal((await createPartyRoom('667802')).ok, true)
+  const joined = await joinPartyRoom(owner, { roomId: '667802', nickname: '만료예외', characterId: '101' })
+  assert.equal(joined.ok, true)
+  // 큐를 막을 상주 참가자는 예산 소진 전에 입장해 둔다.
+  assert.equal((await joinPartyRoom(stayer, { roomId: '667802', nickname: '상주', characterId: '101' })).ok, true)
+  takePresence()
+
+  // 소유자를 손실시켜 유예 예약을 만든다. 이 시점 입장은 토큰 예외 대상이다.
+  await removePartyConnection(owner, startedAt, 'loss')
+  takePresence()
+  assert.equal(canResumePartyParticipant('667802', '만료예외', joined.reconnectToken), true)
+
+  // 예산을 완전히 소진해, 예외가 사라진 뒤의 소비가 곧 거부가 되게 만든다.
+  while (true) {
+    const attempt = await joinPartyRoom(contender, { roomId: '654319', nickname: '소진', characterId: '101' })
+    if (attempt.code !== 'ROOM_NOT_FOUND') {
+      assert.equal(attempt.code, 'JOIN_RATE_LIMITED')
+      break
+    }
+  }
+
+  // 상주 참가자의 채팅 저장을 막아 이후 작업이 큐에서 대기하도록 한다.
+  let releaseWrite
+  const writeGate = new Promise((resolve) => {
+    releaseWrite = resolve
+  })
+  let blockWrite = true
+  setPartyChatStore({
+    ...memoryStore,
+    async appendMessage(sessionId, message) {
+      if (blockWrite && message.kind === 'chat') {
+        blockWrite = false
+        await writeGate
+      }
+      await memoryStore.appendMessage(sessionId, message)
+    }
+  })
+
+  const blockingChat = sendPartyChat(stayer, { text: '큐 차단', clientMessageId: 'lost-exemption-block' })
+  await new Promise(resolve => setImmediate(resolve))
+  // 사전 예외 판정은 아직 통과하지만 큐에서 대기한다.
+  const admission = joinPartyRoom(contender, {
+    roomId: '667802',
+    nickname: '만료예외',
+    characterId: '101',
+    reconnectToken: joined.reconnectToken
+  })
+  await new Promise(resolve => setImmediate(resolve))
+
+  // 큐 대기 중 유예가 만료되게 한 뒤 검사를 진행시킨다.
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.reconnectGraceMs)
+  releaseWrite()
+  const [, admissionResult] = await Promise.all([blockingChat, admission])
+  setPartyChatStore(memoryStore)
+
+  assert.equal(admissionResult.ok, false)
+  assert.equal(admissionResult.code, 'JOIN_RATE_LIMITED')
+  assert.ok(admissionResult.retryAfterMs > 0
+    && admissionResult.retryAfterMs <= PARTY_LIMITS.joinAttemptWindowMs)
+
+  // 예산은 한 번만 소모되었고, 예약 만료로 닉네임과 토큰은 풀렸다.
+  assert.equal(isPartyNicknameTaken('667802', '만료예외'), false)
+  assert.equal(canResumePartyParticipant('667802', '만료예외', joined.reconnectToken), false)
+  const stillDenied = await joinPartyRoom(contender, {
+    roomId: '667802',
+    nickname: '만료예외',
+    characterId: '101',
+    reconnectToken: joined.reconnectToken
+  })
+  assert.equal(stillDenied.code, 'JOIN_RATE_LIMITED')
+  // 예약 만료는 정확히 한 건의 퇴장 공지를 남긴다.
+  t.mock.timers.tick(1)
+  await new Promise(resolve => setImmediate(resolve))
+  const expiryNotices = leaveNotices(takePresence())
+  assert.equal(expiryNotices.length, 1)
+  assert.equal(expiryNotices[0].nickname, '만료예외')
 })

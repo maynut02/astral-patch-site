@@ -123,7 +123,7 @@ function trySend(peer: PartyPeer, message: PartyServerMessage): boolean {
 function broadcastPresence(update: PartyPresenceUpdate): void {
   const messages: PartyServerMessage[] = [
     ...(update.notice ? [{ type: 'LEAVE_NOTICE' as const, notice: update.notice }] : []),
-    { type: 'PARTICIPANTS', participants: update.participants }
+    ...(update.participants ? [{ type: 'PARTICIPANTS' as const, participants: update.participants }] : [])
   ]
   const failedPeers: PartyPeer[] = []
 
@@ -134,32 +134,53 @@ function broadcastPresence(update: PartyPresenceUpdate): void {
   for (const peer of failedPeers) void disconnectPartyPeer(peer, 1013, 'backpressure')
 }
 
+// removePartyConnection이 presence를 직접 발행하므로 여기서는 소켓만 닫는다.
 async function disconnectPartyPeer(peer: PartyPeer, code: number, reason: string): Promise<void> {
   if (disconnectingPeers.has(peer)) return
 
   disconnectingPeers.add(peer)
-  const update = await removePartyConnection(peer)
   try {
-    peer.close(code, reason)
-  } catch {
-    // The adapter may already have closed the peer.
+    await removePartyConnection(peer, Date.now(), 'loss')
+  } finally {
+    try {
+      peer.close(code, reason)
+    } catch {
+      // The adapter may already have closed the peer.
+    }
+    disconnectingPeers.delete(peer)
   }
-  disconnectingPeers.delete(peer)
+}
 
-  if (update) broadcastPresence(update)
+// 명시적 퇴장은 close(1000,'leave-room')으로만 알린다.
+async function leavePartyPeer(peer: PartyPeer): Promise<void> {
+  if (disconnectingPeers.has(peer)) return
+
+  disconnectingPeers.add(peer)
+  try {
+    await removePartyConnection(peer, Date.now(), 'leave')
+  } finally {
+    try {
+      peer.close(1000, 'leave-room')
+    } catch {
+      // The adapter may already have closed the peer.
+    }
+    disconnectingPeers.delete(peer)
+  }
 }
 
 function sendError(
   peer: PartyPeer,
   code: string,
   message: string,
-  clientMessageId?: string
+  clientMessageId?: string,
+  retryAfterMs?: number
 ): void {
   const errorMessage: PartyErrorServerMessage = {
     type: 'ERROR',
     code,
     message,
-    ...(clientMessageId ? { clientMessageId } : {})
+    ...(clientMessageId ? { clientMessageId } : {}),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs })
   }
 
   if (!trySend(peer, errorMessage)) {
@@ -174,7 +195,8 @@ async function handleJoin(peer: PartyPeer, data: Record<string, unknown>): Promi
       roomId: data.roomId,
       nickname: data.nickname,
       characterId: data.characterId,
-      order: data.order
+      order: data.order,
+      reconnectToken: data.reconnectToken
     })
   } catch (error) {
     console.error('[ws/party] Failed to join room', error)
@@ -183,7 +205,7 @@ async function handleJoin(peer: PartyPeer, data: Record<string, unknown>): Promi
   }
 
   if (!result.ok) {
-    sendError(peer, result.code, result.message)
+    sendError(peer, result.code, result.message, undefined, result.retryAfterMs)
     return
   }
 
@@ -359,14 +381,17 @@ export default defineWebSocketHandler({
     }
   },
 
-  async close(peer) {
-    const update = await removePartyConnection(peer as PartyPeer)
-    if (update) broadcastPresence(update)
+  async close(peer, details) {
+    // 의도적 퇴장은 이 종료 코드/사유 조합으로만 판별한다.
+    if (details?.code === 1000 && details.reason === 'leave-room') {
+      await leavePartyPeer(peer as PartyPeer)
+      return
+    }
+    await removePartyConnection(peer as PartyPeer, Date.now(), 'loss')
   },
 
   async error(peer, error) {
     console.error(`[ws/party] Peer error: ${peer.id}`, error)
-    const update = await removePartyConnection(peer as PartyPeer)
-    if (update) broadcastPresence(update)
+    await removePartyConnection(peer as PartyPeer, Date.now(), 'loss')
   }
 })

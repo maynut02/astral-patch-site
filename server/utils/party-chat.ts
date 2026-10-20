@@ -33,6 +33,7 @@ export const PARTY_LIMITS = Object.freeze({
   maxOutgoingMessageBytes: 1024 * 1024,
   maxBufferedBytes: 1024 * 1024,
   emptyRoomTtlMs: 3 * 60_000,
+  reconnectGraceMs: 10_000,
   heartbeatIntervalMs: 30_000,
   heartbeatTimeoutMs: 90_000,
   maxNicknameLength: PARTY_MAX_NICKNAME_LENGTH,
@@ -67,16 +68,22 @@ interface PartyConnection {
   messageCount: number
   closed: boolean
   joining: boolean
-  replaced: boolean
   suppressJoinNotice: boolean
+  // 같은 참가자 ID를 다른 소켓이 인계받았는지 여부. 인계 뒤의 낡은 작업은 적용하지 않는다.
+  replacedByTakeover: boolean
   reconnectToken?: string
   room?: PartyRoom
   participant?: PartyParticipant
 }
 
-interface ReconnectableParticipant {
+// 연결이 끊긴 참가자의 닉네임·토큰 예약. 실시간 맵과 분리해 보관한다.
+interface PendingDeparture {
   participant: PartyParticipant
   reconnectToken: string
+  disconnectedAt: number
+  expiresAt: number
+  generation: number
+  timer?: ReturnType<typeof setTimeout>
 }
 
 interface PartyRoom {
@@ -84,7 +91,9 @@ interface PartyRoom {
   sessionId: string
   createdAt: string
   participants: Map<PartyPeer, PartyConnection>
-  reconnectTokens: Map<string, ReconnectableParticipant>
+  // 유예 예약은 실시간 참가자 맵과 별도로 participantId 기준으로만 보관한다.
+  pendingDepartures: Map<string, PendingDeparture>
+  departureGeneration: number
   clientMessages: Map<string, PartyChatMessage>
   messages: PartyRoomMessage[]
   messageSizes: number[]
@@ -98,15 +107,10 @@ interface JoinAttemptState {
   windowStartedAt: number
 }
 
-export interface PartyLeaveResult {
-  roomId: string
-  participants: PartyParticipant[]
-  notice: PartyLeaveNotice
-}
-
 export interface PartyPresenceUpdate {
   roomId: string
-  participants: PartyParticipant[]
+  // 생략하면 참가자 목록은 다시 보내지 않고 공지와 같은 update만 전송한다.
+  participants?: PartyParticipant[]
   notice?: PartyLeaveNotice
 }
 
@@ -146,6 +150,9 @@ export interface PartyJoinFailure {
   ok: false
   code: string
   message: string
+  // 서버가 재시도 가능 시점까지 남은 시간(ms)을 알려줄 때만 채운다.
+  // 없음은 재시도 가능을 뜻하지 않으며, 라이브 닉네임 충돌처럼 종료 상태인 경우도 있다.
+  retryAfterMs?: number
 }
 
 export type PartyJoinResult = PartyJoinSuccess | PartyJoinFailure
@@ -223,6 +230,14 @@ function nicknameKey(value: string): string {
   return value.normalize('NFKC').toLowerCase()
 }
 
+function normalizeReconnectToken(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  if (!normalized || normalized.length > PARTY_LIMITS.maxReconnectTokenLength) return null
+  return normalized
+}
+
+// 유예 중인 예약도 닉네임을 점유하므로 함께 검사한다.
 export function isPartyNicknameTaken(
   roomId: string,
   nickname: string,
@@ -232,17 +247,76 @@ export function isPartyNicknameTaken(
   if (!room) return false
 
   const key = nicknameKey(nickname)
-  return [...room.participants.values()]
+  const liveTaken = [...room.participants.values()]
     .some(connection => connection.participant
       && connection.participant.id !== excludeParticipantId
       && nicknameKey(connection.participant.nickname) === key)
+  if (liveTaken) return true
+
+  const now = Date.now()
+  for (const pending of room.pendingDepartures.values()) {
+    if (pending.participant.id === excludeParticipantId) continue
+    if (now >= pending.expiresAt) continue
+    if (nicknameKey(pending.participant.nickname) === key) return true
+  }
+  return false
 }
 
-function normalizeReconnectToken(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const normalized = value.trim()
-  if (!normalized || normalized.length > PARTY_LIMITS.maxReconnectTokenLength) return null
-  return normalized
+interface ReconnectOwner {
+  participant: PartyParticipant
+  reconnectToken: string
+  pending: boolean
+  pendingDeparture?: PendingDeparture
+}
+
+// 실시간 연결과 유예 예약에서 토큰 소유자를 찾는다.
+function findReconnectOwner(room: PartyRoom, reconnectToken: string, now: number): ReconnectOwner | null {
+  for (const connection of room.participants.values()) {
+    if (!connection.participant || connection.closed) continue
+    if (connection.reconnectToken !== reconnectToken) continue
+    return {
+      participant: connection.participant,
+      reconnectToken,
+      pending: false
+    }
+  }
+
+  for (const pending of room.pendingDepartures.values()) {
+    if (pending.reconnectToken !== reconnectToken) continue
+    if (now >= pending.expiresAt) continue
+    return {
+      participant: pending.participant,
+      reconnectToken,
+      pending: true,
+      pendingDeparture: pending
+    }
+  }
+
+  return null
+}
+
+function clearPendingTimer(pending: PendingDeparture): void {
+  if (pending.timer) clearTimeout(pending.timer)
+  pending.timer = undefined
+}
+
+// 닉네임 변경 없이 실제로 살아 있는 참가자(또는 유예 중 예약) 소유권만 인정한다.
+export function canResumePartyParticipant(
+  roomId: string,
+  nickname: string,
+  reconnectToken: unknown
+): boolean {
+  const room = rooms.get(roomId)
+  if (!room) return false
+
+  const normalizedNickname = normalizePartyNickname(nickname)
+  const token = normalizeReconnectToken(reconnectToken)
+  if (!normalizedNickname || !token) return false
+
+  const owner = findReconnectOwner(room, token, Date.now())
+  if (!owner) return false
+
+  return nicknameKey(owner.participant.nickname) === nicknameKey(normalizedNickname)
 }
 
 export function normalizePartyChatText(value: unknown): string | null {
@@ -307,11 +381,26 @@ function queueRoomWrite<T>(room: PartyRoom, operation: () => Promise<T>): Promis
   return result
 }
 
+// 큐 안에서 이미 실행 중이면 다시 큐에 넣지 않고 저장만 수행한다.
+async function appendRoomMessageNow(room: PartyRoom, message: PartyRoomMessage): Promise<void> {
+  await partyChatStore.appendMessage(room.sessionId, message)
+  appendRoomMessage(room, message)
+}
+
 function persistRoomMessage(room: PartyRoom, message: PartyRoomMessage): Promise<void> {
-  return queueRoomWrite(room, async () => {
-    await partyChatStore.appendMessage(room.sessionId, message)
-    appendRoomMessage(room, message)
-  })
+  return queueRoomWrite(room, () => appendRoomMessageNow(room, message))
+}
+
+// 유예 예약 사본만 프로필 변경 내용으로 갱신한다. 실시간 맵은 건드리지 않는다.
+function applyParticipantProfile(
+  room: PartyRoom,
+  participantId: string,
+  updated: PartyParticipant
+): void {
+  const pending = room.pendingDepartures.get(participantId)
+  if (!pending) return
+  pending.participant.characterId = updated.characterId
+  pending.participant.order = updated.order
 }
 
 function syncParticipantMessages(room: PartyRoom, participant: PartyParticipant): void {
@@ -353,7 +442,7 @@ function pruneJoinAttempts(now: number): void {
   }
 }
 
-function consumeJoinAttempt(ipAddress: string, now: number): boolean {
+function consumeJoinAttempt(ipAddress: string, now: number): { allowed: boolean, retryAfterMs: number } {
   const current = joinAttemptsByIp.get(ipAddress)
 
   if (!current || now - current.windowStartedAt >= PARTY_LIMITS.joinAttemptWindowMs) {
@@ -361,17 +450,137 @@ function consumeJoinAttempt(ipAddress: string, now: number): boolean {
       count: 1,
       windowStartedAt: now
     })
-    return true
+    return { allowed: true, retryAfterMs: 0 }
   }
 
   current.count++
-  return current.count <= PARTY_LIMITS.maxJoinAttemptsPerIp
+  return {
+    allowed: current.count <= PARTY_LIMITS.maxJoinAttemptsPerIp,
+    retryAfterMs: Math.max(0, current.windowStartedAt + PARTY_LIMITS.joinAttemptWindowMs - now)
+  }
+}
+
+function releaseConnectionQuota(connection: PartyConnection): void {
+  const activeForIp = activeConnectionsByIp.get(connection.ipAddress) || 0
+  if (activeForIp <= 1) {
+    activeConnectionsByIp.delete(connection.ipAddress)
+  } else {
+    activeConnectionsByIp.set(connection.ipAddress, activeForIp - 1)
+  }
 }
 
 function setEmptySince(room: PartyRoom, now: number): void {
   room.emptySinceMs = room.participants.size === 0
     ? now
     : null
+}
+
+function buildLeaveNotice(participant: PartyParticipant, now: number): PartyLeaveNotice {
+  return {
+    kind: 'leave',
+    id: randomUUID(),
+    nickname: participant.nickname,
+    createdAt: new Date(now).toISOString()
+  }
+}
+
+function publishLeave(notice: PartyLeaveNotice, roomId: string): void {
+  presenceListener?.({
+    roomId,
+    notice: { ...notice }
+  })
+}
+
+function publishParticipants(room: PartyRoom): void {
+  presenceListener?.({
+    roomId: room.roomId,
+    participants: getParticipants(room)
+  })
+}
+
+// 명시적 퇴장은 저장에 성공한 뒤에만 공지를 한 번 방송한다.
+async function finalizeLeave(room: PartyRoom, participant: PartyParticipant): Promise<void> {
+  const notice = buildLeaveNotice(participant, Date.now())
+  try {
+    await queueRoomWrite(room, async () => {
+      await appendRoomMessageNow(room, notice)
+      if (room.participants.size === 0) {
+        // 만료 시각은 이벤트 시각이 아니라 현재 시계로 계산한다.
+        await partyChatStore.setRoomExpiry(
+          room.sessionId,
+          new Date(Date.now() + PARTY_LIMITS.emptyRoomTtlMs).toISOString()
+        ).catch(error => console.error('[party] Failed to shorten empty room expiry', error))
+      }
+    })
+  } catch (error) {
+    console.error('[party] Failed to save leave notice', error)
+    return
+  }
+
+  publishLeave(notice, room.roomId)
+}
+
+function scheduleDepartureTimer(pending: PendingDeparture, delayMs: number, onExpire: () => void): void {
+  if (pending.timer) clearTimeout(pending.timer)
+  const timer = setTimeout(onExpire, Math.max(0, delayMs))
+  timer.unref?.()
+  pending.timer = timer
+}
+
+function reservePendingDeparture(
+  room: PartyRoom,
+  participant: PartyParticipant,
+  reconnectToken: string,
+  now: number
+): void {
+  const existing = room.pendingDepartures.get(participant.id)
+  if (existing) clearPendingTimer(existing)
+
+  room.departureGeneration += 1
+  const generation = room.departureGeneration
+  const pending: PendingDeparture = {
+    participant: cloneParticipant(participant),
+    reconnectToken,
+    disconnectedAt: now,
+    // 유예 만료는 이벤트 시각이 아니라 현재 시계 기준으로 계산한다.
+    expiresAt: Date.now() + PARTY_LIMITS.reconnectGraceMs,
+    generation
+  }
+  room.pendingDepartures.set(participant.id, pending)
+  scheduleDepartureTimer(pending, pending.expiresAt - Date.now(), () => {
+    expirePendingDeparture(room, participant.id, generation)
+  })
+}
+
+// 만료와 재연결은 같은 큐에서 직렬화되고, 늦게 도착한 타이머는 세대 검사로 무시된다.
+function expirePendingDeparture(room: PartyRoom, participantId: string, generation: number): void {
+  void queueRoomWrite(room, async () => {
+    if (rooms.get(room.roomId) !== room) return
+    const pending = room.pendingDepartures.get(participantId)
+    if (!pending || pending.generation !== generation) return
+
+    const currentNow = Date.now()
+    if (currentNow < pending.expiresAt) {
+      scheduleDepartureTimer(pending, pending.expiresAt - currentNow, () => {
+        expirePendingDeparture(room, participantId, generation)
+      })
+      return
+    }
+
+    room.pendingDepartures.delete(participantId)
+    clearPendingTimer(pending)
+    setEmptySince(room, currentNow)
+    const notice = buildLeaveNotice(pending.participant, currentNow)
+    try {
+      await appendRoomMessageNow(room, notice)
+    } catch (error) {
+      console.error('[party] Failed to save leave notice', error)
+      return
+    }
+
+    publishLeave(notice, room.roomId)
+    maybeStopMaintenance()
+  }).catch(error => console.error('[party] Failed to expire pending departure', error))
 }
 
 function pruneEmptyRooms(now: number): void {
@@ -381,6 +590,9 @@ function pruneEmptyRooms(now: number): void {
       && room.emptySinceMs !== null
       && now - room.emptySinceMs >= PARTY_LIMITS.emptyRoomTtlMs
     ) {
+      // 삭제된 방의 유예 타이머가 뒤늦게 실행되어도 다시 살아나지 않게 정리한다.
+      for (const pending of room.pendingDepartures.values()) clearPendingTimer(pending)
+      room.pendingDepartures.clear()
       rooms.delete(roomId)
       void room.writeQueue.then(() => partyChatStore.deleteRoom(room.sessionId))
         .catch(error => console.error('[party] Failed to delete expired room', error))
@@ -407,14 +619,13 @@ function ensureMaintenance(): void {
     for (const connection of [...connections.values()]) {
       if (now - connection.lastSeenAt <= PARTY_LIMITS.heartbeatTimeoutMs) continue
 
-      void removePartyConnection(connection.peer, now).then((update) => {
-        if (update) presenceListener?.(update)
-      }).catch(error => console.error('[party] Failed to remove stale peer', error))
       try {
         connection.peer.close(1013, 'heartbeat-timeout')
       } catch {
         // The adapter may already have closed the peer.
       }
+      void removePartyConnection(connection.peer, now, 'loss')
+        .catch(error => console.error('[party] Failed to remove stale peer', error))
     }
 
     for (const connection of [...connections.values()]) {
@@ -424,14 +635,13 @@ function ensureMaintenance(): void {
         if (websocket?.ping) websocket.ping(HEARTBEAT_PING_PAYLOAD)
         else connection.peer.ping?.(HEARTBEAT_PING_PAYLOAD)
       } catch {
-        void removePartyConnection(connection.peer, now).then((update) => {
-          if (update) presenceListener?.(update)
-        }).catch(error => console.error('[party] Failed to remove peer', error))
         try {
           connection.peer.close(1013, 'heartbeat-error')
         } catch {
           // The adapter may already have closed the peer.
         }
+        void removePartyConnection(connection.peer, now, 'loss')
+          .catch(error => console.error('[party] Failed to remove peer', error))
       }
     }
 
@@ -455,7 +665,8 @@ function hydrateRoom(roomId: string, stored: Awaited<ReturnType<PartyChatStore['
     sessionId: stored.sessionId,
     createdAt: stored.createdAt,
     participants: new Map(),
-    reconnectTokens: new Map(),
+    pendingDepartures: new Map(),
+    departureGeneration: 0,
     clientMessages: new Map(),
     messages: [],
     messageSizes: [],
@@ -553,8 +764,8 @@ export function registerPartyConnection(peer: PartyPeer, ipAddress: string): boo
     messageCount: 0,
     closed: false,
     joining: false,
-    replaced: false,
-    suppressJoinNotice: false
+    suppressJoinNotice: false,
+    replacedByTakeover: false
   })
   activeConnectionsByIp.set(normalizedIpAddress, activeForIp + 1)
   ensureMaintenance()
@@ -639,15 +850,21 @@ export async function joinPartyRoom(
   }
 
   const providedToken = normalizeReconnectToken(input.reconnectToken)
-  const existingMemoryRoom = rooms.get(roomId)
-  const knownReconnect = Boolean(providedToken && existingMemoryRoom?.reconnectTokens.has(providedToken))
-
   const now = Date.now()
-  if (!knownReconnect && !consumeJoinAttempt(connection.ipAddress, now)) {
-    return {
-      ok: false,
-      code: 'JOIN_RATE_LIMITED',
-      message: '입장 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.'
+  const existingRoom = rooms.get(roomId)
+  const memoryOwner = providedToken && existingRoom ? findReconnectOwner(existingRoom, providedToken, now) : null
+  const rateExempt = Boolean(
+    memoryOwner && nicknameKey(memoryOwner.participant.nickname) === nicknameKey(nickname)
+  )
+  if (!rateExempt) {
+    const attempt = consumeJoinAttempt(connection.ipAddress, now)
+    if (!attempt.allowed) {
+      return {
+        ok: false,
+        code: 'JOIN_RATE_LIMITED',
+        message: '입장 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+        retryAfterMs: attempt.retryAfterMs
+      }
     }
   }
 
@@ -670,85 +887,180 @@ export async function joinPartyRoom(
       }
     }
 
-    const candidateReconnect = providedToken ? room.reconnectTokens.get(providedToken) : undefined
-    const matchedReconnect = candidateReconnect && nicknameKey(candidateReconnect.participant.nickname) === nicknameKey(nickname)
-      ? candidateReconnect
-      : undefined
-    if (isPartyNicknameTaken(roomId, nickname, matchedReconnect?.participant.id)) {
-      return {
-        ok: false,
-        code: 'NICKNAME_TAKEN',
-        message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
-      }
-    }
-
     const desiredOrder = input.characterId === PARTY_SPECTATOR_ID
       ? null
       : (input.order ?? PARTY_ORDERS[0]) as PartyOrder
     const desiredCharacterId = input.characterId
     let participant: PartyParticipant = {
-      id: matchedReconnect?.participant.id ?? randomUUID(),
+      id: randomUUID(),
       nickname,
       characterId: desiredCharacterId,
       order: desiredOrder
     }
-    let reconnectToken = matchedReconnect?.reconnectToken ?? randomUUID()
+    let reconnectToken: string = randomUUID()
     let replacedPeer: PartyPeer | undefined
     let resumed = false
     let suppressJoinNotice = false
+    let conflict: PartyJoinFailure | null = null
+    let roomLost = false
 
     const admitted = await queueRoomWrite(room, async () => {
-      if (connection.closed || connection.room || connection.participant) return false
-      const rawReconnect = providedToken ? room.reconnectTokens.get(providedToken) : undefined
-      const currentReconnect = rawReconnect && nicknameKey(rawReconnect.participant.nickname) === nicknameKey(nickname)
-        ? rawReconnect
-        : undefined
-      if (isPartyNicknameTaken(roomId, nickname, currentReconnect?.participant.id)) return false
+      const isCurrentConnection = () => !connection.closed && !connection.room && !connection.participant
+      // 방이 정리/교체됐으면 어떤 저장도 그 방에 반영하지 않는다.
+      if (!isCurrentConnection()) return false
+      if (rooms.get(room.roomId) !== room) {
+        roomLost = true
+        return false
+      }
 
-      if (currentReconnect) {
-        resumed = true
-        reconnectToken = currentReconnect.reconnectToken
+      const serializedNow = Date.now()
+      const owner = providedToken ? findReconnectOwner(room, providedToken, serializedNow) : null
+      const matchedOwner = owner && nicknameKey(owner.participant.nickname) === nicknameKey(nickname)
+        ? owner
+        : undefined
+
+      // 이번 입장이 새 예산을 이미 소모했는지 추적해 중복 소모를 막는다.
+      let budgetConsumed = false
+      const consumeBudgetOnce = (now: number): boolean => {
+        if (budgetConsumed) return true
+        budgetConsumed = true
+        const attempt = consumeJoinAttempt(connection.ipAddress, now)
+        if (attempt.allowed) return true
+        conflict = {
+          ok: false,
+          code: 'JOIN_RATE_LIMITED',
+          message: '입장 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+          retryAfterMs: attempt.retryAfterMs
+        }
+        return false
+      }
+
+      // 유효 토큰 예외가 사라졌다면 이번 입장은 새 예산을 정확히 한 번 소모한다.
+      if (!matchedOwner && rateExempt && !consumeBudgetOnce(serializedNow)) return false
+
+      if (isPartyNicknameTaken(roomId, nickname, matchedOwner?.participant.id)) {
+        const pending = [...room.pendingDepartures.values()]
+          .find(departure => Date.now() < departure.expiresAt
+            && departure.participant.id !== matchedOwner?.participant.id
+            && nicknameKey(departure.participant.nickname) === nicknameKey(nickname))
+        conflict = pending
+          ? {
+              ok: false,
+              code: 'NICKNAME_TAKEN',
+              message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.',
+              retryAfterMs: Math.max(0, pending.expiresAt - serializedNow)
+            }
+          : {
+              ok: false,
+              code: 'NICKNAME_TAKEN',
+              message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
+            }
+        return false
+      }
+
+      // 저장 전에 붙잡은 신원은 await 뒤에 다시 검증해야 한다.
+      const resumeParticipantId = matchedOwner?.participant.id
+      const resumeToken = matchedOwner?.reconnectToken
+
+      if (matchedOwner) {
         participant = {
-          id: currentReconnect.participant.id,
+          id: matchedOwner.participant.id,
           nickname,
           characterId: desiredCharacterId,
           order: desiredOrder
         }
         await partyChatStore.addParticipant(room.sessionId, participant)
-        if (
-          currentReconnect.participant.characterId !== participant.characterId
-          || currentReconnect.participant.order !== participant.order
-        ) {
-          await partyChatStore.updateParticipant(participant)
-        }
+        // 인계에서는 원하는 프로필이 항상 최종값이 되어야 한다. 이전 연결의 대기 작업이
+        // 먼저 DB에 반영됐더라도 여기서 다시 덮어써 실시간 값과 DB/history를 일치시킨다.
+        await partyChatStore.updateParticipant(participant)
       } else {
         await partyChatStore.addParticipant(room.sessionId, participant)
       }
 
       await partyChatStore.extendRoom(room.sessionId, new Date(Date.now() + PARTY_LIMITS.emptyRoomTtlMs).toISOString())
-      if (connection.closed || connection.room || connection.participant) return false
+
+      if (rooms.get(room.roomId) !== room) {
+        roomLost = true
+        return false
+      }
+      if (!isCurrentConnection()) return false
+
+      if (resumeParticipantId) {
+        // 재개 신원이 저장 대기 중 명시적으로 무효화됐는지 확인한다. 손실→유예 전환은 같은 토큰으로 계속 유효하다.
+        const currentOwner = resumeToken ? findReconnectOwner(room, resumeToken, Date.now()) : null
+        if (!currentOwner || currentOwner.participant.id !== resumeParticipantId) {
+          // 무효화된 신원을 되살리지 않고 새 참가자로 다시 시작한다.
+          if (isPartyNicknameTaken(roomId, nickname)) {
+            const pending = [...room.pendingDepartures.values()]
+              .find(departure => Date.now() < departure.expiresAt
+                && nicknameKey(departure.participant.nickname) === nicknameKey(nickname))
+            conflict = {
+              ok: false,
+              code: 'NICKNAME_TAKEN',
+              message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.',
+              ...(pending ? { retryAfterMs: Math.max(0, pending.expiresAt - Date.now()) } : {})
+            }
+            return false
+          }
+
+          // 무효화된 신원을 되살리지 않고, 새 예산을 한 번 소모한 뒤 새 참가자로 다시 시작한다.
+          if (!consumeBudgetOnce(Date.now())) return false
+          resumed = false
+          suppressJoinNotice = false
+          participant = {
+            id: randomUUID(),
+            nickname,
+            characterId: desiredCharacterId,
+            order: desiredOrder
+          }
+          reconnectToken = randomUUID()
+          await partyChatStore.addParticipant(room.sessionId, participant)
+          if (rooms.get(room.roomId) !== room) {
+            roomLost = true
+            return false
+          }
+          if (!isCurrentConnection()) return false
+        } else {
+          resumed = true
+          reconnectToken = currentOwner.reconnectToken
+          participant = {
+            id: currentOwner.participant.id,
+            nickname,
+            characterId: desiredCharacterId,
+            order: desiredOrder
+          }
+        }
+      }
 
       for (const [activePeer, activeConn] of room.participants) {
         if (activeConn.participant?.id === participant.id && activePeer !== peer) {
-          activeConn.replaced = true
           activeConn.room = undefined
           activeConn.participant = undefined
+          activeConn.closed = true
+          activeConn.replacedByTakeover = true
           room.participants.delete(activePeer)
+          // 이전 연결은 즉시 종료된 것으로 보고 쿼터를 바로 반환한다.
+          connections.delete(activePeer)
+          releaseConnectionQuota(activeConn)
           replacedPeer = activePeer
           suppressJoinNotice = true
           break
         }
       }
 
+      // 유예 예약을 되살릴 때는 타이머를 취소해 저장 대기 중 만료가 끼어들지 않게 한다.
+      const pendingDeparture = room.pendingDepartures.get(participant.id)
+      if (pendingDeparture) {
+        clearPendingTimer(pendingDeparture)
+        room.pendingDepartures.delete(participant.id)
+      }
+
       connection.room = room
       connection.participant = participant
       connection.reconnectToken = reconnectToken
-      connection.suppressJoinNotice = suppressJoinNotice
+      // 재연결은 이전 연결이 살아 있든 유예 중이든 입·퇴장 공지를 모두 억제한다.
+      connection.suppressJoinNotice = resumed || suppressJoinNotice
       room.participants.set(peer, connection)
-      room.reconnectTokens.set(reconnectToken, {
-        participant: cloneParticipant(participant),
-        reconnectToken
-      })
       syncParticipantMessages(room, participant)
       setEmptySince(room, Date.now())
       return true
@@ -763,6 +1075,14 @@ export async function joinPartyRoom(
     }
 
     if (!admitted) {
+      if (conflict) return conflict
+      if (roomLost) {
+        return {
+          ok: false,
+          code: 'ROOM_NOT_FOUND',
+          message: '방을 찾을 수 없습니다.'
+        }
+      }
       return connection.closed
         ? { ok: false, code: 'CONNECTION_CLOSED', message: '웹소켓 연결을 사용할 수 없습니다.' }
         : { ok: false, code: 'NICKNAME_TAKEN', message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.' }
@@ -792,13 +1112,15 @@ export async function recordPartyJoin(peer: PartyPeer): Promise<{ notice: PartyJ
   }
 
   const room = connection.room
+  const participant = connection.participant
   const notice: PartyJoinNotice = {
     kind: 'join',
     id: randomUUID(),
-    nickname: connection.participant.nickname,
+    nickname: participant.nickname,
     createdAt: new Date().toISOString()
   }
   await persistRoomMessage(room, notice)
+  // 저장 대기 중 연결이 끊겨도 보관한 방 객체로 수신자 목록을 만든다.
   return { notice: { ...notice }, peers: [...room.participants.keys()] }
 }
 
@@ -813,25 +1135,22 @@ export async function changePartyCharacter(peer: PartyPeer, characterId: unknown
 
   connection.lastSeenAt = Date.now()
   const room = connection.room
+  const participant = connection.participant
+  const acceptedConnection = connection
   return queueRoomWrite(room, async (): Promise<PartyCharacterChangeResult> => {
-    if (connection.closed || connection.room !== room || !connection.participant) {
+    // 인계 뒤 도착한 이전 연결의 프로필 작업은 현재 신원과 어긋나므로 적용하지 않는다.
+    if (acceptedConnection.replacedByTakeover) {
       return { ok: false, code: 'NOT_IN_ROOM', message: '방에 입장한 후 캐릭터를 변경할 수 있습니다.' }
     }
-    const updated = cloneParticipant(connection.participant)
+    const updated = cloneParticipant(participant)
     updated.characterId = characterId
     if (characterId === PARTY_SPECTATOR_ID) updated.order = null
     else if (!updated.order) updated.order = PARTY_ORDERS[0]
     await partyChatStore.updateParticipant(updated)
-    if (connection.participant && connection.room === room) {
-      connection.participant.characterId = updated.characterId
-      connection.participant.order = updated.order
-    }
-    if (connection.reconnectToken && room.reconnectTokens.has(connection.reconnectToken)) {
-      room.reconnectTokens.set(connection.reconnectToken, {
-        participant: cloneParticipant(updated),
-        reconnectToken: connection.reconnectToken
-      })
-    }
+    // 저장이 끝났으면 연결이 끊겼어도 이미 승인된 객체는 갱신하되 실시간 상태는 되살리지 않는다.
+    participant.characterId = updated.characterId
+    participant.order = updated.order
+    applyParticipantProfile(room, participant.id, updated)
     syncParticipantMessages(room, updated)
     return {
       ok: true,
@@ -855,24 +1174,20 @@ export async function changePartyOrder(peer: PartyPeer, order: unknown): Promise
 
   connection.lastSeenAt = Date.now()
   const room = connection.room
+  const participant = connection.participant
+  const acceptedConnection = connection
   return queueRoomWrite(room, async (): Promise<PartyOrderChangeResult> => {
-    if (connection.closed || connection.room !== room || !connection.participant) {
+    // 인계 뒤 도착한 이전 연결의 프로필 작업은 현재 신원과 어긋나므로 적용하지 않는다.
+    if (acceptedConnection.replacedByTakeover) {
       return { ok: false, code: 'NOT_IN_ROOM', message: '방에 입장한 후 순서를 변경할 수 있습니다.' }
     }
-    if (connection.participant.characterId === PARTY_SPECTATOR_ID) {
+    if (participant.characterId === PARTY_SPECTATOR_ID) {
       return { ok: false, code: 'SPECTATOR_ORDER_DISABLED', message: '관전 중에는 순서를 선택할 수 없습니다.' }
     }
-    const updated = { ...cloneParticipant(connection.participant), order }
+    const updated = { ...cloneParticipant(participant), order }
     await partyChatStore.updateParticipant(updated)
-    if (connection.participant && connection.room === room) {
-      connection.participant.order = order
-    }
-    if (connection.reconnectToken && room.reconnectTokens.has(connection.reconnectToken)) {
-      room.reconnectTokens.set(connection.reconnectToken, {
-        participant: cloneParticipant(updated),
-        reconnectToken: connection.reconnectToken
-      })
-    }
+    participant.order = order
+    applyParticipantProfile(room, participant.id, updated)
     syncParticipantMessages(room, updated)
     return {
       ok: true,
@@ -934,7 +1249,9 @@ export async function sendPartyChat(
 
   connection.lastSeenAt = Date.now()
   const room = connection.room
-  const participantId = connection.participant.id
+  // 참가자 객체를 붙잡아 큐에서 연결이 닫혀도 실제 승인된 발신자 정보를 유지한다.
+  const participant = connection.participant
+  const participantId = participant.id
   const effectiveClientMessageId = clientMessageId || randomUUID()
   const dedupeKey = clientMessageId ? `${participantId}:${clientMessageId}` : ''
   const createdAt = new Date(connection.lastSeenAt).toISOString()
@@ -944,22 +1261,15 @@ export async function sendPartyChat(
       const existing = room.clientMessages.get(dedupeKey)
       if (existing) return existing
     }
-    const currentParticipant = connection.participant ?? {
-      id: participantId,
-      nickname: '',
-      characterId: PARTY_SPECTATOR_ID,
-      order: null
-    }
     const created: PartyChatMessage = {
       kind: 'chat',
       id: randomUUID(),
       clientMessageId: effectiveClientMessageId,
-      participant: cloneParticipant(currentParticipant),
+      participant: cloneParticipant(participant),
       text,
       createdAt
     }
-    await partyChatStore.appendMessage(room.sessionId, created)
-    appendRoomMessage(room, created)
+    await appendRoomMessageNow(room, created)
     return created
   })
 
@@ -994,57 +1304,51 @@ export function getPartyRoomPeers(roomIdInput: unknown): PartyPeer[] {
   return room ? [...room.participants.keys()] : []
 }
 
+// 동기 삭제·쿼터 반환·presence 전송을 저장 대기보다 먼저 수행한다.
 export async function removePartyConnection(
   peer: PartyPeer,
-  now = Date.now()
-): Promise<PartyLeaveResult | null> {
+  now = Date.now(),
+  reason: 'loss' | 'leave' = 'loss'
+): Promise<void> {
   const connection = connections.get(peer)
-  if (!connection) return null
+  if (!connection) return
 
   connection.closed = true
   connections.delete(peer)
-
-  const activeForIp = activeConnectionsByIp.get(connection.ipAddress) || 0
-  if (activeForIp <= 1) {
-    activeConnectionsByIp.delete(connection.ipAddress)
-  } else {
-    activeConnectionsByIp.set(connection.ipAddress, activeForIp - 1)
-  }
+  releaseConnectionQuota(connection)
 
   const room = connection.room
-  const roomId = room?.roomId
-  if (connection.replaced || !room || !roomId || !connection.participant) {
+  const participant = connection.participant
+  const reconnectToken = connection.reconnectToken
+  connection.room = undefined
+  connection.participant = undefined
+  connection.reconnectToken = undefined
+
+  if (!room || !participant) {
     maybeStopMaintenance()
-    return null
+    return
   }
 
   room.participants.delete(peer)
-  const notice: PartyLeaveNotice = {
-    kind: 'leave',
-    id: randomUUID(),
-    nickname: connection.participant.nickname,
-    createdAt: new Date(now).toISOString()
-  }
-  connection.room = undefined
-  connection.participant = undefined
-  setEmptySince(room, now)
-  try {
-    await persistRoomMessage(room, notice)
-    await queueRoomWrite(room, async () => {
-      if (room.participants.size === 0) {
-        await partyChatStore.setRoomExpiry(room.sessionId, new Date(now + PARTY_LIMITS.emptyRoomTtlMs).toISOString())
-      }
-    })
-  } catch (error) {
-    console.error('[party] Failed to save leave notice', error)
-  }
-  maybeStopMaintenance()
+  // 빈 방 TTL도 이벤트 시각이 아니라 현재 시계에서 시작한다.
+  setEmptySince(room, Date.now())
 
-  return {
-    roomId,
-    participants: getParticipants(room),
-    notice: { ...notice }
+  if (reason === 'leave') {
+    const pending = room.pendingDepartures.get(participant.id)
+    if (pending) {
+      clearPendingTimer(pending)
+      room.pendingDepartures.delete(participant.id)
+    }
+    // 참가자 목록은 저장을 기다리지 않고 즉시 알리고, 퇴장 공지는 저장 성공 뒤 한 번만 보낸다.
+    publishParticipants(room)
+    await finalizeLeave(room, participant)
+    maybeStopMaintenance()
+    return
   }
+
+  reservePendingDeparture(room, participant, reconnectToken ?? randomUUID(), now)
+  publishParticipants(room)
+  maybeStopMaintenance()
 }
 
 export function setPartyPresenceListener(

@@ -152,6 +152,9 @@ export interface PartyErrorServerMessage {
   code: string
   message: string
   clientMessageId?: string
+  // 서버가 재시도 가능 시점까지 남은 시간(ms)을 알려줄 때만 존재한다.
+  // 없음은 재시도 가능을 뜻하지 않는다(예: 라이브 닉네임 충돌은 종료 상태).
+  retryAfterMs?: number
 }
 
 export interface PartyPongServerMessage {
