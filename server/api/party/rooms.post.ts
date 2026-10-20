@@ -1,10 +1,16 @@
 import { createError, getHeader, getRequestIP, setResponseHeader } from 'h3'
 import { readJsonBody } from '../../utils/request-security'
-import { createPartyRoom, isPartyNicknameTaken, normalizePartyNickname } from '../../utils/party-chat'
+import {
+  canResumePartyParticipant,
+  createPartyRoom,
+  isPartyNicknameTaken,
+  normalizePartyNickname
+} from '../../utils/party-chat'
 
 interface CreatePartyRoomBody extends Record<string, unknown> {
   roomId?: unknown
   nickname?: unknown
+  reconnectToken?: unknown
 }
 
 interface CreateAttemptState {
@@ -75,10 +81,14 @@ export default defineEventHandler(async (event) => {
   }
 
   if (nickname && isPartyNicknameTaken(result.room.roomId, nickname)) {
-    throw createError({
-      statusCode: 409,
-      message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
-    })
+    // 유효한 재접속 토큰이 해당 닉네임을 실제로 소유할 때만 중복 검사를 통과시킨다.
+    const ownsNickname = canResumePartyParticipant(result.room.roomId, nickname, body.reconnectToken)
+    if (!ownsNickname) {
+      throw createError({
+        statusCode: 409,
+        message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
+      })
+    }
   }
 
   setResponseHeader(event, 'Cache-Control', 'no-store')

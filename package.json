@@ -13,6 +13,7 @@
     "typecheck": "nuxt typecheck",
     "test:party": "node scripts/test-party-chat.mjs",
     "test:party:rooms": "node --experimental-strip-types scripts/test-party-rooms.mjs",
+    "test:party:adapter": "node scripts/test-party-ws-adapter.mjs",
     "test:party:storage": "node scripts/test-party-storage.mjs",
     "test:security": "node scripts/test-security-forge.mjs && node scripts/test-security-braces.mjs",
     "test:mods": "node scripts/test-mod-github.mjs && node scripts/test-mod-hub.mjs && node --experimental-strip-types scripts/test-mod-markdown.mjs && node scripts/test-mod-commits.mjs && node scripts/test-mod-management.mjs",

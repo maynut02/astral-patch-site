@@ -2,7 +2,7 @@
 
 파티 채팅은 인게임 방 ID를 공유하는 사용자를 위한 텍스트 채팅 기능이다. `/party`에서 숫자 6자리 방 ID와 닉네임을 입력하고 입장 버튼을 누르면 해당 방으로 이동해 채팅에 연결된다. 방이 없으면 새로 열리고, 있으면 기존 방을 사용한다. 방 목록과 비밀번호 방은 제공하지 않는다.
 
-방의 참여자와 최근 메시지는 Nuxt 프로세스 메모리에 보관한다. 모든 채팅과 입·퇴장 알림은 PostgreSQL에도 저장하며, 각 방에는 재사용 가능한 6자리 ID와 별도로 고유한 세션 ID가 있다. 프로세스가 재시작되어도 만료 전 세션의 최근 기록을 다시 읽을 수 있다. 참여자 연결 상태는 프로세스 간 공유하지 않으므로 앱은 단일 프로세스로 운영해야 한다.
+방의 참여자와 최근 메시지는 Nuxt 프로세스 메모리에 보관한다. 모든 채팅과 입·퇴장 알림은 PostgreSQL에도 저장하며, 각 방에는 재사용 가능한 6자리 ID와 별도로 고유한 세션 ID가 있다. 참여자 프로필과 재접속 토큰의 SHA-256 해시도 DB에 저장하므로, 재배포 등으로 프로세스가 재시작되어도 만료 전 세션의 기록과 참여자를 그대로 복원한다. 재시작 중 끊긴 클라이언트는 몇 초 안에 자동으로 다시 연결되어 같은 참여자 ID로 이어지며 입·퇴장 알림은 생기지 않는다. 참여자 연결 상태는 프로세스 간 공유하지 않으므로 앱은 단일 프로세스로 운영해야 한다.
 
 ## PiP 채팅 창
 
@@ -12,7 +12,7 @@ API를 지원하지 않는 브라우저에서는 PiP 버튼을 숨긴다. PiP �
 
 ## HTTP API
 
-`POST /api/party/rooms`는 JSON `{ "roomId": "001234", "nickname": "닉네임" }`를 받는다. 닉네임은 선택사항이며, 입력 화면에서 제출할 때는 함께 보내 같은 방에서 사용 중인지 확인한다. 중복이면 `409`를 반환하고 입력칸 아래에 오류를 표시한다. 방이 없으면 생성하고, 이미 있으면 기존 방 요약을 반환한다. 공유 링크로 `/party/:roomId`를 직접 열 때도 닉네임 없이 이 API를 사용한다. 응답 형태는 다음과 같다.
+`POST /api/party/rooms`는 JSON `{ "roomId": "001234", "nickname": "닉네임", "reconnectToken": "optional-token" }`를 받는다. 닉네임과 토큰은 선택사항이다. 닉네임이 사용 중이면 유효한 토큰이 그 닉네임의 소유자임을 확인한 경우에만 요청을 허용하고, 그렇지 않으면 `409`를 반환한다. 이 사전 확인은 WebSocket `JOIN`에서 다시 검증한다. 방이 없으면 생성하고, 이미 있으면 기존 방 요약을 반환한다. 공유 링크로 `/party/:roomId`를 직접 열 때도 닉네임 없이 이 API를 사용한다. 응답 형태는 다음과 같다.
 
 ```json
 {
@@ -39,7 +39,7 @@ API를 지원하지 않는 브라우저에서는 PiP 버튼을 숨긴다. PiP �
 클라이언트 이벤트:
 
 ```json
-{ "type": "JOIN", "roomId": "001234", "nickname": "닉네임", "characterId": "spectator", "order": null, "reconnectToken": "optional-token" }
+{ "type": "JOIN", "roomId": "001234", "nickname": "닉네임", "characterId": "spectator", "order": null, "reconnectToken": "optional-token", "diagnostics": { "attempt": 1, "lastCloseCode": 1006, "lastCloseAgoMs": 1200, "hiddenAtClose": false, "onlineAtClose": true } }
 { "type": "JOIN", "roomId": "001234", "nickname": "미선택 플레이어", "characterId": "unselected", "order": "P3" }
 { "type": "SET_CHARACTER", "characterId": "unselected" }
 { "type": "SET_CHARACTER", "characterId": "306" }
@@ -63,18 +63,31 @@ API를 지원하지 않는 브라우저에서는 PiP 버튼을 숨긴다. PiP �
 }
 ```
 
-입장에 성공하면 `{ "type": "JOIN_NOTICE", "notice": { "kind": "join", "id": "uuid", "nickname": "닉네임", "createdAt": "..." } }`가 같은 방의 모든 참가자에게 전달되고 최근 기록에 남는다. 연결이 종료되면 `{ "type": "LEAVE_NOTICE", "notice": { "kind": "leave", "id": "uuid", "nickname": "닉네임", "createdAt": "..." } }`가 남은 참가자에게 전달되고 기록에 남는다. 화면에는 각각 `닉네임님이 채팅방에 입장했습니다.`, `닉네임님이 채팅방에서 나갔습니다.`로 표시한다. `JOINED.messages`에는 이전 채팅과 입·퇴장 알림이 시간순으로 들어간다. 채팅은 `{ "type": "CHAT", "message": { "kind": "chat", "id": "uuid", "clientMessageId": "local-id", "participant": { "characterId": "spectator", "order": null }, "text": "...", "createdAt": "..." } }`로 전달된다. `clientMessageId`는 선택사항이며 생략하면 서버가 생성한다. 같은 참가자가 동일한 `clientMessageId`로 다시 보낸 메시지는 중복 저장하지 않고 기존 메시지를 반환한다. 입장·퇴장·캐릭터·순서 변경 때 `PARTICIPANTS`가 전달되고, 변경 시 해당 참가자의 최근 채팅 캐릭터와 순서도 갱신된다. `PING`에는 `PONG`으로 응답한다. 연결이 끊기면 클라이언트는 새 연결에서 `JOINED`로 받은 `reconnectToken`을 함께 보내 기존 참가자 ID를 승계하고 남아 있는 이전 소켓을 정리한다.
+`JOINED`의 재접속 토큰은 서버가 SHA-256 해시로만 DB와 메모리에 보관한다. 같은 방 세션에서 정규화된 닉네임과 유효한 토큰을 제시하면 살아 있는 참가자 또는 연결 종료 후 유예 중인 참가자를 같은 ID와 토큰으로 승계하고 이전 소켓을 정리한다. 연결 종료 시 실시간 참가자 목록에서 즉시 제거되고 IP 연결 할당량도 반환되지만, 닉네임·토큰은 종료 종류에 따라 다음 시간 동안 예약된다.
 
-메시지 텍스트는 trim 후 비어 있지 않아야 하며 최대 1,000자다. JSON 문자열만 받으므로 HTML을 실행하지 않고, 화면에서는 텍스트로 렌더링해야 한다. 서버는 채팅과 입·퇴장 알림을 합쳐 최근 최대 300개, 직렬화된 메시지 크기 합계 최대 256KiB만 메모리에 보관한다. 클라이언트는 전송 직후 입력칸을 비우고 메시지를 임시로 표시한다. 전송 중에는 메시지 텍스트의 밝기가 변하며, 서버에서 DB 저장을 마친 뒤 돌아온 `clientMessageId`가 같은 메시지로 교체된다. 실패하면 임시 메시지에 오류와 다시 입력 버튼을 표시한다. 연결이 끊겨 결과를 확인할 수 없는 경우에는 중복 전송 가능성을 알려준다. 화면에서 위로 스크롤하면 이미 입장한 웹소켓 연결에서 `HISTORY`를 요청해 세션의 이전 기록을 50개씩 가져온다. 서버는 `{ "type": "HISTORY", "before": "요청한 UUID", "messages": [], "hasMore": false }` 형태로 응답한다. 캐릭터·순서 변경은 DB의 참여자 정보에도 반영하므로 과거 메시지에 최신 설정이 표시된다.
+| 종료 | 판별 | 퇴장 알림 |
+| --- | --- | --- |
+| 명시적 퇴장(나가기, 다른 페이지로 이동) | close `1000` / `leave-room` | 즉시 |
+| 창 닫기·새로고침 | close `4001` / `page-hide`(클라이언트 `pagehide`) 또는 브라우저의 `1001` | 15초 뒤. 그 안에 새로고침으로 돌아오면 없음 |
+| 그 밖의 단절(네트워크 전환, 모바일 백그라운드 등) | 위에 해당하지 않는 모든 종료. 클라이언트가 응답 없는 소켓을 포기한 `4002`도 포함 | 서버가 종료를 알게 된 시점부터 60초 뒤. heartbeat 만료도 감지 시점부터 60초 |
+| 서버 종료(재배포) | SIGTERM/SIGINT 수신 뒤의 모든 종료 | 없음. 재시작 후 복원된 참여자에게 다시 60초 유예 |
 
-오류는 `{ "type": "ERROR", "code": "...", "message": "...", "clientMessageId": "..." }` 형태다.
+유예 중 재접속은 새 입장·퇴장 알림을 만들지 않는다. 유예 만료 시 토큰을 무효화하고 퇴장 알림을 한 번 기록·발행하며 DB의 `left_at`을 채운다. 재시작 후에는 방을 처음 조회할 때 `left_at`이 비어 있고 토큰 해시가 있는 참여자를 유예 상태로 복원한다. 브라우저의 재접속 토큰은 같은 탭의 `sessionStorage`에 보관된다.
+
+입장에 성공하면 `{ "type": "JOIN_NOTICE", "notice": { "kind": "join", "id": "uuid", "nickname": "닉네임", "createdAt": "..." } }`가 같은 방 참가자에게 전달되고 최근 기록에 남는다. 명시적 퇴장이 아닌 연결 종료는 유예 만료 때 `{ "type": "LEAVE_NOTICE", "notice": { "kind": "leave", "id": "uuid", "nickname": "닉네임", "createdAt": "..." } }`를 기록·발행한다. 화면에는 각각 `닉네임님이 채팅방에 입장했습니다.`, `닉네임님이 채팅방에서 나갔습니다.`로 표시한다. `JOINED.messages`에는 이전 채팅과 입·퇴장 알림이 시간순으로 들어간다. 채팅은 `{ "type": "CHAT", "message": { "kind": "chat", "id": "uuid", "clientMessageId": "local-id", "participant": { "characterId": "spectator", "order": null }, "text": "...", "createdAt": "..." } }`로 전달된다. `clientMessageId`는 선택사항이며 생략하면 서버가 생성한다. 같은 참가자가 동일한 `clientMessageId`로 다시 보낸 메시지는 중복 저장하지 않고 기존 메시지를 반환한다. 이 보장은 DB의 부분 고유 인덱스로 서버 재시작 뒤에도 유지된다. 입장·퇴장·캐릭터·순서 변경 때 `PARTICIPANTS`가 전달되고, 변경 시 해당 참가자의 최근 채팅 캐릭터와 순서도 갱신된다. `PING`에는 `PONG`으로 응답한다.
+
+클라이언트는 같은 탭의 `sessionStorage`를 사용해 재연결 및 새로고침 복구를 시도하고, 내부 복구 중에는 닉네임 입력 모달을 강제로 열지 않는다. 재연결 대기 간격은 1초부터 두 배씩 늘어 최대 5초다. heartbeat(PING 2회 무응답·55초 무수신), `JOINED` 기한(20초), 화면 복귀·`online` 직후의 생존 확인(PING 뒤 5초 무수신)에 걸린 소켓은 `4002`와 사유 `heartbeat-timeout`/`join-timeout`/`liveness-timeout`으로 닫되, 브라우저의 `onclose`를 기다리지 않고 바로 재연결한다. 응답 없는 상대에게 `close()`를 부르면 브라우저가 종료 확인을 기다리느라(Chromium 최대 60초) `onclose`가 늦게 오기 때문이다. `pagehide`에서는 `4001`/`page-hide`로 소켓을 닫고 자동 재연결을 멈추며, bfcache 복원(`pageshow`의 `persisted`) 때 토큰으로 다시 연결한다. 같은 세션으로 재연결되면 확인받지 못한 메시지를 같은 `clientMessageId`로 자동 재전송한다. 모든 `JOIN`에는 직전 소켓의 종료 코드·사유, 종료 뒤 경과 시간, 종료 당시 화면 숨김·온라인 여부, 연속 시도 횟수, 첫 입장의 탐색 종류를 `diagnostics`로 싣는다. `retryAfterMs`가 있으면 그 기한보다 이른 온라인/가시성 이벤트가 재시도를 앞당기지 않는다. 세션 변경 시 미확정 전송은 보존한다. 이 계약 설명만으로 별도의 브라우저 실기기 검증을 주장하지 않는다.
+
+메시지 텍스트는 trim 후 비어 있지 않아야 하며 최대 1,000자다. JSON 문자열만 받으므로 HTML을 실행하지 않고 화면에서는 텍스트로 렌더링한다. 서버는 채팅과 입·퇴장 알림을 합쳐 최근 최대 300개, 직렬화된 메시지 크기 합계 최대 256KiB만 메모리에 보관한다. 클라이언트는 전송 직후 입력칸을 비우고 메시지를 임시 표시한다. 전송 중에는 텍스트 밝기가 변하고, DB 저장 후 같은 `clientMessageId`로 받은 메시지로 교체된다. 서버 확인이 15초 안에 오지 않거나 연결이 끊기면 소켓을 닫지 않고 미확정 상태로 표시하며, 다시 연결되면 자동으로 재전송한다. 서버가 거절한 메시지에만 오류와 다시 입력 버튼을 표시한다. 연결 시에는 `JOINED` 수신까지 20초 기한을 둔다. 화면에서 위로 스크롤하면 이미 입장한 웹소켓 연결에서 `HISTORY`를 요청해 50개씩 가져오며, 서버 응답은 `{ "type": "HISTORY", "before": "요청한 UUID", "messages": [], "hasMore": false }` 형태다. 캐릭터·순서 변경은 DB에도 반영되어 과거 메시지에 최신 설정이 표시된다.
+
+오류는 `{ "type": "ERROR", "code": "...", "message": "...", "clientMessageId": "...", "retryAfterMs": 1234 }` 형태다. `clientMessageId`와 `retryAfterMs`는 선택사항이며 `retryAfterMs`는 밀리초다. JOIN 고정 윈도우 제한과 유예 중 닉네임 점유는 남은 대기 시간을 알릴 수 있다. 실제 연결된 참가자와의 닉네임 충돌에는 재시도 힌트가 없다.
 
 ## 제한과 배포
 
 - 방 최대 200개, 동시 연결 최대 500개, IP당 연결 최대 20개
 - IP당 입장 시도 1분 12회, 연결당 메시지 1분 60회
 - 마지막 참여자가 나간 뒤 3분이 지나면 방 세션과 DB 채팅 이력이 삭제됨. 같은 ID로 다시 입장하면 별도 세션이 열림. 비정상 종료 후 남은 만료 세션도 주기적으로 삭제됨
-- 연결 heartbeat가 90초 동안 수신되지 않으면 정리됨. 클라이언트는 약 20초마다 `PING`을 보내며, 서버는 연결된 참가자에게 약 30초마다 WebSocket ping 프레임을 보내 브라우저의 자동 pong 응답도 확인함
+- 연결 heartbeat가 60초 동안 수신되지 않으면 정리됨(20초 주기 검사). 정리된 참여자는 그때부터 60초 유예 상태가 된다. 클라이언트는 약 20초마다 `PING`을 보내며, 서버는 연결된 참가자에게 약 20초마다 WebSocket ping 프레임을 보내 브라우저의 자동 pong 응답도 확인함
 - 전송 버퍼가 1MiB를 넘는 느린 연결은 종료됨
 
 Nginx는 `/ws/party`를 HTTP/1.1 Upgrade로 프록시해야 한다. 배포 템플릿에는 이 location이 포함되어 있다. 프록시 뒤에서 실제 IP별 제한을 사용하려면 Nginx가 덮어쓰는 `X-Real-IP`를 신뢰하도록 앱 환경에 `ASTRAL_TRUST_PROXY=true`를 설정한다. 저장소의 Docker Compose 배포 설정은 이 값을 `true`로 전달하며, 프록시 없이 직접 실행할 때의 기본값은 `false`다. 기본값에서는 직접 연결의 `peer.remoteAddress`만 사용하며, 클라이언트가 보낸 `X-Forwarded-For`는 사용하지 않는다.
@@ -82,4 +95,47 @@ Nginx는 `/ws/party`를 HTTP/1.1 Upgrade로 프록시해야 한다. 배포 템�
 로컬 서버를 실행한 뒤 `pnpm test:party`로 HTTP와 WebSocket 통합 테스트를 실행할 수 있다. 테스트 대상 URL을 바꾸려면 `pnpm test:party http://localhost:3000`처럼 지정한다. 방 생명주기와 TTL 정리는 서버 없이 `pnpm test:party:rooms`로 검증한다.
 DB 저장과 과거 기록 조회는 마이그레이션을 적용한 로컬 서버에서 `pnpm test:party:storage http://localhost:3000`으로 검증한다.
 
-배포 전에 `database/migrations/0012_party_chat_history.sql`까지 마이그레이션을 적용해야 한다. 실제 저장 용량은 `SELECT pg_size_pretty(pg_total_relation_size('party_chat_messages'));`로 확인할 수 있다.
+배포 전에 `database/migrations/0016_party_chat_reconnect.sql`까지 마이그레이션을 적용해야 한다. 0016 이전에 저장된 참여자는 토큰 해시가 없어 재시작 후 복원 대상에서 제외되므로, 0016을 처음 배포할 때만 접속 중인 사용자가 새 참여자로 한 번 다시 입장한다. 실제 저장 용량은 `SELECT pg_size_pretty(pg_total_relation_size('party_chat_messages'));`로 확인할 수 있다.
+
+WebSocket 어댑터 통합 테스트는 서버 없이 `pnpm test:party:adapter`로 실행한다. 로컬에서 `.output`을 직접 실행할 때는 빌드 시점의 `.env` 값이 `runtimeConfig.databaseUrl`에 고정되므로, 다른 DB를 쓰려면 `NUXT_DATABASE_URL`로 덮어써야 한다.
+
+## 연결 로그
+
+끊김 원인 분석을 위해 `party_chat_connection_events`에 연결 이벤트를 저장한다. 방이 삭제되어도 남고, 30일이 지나면 정리 작업이 삭제한다. IP 주소는 저장하지 않는다. 기록은 채팅·입장 처리와 분리된 비동기 쓰기이며 실패해도 채팅에 영향을 주지 않는다.
+
+| `event` | 시점 | 주요 값 |
+| --- | --- | --- |
+| `connect` | 소켓 연결 | `connection_id`, `detail.userAgent` |
+| `join` | 입장·재입장 성공 | `detail.resumed`(유예·인계 승계), `detail.restored`(재시작 후 복원 승계), `detail.disconnectedMs`, `detail.diagnostics` |
+| `join_rejected` | 입장 거절 | `detail.code` |
+| `disconnect` | 소켓 종료 | `close_code`, `close_reason`, `departure`(`leave`, `page-hide`, `loss`, `replaced`, `shutdown`, `not-joined`), `connected_ms`, `detail.serverReason`(서버가 끊은 이유) |
+| `leave_notice` | 퇴장 알림 발행 | `departure`(`leave`, `page-hide`, `loss`, `restored`) |
+| `room_restored` | 재시작 후 방을 DB에서 다시 읽음 | `detail.participants` |
+| `server_shutdown` | 서버 종료 | |
+
+예시 쿼리:
+
+```sql
+-- 최근 24시간 종료 원인 분포
+SELECT departure, close_code, detail->>'serverReason' AS server_reason, count(*)
+FROM party_chat_connection_events
+WHERE event = 'disconnect' AND created_at > now() - interval '24 hours'
+GROUP BY 1, 2, 3 ORDER BY count(*) DESC;
+
+-- 특정 방의 연결 이력
+SELECT created_at, event, nickname, departure, close_code, close_reason, connected_ms, detail
+FROM party_chat_connection_events
+WHERE room_id = '001234' AND created_at > now() - interval '2 hours'
+ORDER BY id;
+
+-- 재연결 때 클라이언트가 보고한 직전 종료 정보(화면 숨김·오프라인 여부 포함)
+SELECT created_at, room_id, nickname, detail->'diagnostics' AS diagnostics
+FROM party_chat_connection_events
+WHERE event = 'join' AND (detail->>'resumed')::boolean
+ORDER BY id DESC LIMIT 100;
+
+-- 유예 안에 돌아오지 못해 퇴장 처리된 사례
+SELECT departure, count(*) FROM party_chat_connection_events
+WHERE event = 'leave_notice' AND created_at > now() - interval '7 days'
+GROUP BY 1;
+```

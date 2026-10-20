@@ -75,6 +75,28 @@ export interface PartyLeaveNotice {
 
 export type PartyRoomMessage = PartyChatMessage | PartyJoinNotice | PartyLeaveNotice
 
+// 명시적 퇴장: 즉시 퇴장 알림을 남긴다.
+export const PARTY_CLOSE_LEAVE = { code: 1000, reason: 'leave-room' } as const
+// 창 닫기·새로고침(pagehide): 새로고침 복귀를 기다리는 짧은 유예 뒤 퇴장 알림을 남긴다.
+export const PARTY_CLOSE_PAGE_HIDE = { code: 4001, reason: 'page-hide' } as const
+// 클라이언트가 응답 없는 소켓을 포기할 때(heartbeat, JOINED 기한, 화면 복귀 확인). 서버는 일반 단절로 유예한다.
+// reason은 `heartbeat-timeout`, `join-timeout`, `liveness-timeout` 중 하나다.
+export const PARTY_CLOSE_UNRESPONSIVE_CODE = 4002
+
+// 재연결 JOIN에 싣는 직전 연결의 종료 정보. 서버는 연결 로그에만 사용한다.
+export interface PartyConnectionDiagnostics {
+  // 마지막 JOINED 이후 이번 JOIN까지의 연속 연결 시도 횟수
+  attempt?: number
+  lastCloseCode?: number
+  lastCloseReason?: string
+  // 직전 소켓이 닫힌 뒤 이번 JOIN까지 지난 시간(ms)
+  lastCloseAgoMs?: number
+  hiddenAtClose?: boolean
+  onlineAtClose?: boolean
+  // 페이지의 첫 JOIN에서만 PerformanceNavigationTiming.type을 보낸다.
+  navigationType?: string
+}
+
 export interface PartyJoinClientMessage {
   type: 'JOIN'
   roomId: string
@@ -82,6 +104,7 @@ export interface PartyJoinClientMessage {
   characterId: PartyCharacterId
   order: PartyOrder | null
   reconnectToken?: string
+  diagnostics?: PartyConnectionDiagnostics
 }
 
 export interface PartyChatClientMessage {
@@ -152,6 +175,9 @@ export interface PartyErrorServerMessage {
   code: string
   message: string
   clientMessageId?: string
+  // 서버가 재시도 가능 시점까지 남은 시간(ms)을 알려줄 때만 존재한다.
+  // 없음은 재시도 가능을 뜻하지 않는다(예: 라이브 닉네임 충돌은 종료 상태).
+  retryAfterMs?: number
 }
 
 export interface PartyPongServerMessage {
