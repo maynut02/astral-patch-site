@@ -1,11 +1,18 @@
 import { postgresPartyChatStore } from '../utils/party-chat-storage'
-import { getRetainedPartySessionIds } from '../utils/party-chat'
+import { beginPartyShutdown, finishPartyShutdown, getRetainedPartySessionIds } from '../utils/party-chat'
 
 export default defineNitroPlugin((nitroApp) => {
+  // Synchronous signal listeners run before Nitro asynchronously destroys sockets.
+  process.once('SIGTERM', beginPartyShutdown)
+  process.once('SIGINT', beginPartyShutdown)
   const timer = setInterval(() => {
     void postgresPartyChatStore.deleteExpiredRooms(getRetainedPartySessionIds())
       .catch(error => console.error('[party] Failed to clean up expired chat sessions', error))
+    void postgresPartyChatStore.deleteOldConnectionEvents().catch(console.error)
   }, 60_000)
   timer.unref?.()
-  nitroApp.hooks.hook('close', () => clearInterval(timer))
+  nitroApp.hooks.hook('close', async () => {
+    clearInterval(timer)
+    await finishPartyShutdown()
+  })
 })

@@ -1,6 +1,8 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   PARTY_CHARACTER_IDS,
+  PARTY_CLOSE_LEAVE,
+  PARTY_CLOSE_PAGE_HIDE,
   PARTY_HISTORY_MAX_BYTES,
   PARTY_HISTORY_MAX_MESSAGES,
   PARTY_MAX_NICKNAME_LENGTH,
@@ -12,6 +14,7 @@ import {
   getPartyTextLength,
   type PartyCharacterId,
   type PartyChatMessage,
+  type PartyConnectionDiagnostics,
   type PartyJoinNotice,
   type PartyLeaveNotice,
   type PartyParticipant,
@@ -19,7 +22,7 @@ import {
   type PartyRoomMessage,
   type PartyRoomSummary
 } from '../../shared/types/party.ts'
-import { postgresPartyChatStore, type PartyChatStore } from './party-chat-storage.ts'
+import { postgresPartyChatStore, type PartyChatStore, type PartyConnectionEvent } from './party-chat-storage.ts'
 
 export const PARTY_LIMITS = Object.freeze({
   maxRooms: 200,
@@ -33,9 +36,10 @@ export const PARTY_LIMITS = Object.freeze({
   maxOutgoingMessageBytes: 1024 * 1024,
   maxBufferedBytes: 1024 * 1024,
   emptyRoomTtlMs: 3 * 60_000,
-  reconnectGraceMs: 10_000,
-  heartbeatIntervalMs: 30_000,
-  heartbeatTimeoutMs: 90_000,
+  pageHideGraceMs: 15_000,
+  connectionLossGraceMs: 60_000,
+  heartbeatIntervalMs: 20_000,
+  heartbeatTimeoutMs: 60_000,
   maxNicknameLength: PARTY_MAX_NICKNAME_LENGTH,
   maxTextLength: PARTY_MAX_TEXT_LENGTH,
   maxClientMessageIdLength: 128,
@@ -48,6 +52,7 @@ const HEARTBEAT_PING_PAYLOAD = 'party-presence'
 
 export interface PartyPeer {
   id: string
+  request?: Request
   remoteAddress?: string
   bufferedAmount?: number
   websocket?: {
@@ -71,7 +76,7 @@ interface PartyConnection {
   suppressJoinNotice: boolean
   // 같은 참가자 ID를 다른 소켓이 인계받았는지 여부. 인계 뒤의 낡은 작업은 적용하지 않는다.
   replacedByTakeover: boolean
-  reconnectToken?: string
+  reconnectTokenHash?: string
   room?: PartyRoom
   participant?: PartyParticipant
 }
@@ -79,7 +84,9 @@ interface PartyConnection {
 // 연결이 끊긴 참가자의 닉네임·토큰 예약. 실시간 맵과 분리해 보관한다.
 interface PendingDeparture {
   participant: PartyParticipant
-  reconnectToken: string
+  reconnectTokenHash: string
+  departure: 'page-hide' | 'loss' | 'restored'
+  restored: boolean
   disconnectedAt: number
   expiresAt: number
   generation: number
@@ -133,6 +140,7 @@ export interface PartyJoinInput {
   characterId: unknown
   order?: unknown
   reconnectToken?: unknown
+  diagnostics?: unknown
 }
 
 export interface PartyJoinSuccess {
@@ -195,6 +203,60 @@ let partyChatStore: PartyChatStore = postgresPartyChatStore
 
 let maintenanceTimer: ReturnType<typeof setInterval> | undefined
 let presenceListener: ((update: PartyPresenceUpdate) => void) | undefined
+let shuttingDown = false
+
+interface ConnectionLogState {
+  openedAt: number
+  disconnected: boolean
+  replaced?: boolean
+  roomId?: string
+  sessionId?: string
+  participantId?: string
+  nickname?: string
+}
+
+const connectionLogs = new WeakMap<PartyPeer, ConnectionLogState>()
+
+function logEvent(event: PartyConnectionEvent): void {
+  void partyChatStore.recordConnectionEvent(event).catch(console.error)
+}
+
+function participantEvent(room: PartyRoom, participant: PartyParticipant): Pick<PartyConnectionEvent, 'roomId' | 'sessionId' | 'participantId' | 'nickname'> {
+  return { roomId: room.roomId, sessionId: room.sessionId, participantId: participant.id, nickname: participant.nickname }
+}
+
+function sanitizeDiagnostics(value: unknown): PartyConnectionDiagnostics {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const input = value as Record<string, unknown>
+  const result: Record<string, unknown> = {}
+  for (const key of ['attempt', 'lastCloseCode', 'lastCloseAgoMs']) {
+    const item = input[key]
+    if (typeof item === 'number' && Number.isFinite(item) && item >= 0) result[key] = item
+  }
+  for (const key of ['hiddenAtClose', 'onlineAtClose']) {
+    if (typeof input[key] === 'boolean') result[key] = input[key]
+  }
+  for (const key of ['lastCloseReason', 'navigationType']) {
+    const item = input[key]
+    if (typeof item === 'string' && item.length <= 64) result[key] = item
+  }
+  return result
+}
+
+export function beginPartyShutdown(): void {
+  shuttingDown = true
+  if (maintenanceTimer) clearInterval(maintenanceTimer)
+  maintenanceTimer = undefined
+  for (const room of rooms.values()) {
+    for (const pending of room.pendingDepartures.values()) clearPendingTimer(pending)
+  }
+}
+
+export async function finishPartyShutdown(): Promise<void> {
+  beginPartyShutdown()
+  await Promise.all([...rooms.values()].map(room => room.writeQueue))
+  await partyChatStore.recordConnectionEvent({ event: 'server_shutdown' }).catch(console.error)
+}
 
 export function setPartyChatStore(store: PartyChatStore): void {
   partyChatStore = store
@@ -237,6 +299,10 @@ function normalizeReconnectToken(value: unknown): string | null {
   return normalized
 }
 
+function hashReconnectToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
 // 유예 중인 예약도 닉네임을 점유하므로 함께 검사한다.
 export function isPartyNicknameTaken(
   roomId: string,
@@ -264,29 +330,31 @@ export function isPartyNicknameTaken(
 
 interface ReconnectOwner {
   participant: PartyParticipant
-  reconnectToken: string
+  reconnectTokenHash: string
   pending: boolean
   pendingDeparture?: PendingDeparture
 }
 
 // 실시간 연결과 유예 예약에서 토큰 소유자를 찾는다.
-function findReconnectOwner(room: PartyRoom, reconnectToken: string, now: number): ReconnectOwner | null {
+// ignoreExpiry: 입장이 방 큐를 잡은 동안에는 만료 작업이 그 뒤에 실행되므로, 남아 있는 예약은 아직 유효하다.
+function findReconnectOwner(room: PartyRoom, reconnectToken: string, now: number, ignoreExpiry = false): ReconnectOwner | null {
+  const reconnectTokenHash = hashReconnectToken(reconnectToken)
   for (const connection of room.participants.values()) {
     if (!connection.participant || connection.closed) continue
-    if (connection.reconnectToken !== reconnectToken) continue
+    if (connection.reconnectTokenHash !== reconnectTokenHash) continue
     return {
       participant: connection.participant,
-      reconnectToken,
+      reconnectTokenHash,
       pending: false
     }
   }
 
   for (const pending of room.pendingDepartures.values()) {
-    if (pending.reconnectToken !== reconnectToken) continue
-    if (now >= pending.expiresAt) continue
+    if (pending.reconnectTokenHash !== reconnectTokenHash) continue
+    if (!ignoreExpiry && now >= pending.expiresAt) continue
     return {
       participant: pending.participant,
-      reconnectToken,
+      reconnectTokenHash,
       pending: true,
       pendingDeparture: pending
     }
@@ -361,6 +429,7 @@ function trimRoomHistory(room: PartyRoom): void {
 }
 
 function appendRoomMessage(room: PartyRoom, message: PartyRoomMessage): void {
+  if (room.messages.some(existing => existing.id === message.id)) return
   const bytes = Buffer.byteLength(JSON.stringify(message), 'utf8') + 1
   room.messages.push(message)
   room.messageSizes.push(bytes)
@@ -382,12 +451,14 @@ function queueRoomWrite<T>(room: PartyRoom, operation: () => Promise<T>): Promis
 }
 
 // 큐 안에서 이미 실행 중이면 다시 큐에 넣지 않고 저장만 수행한다.
-async function appendRoomMessageNow(room: PartyRoom, message: PartyRoomMessage): Promise<void> {
-  await partyChatStore.appendMessage(room.sessionId, message)
-  appendRoomMessage(room, message)
+async function appendRoomMessageNow(room: PartyRoom, message: PartyRoomMessage, leftParticipantId?: string): Promise<PartyRoomMessage> {
+  const stored = await partyChatStore.appendMessage(room.sessionId, message, leftParticipantId)
+  // A DB duplicate outside the in-memory history is acknowledged, not re-appended.
+  if (stored.id === message.id) appendRoomMessage(room, stored)
+  return stored
 }
 
-function persistRoomMessage(room: PartyRoom, message: PartyRoomMessage): Promise<void> {
+function persistRoomMessage(room: PartyRoom, message: PartyRoomMessage): Promise<PartyRoomMessage> {
   return queueRoomWrite(room, () => appendRoomMessageNow(room, message))
 }
 
@@ -485,6 +556,7 @@ function buildLeaveNotice(participant: PartyParticipant, now: number): PartyLeav
 }
 
 function publishLeave(notice: PartyLeaveNotice, roomId: string): void {
+  if (shuttingDown) return
   presenceListener?.({
     roomId,
     notice: { ...notice }
@@ -492,6 +564,7 @@ function publishLeave(notice: PartyLeaveNotice, roomId: string): void {
 }
 
 function publishParticipants(room: PartyRoom): void {
+  if (shuttingDown) return
   presenceListener?.({
     roomId: room.roomId,
     participants: getParticipants(room)
@@ -503,8 +576,8 @@ async function finalizeLeave(room: PartyRoom, participant: PartyParticipant): Pr
   const notice = buildLeaveNotice(participant, Date.now())
   try {
     await queueRoomWrite(room, async () => {
-      await appendRoomMessageNow(room, notice)
-      if (room.participants.size === 0) {
+      await appendRoomMessageNow(room, notice, participant.id)
+      if (room.participants.size === 0 && room.pendingDepartures.size === 0) {
         // 만료 시각은 이벤트 시각이 아니라 현재 시계로 계산한다.
         await partyChatStore.setRoomExpiry(
           room.sessionId,
@@ -518,6 +591,29 @@ async function finalizeLeave(room: PartyRoom, participant: PartyParticipant): Pr
   }
 
   publishLeave(notice, room.roomId)
+  logEvent({ event: 'leave_notice', ...participantEvent(room, participant), departure: 'leave' })
+}
+
+interface PersistedAdmission {
+  id: string
+  // 이미 있던 신원(재개)인지, 이번 입장에서 새로 만든 신원인지
+  existing: boolean
+}
+
+// 저장 뒤 취소된 입장: 새 신원은 재시작 후 복원되지 않게 닫고, 유예 중인 기존 신원은 마감 시각을 다시 기록한다.
+async function revertAdmission(room: PartyRoom, persisted: PersistedAdmission[]): Promise<void> {
+  try {
+    for (const entry of persisted) {
+      if (!entry.existing) {
+        await partyChatStore.discardParticipant(entry.id)
+        continue
+      }
+      const pending = room.pendingDepartures.get(entry.id)
+      if (pending) await partyChatStore.setDepartureDeadline(entry.id, new Date(pending.expiresAt).toISOString())
+    }
+  } catch (error) {
+    console.error('[party] Failed to revert cancelled admission', error)
+  }
 }
 
 function scheduleDepartureTimer(pending: PendingDeparture, delayMs: number, onExpire: () => void): void {
@@ -530,8 +626,11 @@ function scheduleDepartureTimer(pending: PendingDeparture, delayMs: number, onEx
 function reservePendingDeparture(
   room: PartyRoom,
   participant: PartyParticipant,
-  reconnectToken: string,
-  now: number
+  reconnectTokenHash: string,
+  now: number,
+  expiresAt: number,
+  departure: PendingDeparture['departure'],
+  restored = false
 ): void {
   const existing = room.pendingDepartures.get(participant.id)
   if (existing) clearPendingTimer(existing)
@@ -540,13 +639,18 @@ function reservePendingDeparture(
   const generation = room.departureGeneration
   const pending: PendingDeparture = {
     participant: cloneParticipant(participant),
-    reconnectToken,
+    reconnectTokenHash,
+    departure,
+    restored,
     disconnectedAt: now,
-    // 유예 만료는 이벤트 시각이 아니라 현재 시계 기준으로 계산한다.
-    expiresAt: Date.now() + PARTY_LIMITS.reconnectGraceMs,
+    expiresAt,
     generation
   }
   room.pendingDepartures.set(participant.id, pending)
+  if (expiresAt <= Date.now()) {
+    expirePendingDeparture(room, participant.id, generation)
+    return
+  }
   scheduleDepartureTimer(pending, pending.expiresAt - Date.now(), () => {
     expirePendingDeparture(room, participant.id, generation)
   })
@@ -555,6 +659,7 @@ function reservePendingDeparture(
 // 만료와 재연결은 같은 큐에서 직렬화되고, 늦게 도착한 타이머는 세대 검사로 무시된다.
 function expirePendingDeparture(room: PartyRoom, participantId: string, generation: number): void {
   void queueRoomWrite(room, async () => {
+    if (shuttingDown) return
     if (rooms.get(room.roomId) !== room) return
     const pending = room.pendingDepartures.get(participantId)
     if (!pending || pending.generation !== generation) return
@@ -572,13 +677,14 @@ function expirePendingDeparture(room: PartyRoom, participantId: string, generati
     setEmptySince(room, currentNow)
     const notice = buildLeaveNotice(pending.participant, currentNow)
     try {
-      await appendRoomMessageNow(room, notice)
+      await appendRoomMessageNow(room, notice, pending.participant.id)
     } catch (error) {
       console.error('[party] Failed to save leave notice', error)
       return
     }
 
     publishLeave(notice, room.roomId)
+    logEvent({ event: 'leave_notice', ...participantEvent(room, pending.participant), departure: pending.departure })
     maybeStopMaintenance()
   }).catch(error => console.error('[party] Failed to expire pending departure', error))
 }
@@ -587,6 +693,7 @@ function pruneEmptyRooms(now: number): void {
   for (const [roomId, room] of rooms) {
     if (
       room.participants.size === 0
+      && room.pendingDepartures.size === 0
       && room.emptySinceMs !== null
       && now - room.emptySinceMs >= PARTY_LIMITS.emptyRoomTtlMs
     ) {
@@ -610,7 +717,7 @@ function maybeStopMaintenance(): void {
 }
 
 function ensureMaintenance(): void {
-  if (maintenanceTimer) return
+  if (maintenanceTimer || shuttingDown) return
 
   maintenanceTimer = setInterval(() => {
     const now = Date.now()
@@ -619,13 +726,13 @@ function ensureMaintenance(): void {
     for (const connection of [...connections.values()]) {
       if (now - connection.lastSeenAt <= PARTY_LIMITS.heartbeatTimeoutMs) continue
 
+      void removePartyConnection(connection.peer, now, { code: 1013, reason: 'heartbeat-timeout', serverReason: 'heartbeat-timeout' })
+        .catch(error => console.error('[party] Failed to remove stale peer', error))
       try {
         connection.peer.close(1013, 'heartbeat-timeout')
       } catch {
         // The adapter may already have closed the peer.
       }
-      void removePartyConnection(connection.peer, now, 'loss')
-        .catch(error => console.error('[party] Failed to remove stale peer', error))
     }
 
     for (const connection of [...connections.values()]) {
@@ -635,19 +742,19 @@ function ensureMaintenance(): void {
         if (websocket?.ping) websocket.ping(HEARTBEAT_PING_PAYLOAD)
         else connection.peer.ping?.(HEARTBEAT_PING_PAYLOAD)
       } catch {
+        void removePartyConnection(connection.peer, now, { code: 1013, reason: 'heartbeat-error', serverReason: 'heartbeat-error' })
+          .catch(error => console.error('[party] Failed to remove peer', error))
         try {
           connection.peer.close(1013, 'heartbeat-error')
         } catch {
           // The adapter may already have closed the peer.
         }
-        void removePartyConnection(connection.peer, now, 'loss')
-          .catch(error => console.error('[party] Failed to remove peer', error))
       }
     }
 
     for (const room of rooms.values()) {
-      if (room.participants.size > 0) {
-        void partyChatStore.extendRoom(room.sessionId, new Date(now + PARTY_LIMITS.emptyRoomTtlMs).toISOString())
+      if (room.participants.size > 0 || room.pendingDepartures.size > 0) {
+        void queueRoomWrite(room, () => partyChatStore.extendRoom(room.sessionId, new Date(now + PARTY_LIMITS.emptyRoomTtlMs).toISOString()))
           .catch(error => console.error('[party] Failed to renew room', error))
       }
     }
@@ -659,7 +766,7 @@ function ensureMaintenance(): void {
   maintenanceTimer.unref?.()
 }
 
-function hydrateRoom(roomId: string, stored: Awaited<ReturnType<PartyChatStore['openRoom']>>): PartyRoom {
+function hydrateRoom(roomId: string, stored: Awaited<ReturnType<PartyChatStore['openRoom']>>, restored: boolean): PartyRoom {
   const room: PartyRoom = {
     roomId,
     sessionId: stored.sessionId,
@@ -676,6 +783,20 @@ function hydrateRoom(roomId: string, stored: Awaited<ReturnType<PartyChatStore['
   }
   for (const message of stored.messages) appendRoomMessage(room, message)
   rooms.set(roomId, room)
+  const now = Date.now()
+  for (const participant of stored.participants) {
+    reservePendingDeparture(
+      room, participant, participant.reconnectTokenHash, now,
+      participant.departureDeadline === null ? now + PARTY_LIMITS.connectionLossGraceMs : Date.parse(participant.departureDeadline),
+      'restored', true
+    )
+  }
+  if (restored) {
+    room.emptySinceMs = now
+    void queueRoomWrite(room, () => partyChatStore.extendRoom(room.sessionId, new Date(now + PARTY_LIMITS.emptyRoomTtlMs).toISOString()))
+      .catch(error => console.error('[party] Failed to renew restored room', error))
+    logEvent({ event: 'room_restored', roomId, sessionId: room.sessionId, detail: { participants: stored.participants.length } })
+  }
   ensureMaintenance()
   return room
 }
@@ -690,7 +811,7 @@ async function findPartyRoom(roomId: string): Promise<PartyRoom | null> {
   }
   const stored = await partyChatStore.findRoom(roomId)
   if (!stored) return null
-  return rooms.get(roomId) ?? hydrateRoom(roomId, stored)
+  return rooms.get(roomId) ?? hydrateRoom(roomId, stored, true)
 }
 
 export async function createPartyRoom(roomIdInput: unknown): Promise<PartyCreateResult> {
@@ -721,13 +842,14 @@ export async function createPartyRoom(roomIdInput: unknown): Promise<PartyCreate
 
   const creation = (async (): Promise<PartyCreateResult> => {
     const createdAtMs = Date.now()
+    const sessionId = randomUUID()
     const stored = await partyChatStore.openRoom(
       roomId,
-      randomUUID(),
+      sessionId,
       new Date(createdAtMs).toISOString(),
       new Date(createdAtMs + PARTY_LIMITS.emptyRoomTtlMs).toISOString()
     )
-    const room = rooms.get(roomId) ?? hydrateRoom(roomId, stored)
+    const room = rooms.get(roomId) ?? hydrateRoom(roomId, stored, stored.sessionId !== sessionId)
     return { ok: true, room: getRoomSummary(room) }
   })()
   roomCreations.set(roomId, creation)
@@ -749,6 +871,10 @@ export function getPartyRoom(roomIdInput: unknown): PartyRoomSummary | null {
 
 export function registerPartyConnection(peer: PartyPeer, ipAddress: string): boolean {
   if (connections.has(peer)) return true
+  if (!connectionLogs.has(peer)) {
+    connectionLogs.set(peer, { openedAt: Date.now(), disconnected: false })
+    logEvent({ event: 'connect', connectionId: peer.id, detail: { userAgent: peer.request?.headers.get('user-agent')?.slice(0, 256) } })
+  }
   if (connections.size >= PARTY_LIMITS.maxConnections) return false
 
   const normalizedIpAddress = ipAddress.trim() || 'unknown'
@@ -795,7 +921,19 @@ export function consumePartyMessage(peer: PartyPeer): boolean {
   return connection.messageCount <= PARTY_LIMITS.maxMessagesPerWindow
 }
 
-export async function joinPartyRoom(
+export async function joinPartyRoom(peer: PartyPeer, input: PartyJoinInput): Promise<PartyJoinResult> {
+  let result: PartyJoinResult
+  try {
+    result = await admitPartyParticipant(peer, input)
+  } catch (error) {
+    logEvent({ event: 'join_rejected', connectionId: peer.id, roomId: normalizePartyRoomId(input.roomId) ?? undefined, detail: { code: 'STORAGE_UNAVAILABLE' } })
+    throw error
+  }
+  if (!result.ok) logEvent({ event: 'join_rejected', connectionId: peer.id, roomId: normalizePartyRoomId(input.roomId) ?? undefined, detail: { code: result.code } })
+  return result
+}
+
+async function admitPartyParticipant(
   peer: PartyPeer,
   input: PartyJoinInput
 ): Promise<PartyJoinResult> {
@@ -903,8 +1041,12 @@ export async function joinPartyRoom(
     let suppressJoinNotice = false
     let conflict: PartyJoinFailure | null = null
     let roomLost = false
+    let restored = false
+    let disconnectedMs: number | undefined
 
-    const admitted = await queueRoomWrite(room, async () => {
+    // 저장 뒤 입장이 취소되면 같은 큐 안에서 DB 상태를 되돌리기 위해 저장한 신원을 기록한다.
+    const persisted: PersistedAdmission[] = []
+    const admitInQueue = async (): Promise<boolean> => {
       const isCurrentConnection = () => !connection.closed && !connection.room && !connection.participant
       // 방이 정리/교체됐으면 어떤 저장도 그 방에 반영하지 않는다.
       if (!isCurrentConnection()) return false
@@ -960,7 +1102,7 @@ export async function joinPartyRoom(
 
       // 저장 전에 붙잡은 신원은 await 뒤에 다시 검증해야 한다.
       const resumeParticipantId = matchedOwner?.participant.id
-      const resumeToken = matchedOwner?.reconnectToken
+      const resumeToken = matchedOwner ? providedToken : null
 
       if (matchedOwner) {
         participant = {
@@ -969,13 +1111,10 @@ export async function joinPartyRoom(
           characterId: desiredCharacterId,
           order: desiredOrder
         }
-        await partyChatStore.addParticipant(room.sessionId, participant)
-        // 인계에서는 원하는 프로필이 항상 최종값이 되어야 한다. 이전 연결의 대기 작업이
-        // 먼저 DB에 반영됐더라도 여기서 다시 덮어써 실시간 값과 DB/history를 일치시킨다.
-        await partyChatStore.updateParticipant(participant)
-      } else {
-        await partyChatStore.addParticipant(room.sessionId, participant)
       }
+      reconnectToken = matchedOwner && providedToken ? providedToken : reconnectToken
+      await partyChatStore.upsertParticipant(room.sessionId, participant, hashReconnectToken(reconnectToken))
+      persisted.push({ id: participant.id, existing: Boolean(matchedOwner) })
 
       await partyChatStore.extendRoom(room.sessionId, new Date(Date.now() + PARTY_LIMITS.emptyRoomTtlMs).toISOString())
 
@@ -986,8 +1125,8 @@ export async function joinPartyRoom(
       if (!isCurrentConnection()) return false
 
       if (resumeParticipantId) {
-        // 재개 신원이 저장 대기 중 명시적으로 무효화됐는지 확인한다. 손실→유예 전환은 같은 토큰으로 계속 유효하다.
-        const currentOwner = resumeToken ? findReconnectOwner(room, resumeToken, Date.now()) : null
+        // 재개 신원이 저장 대기 중 명시적으로 무효화됐는지만 확인한다. 저장 시간 때문에 유예 마감을 넘긴 것은 무효화가 아니다.
+        const currentOwner = resumeToken ? findReconnectOwner(room, resumeToken, Date.now(), true) : null
         if (!currentOwner || currentOwner.participant.id !== resumeParticipantId) {
           // 무효화된 신원을 되살리지 않고 새 참가자로 다시 시작한다.
           if (isPartyNicknameTaken(roomId, nickname)) {
@@ -1014,7 +1153,8 @@ export async function joinPartyRoom(
             order: desiredOrder
           }
           reconnectToken = randomUUID()
-          await partyChatStore.addParticipant(room.sessionId, participant)
+          await partyChatStore.upsertParticipant(room.sessionId, participant, hashReconnectToken(reconnectToken))
+          persisted.push({ id: participant.id, existing: false })
           if (rooms.get(room.roomId) !== room) {
             roomLost = true
             return false
@@ -1022,7 +1162,7 @@ export async function joinPartyRoom(
           if (!isCurrentConnection()) return false
         } else {
           resumed = true
-          reconnectToken = currentOwner.reconnectToken
+          reconnectToken = providedToken!
           participant = {
             id: currentOwner.participant.id,
             nickname,
@@ -1034,6 +1174,8 @@ export async function joinPartyRoom(
 
       for (const [activePeer, activeConn] of room.participants) {
         if (activeConn.participant?.id === participant.id && activePeer !== peer) {
+          const oldLog = connectionLogs.get(activePeer)
+          if (oldLog) oldLog.replaced = true
           activeConn.room = undefined
           activeConn.participant = undefined
           activeConn.closed = true
@@ -1051,19 +1193,31 @@ export async function joinPartyRoom(
       // 유예 예약을 되살릴 때는 타이머를 취소해 저장 대기 중 만료가 끼어들지 않게 한다.
       const pendingDeparture = room.pendingDepartures.get(participant.id)
       if (pendingDeparture) {
+        restored = pendingDeparture.restored
+        disconnectedMs = Math.max(0, Date.now() - pendingDeparture.disconnectedAt)
         clearPendingTimer(pendingDeparture)
         room.pendingDepartures.delete(participant.id)
       }
 
       connection.room = room
       connection.participant = participant
-      connection.reconnectToken = reconnectToken
+      connection.reconnectTokenHash = hashReconnectToken(reconnectToken)
       // 재연결은 이전 연결이 살아 있든 유예 중이든 입·퇴장 공지를 모두 억제한다.
       connection.suppressJoinNotice = resumed || suppressJoinNotice
       room.participants.set(peer, connection)
+      Object.assign(connectionLogs.get(peer)!, participantEvent(room, participant))
       syncParticipantMessages(room, participant)
       setEmptySince(room, Date.now())
       return true
+    }
+    const admitted = await queueRoomWrite(room, async () => {
+      let ok = false
+      try {
+        ok = await admitInQueue()
+      } finally {
+        if (!ok && persisted.length > 0) await revertAdmission(room, persisted)
+      }
+      return ok
     })
 
     if (replacedPeer) {
@@ -1088,6 +1242,10 @@ export async function joinPartyRoom(
         : { ok: false, code: 'NICKNAME_TAKEN', message: '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.' }
     }
 
+    logEvent({
+      event: 'join', ...participantEvent(room, participant), connectionId: peer.id,
+      detail: { resumed, restored, ...(disconnectedMs === undefined ? {} : { disconnectedMs }), diagnostics: sanitizeDiagnostics(input.diagnostics) }
+    })
     return {
       ok: true,
       sessionId: room.sessionId,
@@ -1269,8 +1427,9 @@ export async function sendPartyChat(
       text,
       createdAt
     }
-    await appendRoomMessageNow(room, created)
-    return created
+    const stored = await appendRoomMessageNow(room, created)
+    if (stored.kind !== 'chat') throw new Error('Invalid stored chat message')
+    return stored
   })
 
   return {
@@ -1305,12 +1464,43 @@ export function getPartyRoomPeers(roomIdInput: unknown): PartyPeer[] {
 }
 
 // 동기 삭제·쿼터 반환·presence 전송을 저장 대기보다 먼저 수행한다.
+export interface PartyCloseDetails {
+  code?: number
+  reason?: string
+  serverReason?: string
+}
+
 export async function removePartyConnection(
   peer: PartyPeer,
   now = Date.now(),
-  reason: 'loss' | 'leave' = 'loss'
+  details: PartyCloseDetails | 'loss' | 'leave' = 'loss'
 ): Promise<void> {
+  const close: PartyCloseDetails = typeof details === 'string'
+    ? details === 'leave' ? PARTY_CLOSE_LEAVE : {}
+    : details
   const connection = connections.get(peer)
+  const state = connectionLogs.get(peer)
+  const departure = shuttingDown
+    ? 'shutdown'
+    : state?.replaced
+      ? 'replaced'
+      : !connection?.participant
+          ? 'not-joined'
+          : close.code === PARTY_CLOSE_LEAVE.code && close.reason === PARTY_CLOSE_LEAVE.reason
+            ? 'leave'
+            : close.code === 1001 || (close.code === PARTY_CLOSE_PAGE_HIDE.code && close.reason === PARTY_CLOSE_PAGE_HIDE.reason)
+              ? 'page-hide'
+              : 'loss'
+  if (state && !state.disconnected) {
+    state.disconnected = true
+    logEvent({
+      event: 'disconnect', roomId: state.roomId, sessionId: state.sessionId,
+      participantId: state.participantId, nickname: state.nickname, connectionId: peer.id,
+      closeCode: close.code, closeReason: close.reason, departure,
+      connectedMs: Math.min(2_147_483_647, Math.max(0, now - state.openedAt)),
+      detail: { ...(close.serverReason || state.replaced ? { serverReason: close.serverReason ?? 'replaced-by-reconnect' } : {}) }
+    })
+  }
   if (!connection) return
 
   connection.closed = true
@@ -1319,10 +1509,10 @@ export async function removePartyConnection(
 
   const room = connection.room
   const participant = connection.participant
-  const reconnectToken = connection.reconnectToken
+  const reconnectTokenHash = connection.reconnectTokenHash
   connection.room = undefined
   connection.participant = undefined
-  connection.reconnectToken = undefined
+  connection.reconnectTokenHash = undefined
 
   if (!room || !participant) {
     maybeStopMaintenance()
@@ -1330,10 +1520,11 @@ export async function removePartyConnection(
   }
 
   room.participants.delete(peer)
+  if (shuttingDown) return
   // 빈 방 TTL도 이벤트 시각이 아니라 현재 시계에서 시작한다.
   setEmptySince(room, Date.now())
 
-  if (reason === 'leave') {
+  if (departure === 'leave') {
     const pending = room.pendingDepartures.get(participant.id)
     if (pending) {
       clearPendingTimer(pending)
@@ -1346,8 +1537,18 @@ export async function removePartyConnection(
     return
   }
 
-  reservePendingDeparture(room, participant, reconnectToken ?? randomUUID(), now)
+  // heartbeat 만료도 감지 시점부터 유예한다. 마지막 수신 시각을 기준으로 하면 감지 순간 유예가 이미 끝나,
+  // 클라이언트가 조용한 단절을 알아채고 다시 붙기 전에 토큰이 무효화된다.
+  const deadline = now + (departure === 'page-hide' ? PARTY_LIMITS.pageHideGraceMs : PARTY_LIMITS.connectionLossGraceMs)
+  reservePendingDeparture(room, participant, reconnectTokenHash!, now, deadline, departure === 'page-hide' ? 'page-hide' : 'loss')
+  const pending = room.pendingDepartures.get(participant.id)!
+  const write = queueRoomWrite(room, async () => {
+    if (shuttingDown) return
+    if (room.pendingDepartures.get(participant.id) !== pending) return
+    await partyChatStore.setDepartureDeadline(participant.id, new Date(deadline).toISOString())
+  })
   publishParticipants(room)
+  await write
   maybeStopMaintenance()
 }
 

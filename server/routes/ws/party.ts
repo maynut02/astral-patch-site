@@ -140,30 +140,14 @@ async function disconnectPartyPeer(peer: PartyPeer, code: number, reason: string
 
   disconnectingPeers.add(peer)
   try {
-    await removePartyConnection(peer, Date.now(), 'loss')
-  } finally {
+    const removal = removePartyConnection(peer, Date.now(), { code, reason, serverReason: reason })
     try {
       peer.close(code, reason)
     } catch {
       // The adapter may already have closed the peer.
     }
-    disconnectingPeers.delete(peer)
-  }
-}
-
-// 명시적 퇴장은 close(1000,'leave-room')으로만 알린다.
-async function leavePartyPeer(peer: PartyPeer): Promise<void> {
-  if (disconnectingPeers.has(peer)) return
-
-  disconnectingPeers.add(peer)
-  try {
-    await removePartyConnection(peer, Date.now(), 'leave')
+    await removal
   } finally {
-    try {
-      peer.close(1000, 'leave-room')
-    } catch {
-      // The adapter may already have closed the peer.
-    }
     disconnectingPeers.delete(peer)
   }
 }
@@ -196,7 +180,8 @@ async function handleJoin(peer: PartyPeer, data: Record<string, unknown>): Promi
       nickname: data.nickname,
       characterId: data.characterId,
       order: data.order,
-      reconnectToken: data.reconnectToken
+      reconnectToken: data.reconnectToken,
+      diagnostics: data.diagnostics
     })
   } catch (error) {
     console.error('[ws/party] Failed to join room', error)
@@ -289,7 +274,7 @@ export default defineWebSocketHandler({
   open(peer) {
     const partyPeer = peer as PartyPeer & { request?: Request }
     if (!registerPartyConnection(partyPeer, getPeerAddress(partyPeer))) {
-      partyPeer.close(1013, 'connection-limit')
+      void disconnectPartyPeer(partyPeer, 1013, 'connection-limit')
       return
     }
     partyPeer.websocket?.on?.('pong', () => touchPartyConnection(partyPeer))
@@ -382,12 +367,7 @@ export default defineWebSocketHandler({
   },
 
   async close(peer, details) {
-    // 의도적 퇴장은 이 종료 코드/사유 조합으로만 판별한다.
-    if (details?.code === 1000 && details.reason === 'leave-room') {
-      await leavePartyPeer(peer as PartyPeer)
-      return
-    }
-    await removePartyConnection(peer as PartyPeer, Date.now(), 'loss')
+    await removePartyConnection(peer as PartyPeer, Date.now(), details ?? {})
   },
 
   async error(peer, error) {

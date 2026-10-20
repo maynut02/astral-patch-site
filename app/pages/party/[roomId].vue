@@ -919,6 +919,7 @@ function togglePip() {
                         <div v-if="'delivery' in message && message.delivery !== 'sending'" class="mt-1 flex items-center gap-2 text-xs" :class="message.delivery === 'failed' ? 'text-error' : 'text-warning'">
                           <span role="alert">{{ message.failureReason || '전송 실패' }}</span>
                           <UButton
+                            v-if="message.delivery === 'failed'"
                             label="다시 입력"
                             size="xs"
                             color="neutral"

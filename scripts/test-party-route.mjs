@@ -58,10 +58,13 @@ function buildMemoryStore() {
   const rooms = new Map()
   const sessions = new Map()
   const participants = new Map()
+  const events = []
+  const activeParticipants = sessionId => [...participants.values()].filter(participant => participant.sessionId === sessionId && participant.leftAt === null && participant.reconnectTokenHash != null).map(participant => structuredClone(participant))
   return {
     rooms,
     sessions,
     participants,
+    events,
     async openRoom(roomId, sessionId, createdAt, expiresAt) {
       let room = rooms.get(roomId)
       if (!room) {
@@ -69,16 +72,25 @@ function buildMemoryStore() {
         rooms.set(roomId, room)
         sessions.set(sessionId, room)
       }
-      return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: [] }
+      return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.map(message => structuredClone(message)), participants: activeParticipants(room.sessionId) }
     },
     async findRoom(roomId) {
       const room = rooms.get(roomId)
       if (!room) return null
-      return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: [] }
+      return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.map(message => structuredClone(message)), participants: activeParticipants(room.sessionId) }
     },
-    async addParticipant(_sessionId, participant) { participants.set(participant.id, structuredClone(participant)) },
-    async updateParticipant(participant) { participants.set(participant.id, structuredClone(participant)) },
-    async appendMessage(sessionId, message) { sessions.get(sessionId).messages.push(structuredClone(message)) },
+    async upsertParticipant(sessionId, participant, reconnectTokenHash) { participants.set(participant.id, { ...structuredClone(participant), sessionId, reconnectTokenHash, departureDeadline: null, leftAt: null }) },
+    async updateParticipant(participant) { Object.assign(participants.get(participant.id), structuredClone(participant)) },
+    async setDepartureDeadline(participantId, deadline) { participants.get(participantId).departureDeadline = deadline },
+    async discardParticipant(participantId) { participants.get(participantId).leftAt = new Date().toISOString() },
+    async appendMessage(sessionId, message, leftParticipantId) {
+      const room = sessions.get(sessionId)
+      const existing = room.messages.find(candidate => candidate.id === message.id || (candidate.kind === 'chat' && message.kind === 'chat' && candidate.participant.id === message.participant.id && candidate.clientMessageId === message.clientMessageId))
+      if (existing) return structuredClone(existing)
+      if (leftParticipantId) Object.assign(participants.get(leftParticipantId), { leftAt: message.createdAt, departureDeadline: null })
+      room.messages.push(structuredClone(message))
+      return structuredClone(message)
+    },
     async getMessagesBefore() { return { messages: [], hasMore: false } },
     async extendRoom(sessionId, expiresAt) {
       const room = sessions.get(sessionId)
@@ -89,7 +101,9 @@ function buildMemoryStore() {
       if (room) room.expiresAt = expiresAt
     },
     async deleteRoom(sessionId) { sessions.delete(sessionId) },
-    async deleteExpiredRooms() {}
+    async deleteExpiredRooms() {},
+    async recordConnectionEvent(event) { events.push(structuredClone(event)) },
+    async deleteOldConnectionEvents() {}
   }
 }
 
@@ -419,12 +433,12 @@ function blockedStore(gateName) {
   const blocked = { release, opened: false }
   partyChat.setPartyChatStore({
     ...memoryStore,
-    async addParticipant(sessionId, participant) {
-      if (gateName === 'addParticipant' && !blocked.opened) {
+    async upsertParticipant(sessionId, participant, reconnectTokenHash) {
+      if (gateName === 'upsertParticipant' && !blocked.opened) {
         blocked.opened = true
         await gate
       }
-      await memoryStore.addParticipant(sessionId, participant)
+      await memoryStore.upsertParticipant(sessionId, participant, reconnectTokenHash)
     },
     async extendRoom(sessionId, expiresAt) {
       if (gateName === 'extendRoom' && !blocked.opened) {
@@ -433,12 +447,12 @@ function blockedStore(gateName) {
       }
       await memoryStore.extendRoom(sessionId, expiresAt)
     },
-    async appendMessage(sessionId, message) {
+    async appendMessage(sessionId, message, leftParticipantId) {
       if (gateName === 'appendMessage' && !blocked.opened && message.kind === 'leave') {
         blocked.opened = true
         await gate
       }
-      await memoryStore.appendMessage(sessionId, message)
+      return memoryStore.appendMessage(sessionId, message, leftParticipantId)
     }
   })
   return blocked
@@ -459,7 +473,7 @@ test('an explicit leave during a blocked admission cannot resurrect the captured
   // 재개 입장을 참가자 저장에서 막고, 그 사이 소유자가 명시적으로 퇴장한다.
   const resumed = createPeer(ip)
   hooks.open(resumed)
-  const blocked = blockedStore('addParticipant')
+  const blocked = blockedStore('upsertParticipant')
   const joinPromise = send(resumed, {
     type: 'JOIN',
     roomId,
@@ -516,7 +530,7 @@ test('a loss during a blocked admission keeps the same token resumable', async (
   // 재개 입장을 막고, 그 사이 기존 소켓이 손실로 전환된다(명시적 무효화가 아님).
   const resumed = createPeer(ip)
   hooks.open(resumed)
-  const blocked = blockedStore('addParticipant')
+  const blocked = blockedStore('upsertParticipant')
   const joinPromise = send(resumed, {
     type: 'JOIN',
     roomId,
@@ -607,7 +621,7 @@ test('an invalidated owner during a blocked admission cannot admit a fresh parti
   // 재개 입장을 참가자 저장에서 막고, 그 사이 소유자가 명시적으로 퇴장해 신원을 무효화한다.
   const resumed = createPeer(ip)
   hooks.open(resumed)
-  const blocked = blockedStore('addParticipant')
+  const blocked = blockedStore('upsertParticipant')
   const joinPromise = send(resumed, {
     type: 'JOIN',
     roomId,
@@ -639,4 +653,111 @@ test('an invalidated owner during a blocked admission cannot admit a fresh parti
   )
   await hooks.close(resumed, { code: 1006 })
   await hooks.close(observer, { code: 1000, reason: 'leave-room' })
+})
+
+test('route logs sanitized diagnostics, never-joined closes and server close reasons', async () => {
+  const peer = createPeer('diagnostic-ip')
+  peer.request = new Request('http://localhost/ws/party', { headers: { 'user-agent': 'x'.repeat(300) } })
+  hooks.open(peer)
+  const connected = memoryStore.events.findLast(event => event.event === 'connect' && event.connectionId === peer.id)
+  assert.equal(connected.detail.userAgent, 'x'.repeat(256))
+  await send(peer, { type: 'JOIN', roomId: '999990', nickname: 'unknown', characterId: '101' })
+  assert.equal(memoryStore.events.findLast(event => event.event === 'join_rejected').detail.code, 'ROOM_NOT_FOUND')
+  await hooks.message(peer, { text: () => 'not JSON' })
+  const disconnected = memoryStore.events.findLast(event => event.event === 'disconnect' && event.connectionId === peer.id)
+  assert.equal(disconnected.departure, 'not-joined')
+  assert.equal(disconnected.closeCode, 1003)
+  assert.equal(disconnected.detail.serverReason, 'invalid-json')
+  assert.ok(disconnected.connectedMs >= 0)
+  await hooks.close(peer, { code: 1003, reason: 'invalid-json' })
+  assert.equal(memoryStore.events.filter(event => event.event === 'disconnect' && event.connectionId === peer.id).length, 1)
+  const member = createPeer('diagnostic-member')
+  hooks.open(member)
+  await join(member, {
+    roomId: '801020', nickname: 'diagnostics', characterId: '101',
+    diagnostics: {
+      attempt: 2, lastCloseCode: 1006, lastCloseAgoMs: 123, hiddenAtClose: false, onlineAtClose: true,
+      lastCloseReason: 'loss', navigationType: 'reload', ip: '127.0.0.1', extra: {},
+      constructor: 'bad'
+    }
+  })
+  const joined = memoryStore.events.findLast(event => event.event === 'join' && event.connectionId === member.id)
+  assert.deepEqual(joined.detail.diagnostics, {
+    attempt: 2, lastCloseCode: 1006, lastCloseAgoMs: 123, hiddenAtClose: false, onlineAtClose: true,
+    lastCloseReason: 'loss', navigationType: 'reload'
+  })
+  await hooks.close(member, { code: 4001, reason: 'page-hide' })
+  const resumed = createPeer('diagnostic-resumed')
+  hooks.open(resumed)
+  const initial = lastOfType(member, 'JOINED')
+  await join(resumed, {
+    roomId: '801020', nickname: 'diagnostics', characterId: '101', reconnectToken: initial.reconnectToken,
+    diagnostics: { attempt: -1, lastCloseCode: '1006', lastCloseAgoMs: Infinity, hiddenAtClose: 1, onlineAtClose: null, lastCloseReason: 'x'.repeat(65), navigationType: [] }
+  })
+  const resumedEvent = memoryStore.events.findLast(event => event.event === 'join' && event.connectionId === resumed.id)
+  assert.deepEqual(resumedEvent.detail.diagnostics, {})
+  assert.equal(resumedEvent.detail.resumed, true)
+  assert.ok(resumedEvent.detail.disconnectedMs >= 0)
+  assert.equal(memoryStore.events.findLast(event => event.event === 'disconnect' && event.connectionId === member.id).departure, 'page-hide')
+  await hooks.close(resumed, { code: 1000, reason: 'leave-room' })
+})
+
+test('signal plugin synchronously suppresses departures and drains writes on Nitro close', async () => {
+  const isolatedUrl = `${partyChatUrl}#signal-plugin`
+  const isolated = await import(isolatedUrl)
+  isolated.setPartyChatStore(memoryStore)
+  globalThis.defineNitroPlugin = plugin => plugin
+  const plugin = (await import(await transformModule('server/plugins/party-chat-cleanup.ts', {
+    '../utils/party-chat': isolatedUrl,
+    '../utils/party-chat-storage': storageStubUrl
+  }))).default
+  let closeHook
+  const previousTerm = process.listeners('SIGTERM')
+  const previousInt = process.listeners('SIGINT')
+  plugin({
+    hooks: {
+      hook(name, callback) {
+        assert.equal(name, 'close')
+        closeHook = callback
+      }
+    }
+  })
+  const onTerm = process.listeners('SIGTERM').find(listener => !previousTerm.includes(listener))
+  const onInt = process.listeners('SIGINT').find(listener => !previousInt.includes(listener))
+  assert.equal(typeof onTerm, 'function')
+  assert.equal(typeof onInt, 'function')
+  const peer = createPeer('signal-member')
+  await isolated.createPartyRoom('801021')
+  isolated.registerPartyConnection(peer, 'signal-member')
+  const joined = await isolated.joinPartyRoom(peer, { roomId: '801021', nickname: 'signal', characterId: '101' })
+  let release
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  isolated.setPartyChatStore({
+    ...memoryStore,
+    async appendMessage(...args) {
+      await gate
+      return memoryStore.appendMessage(...args)
+    }
+  })
+  const write = isolated.sendPartyChat(peer, { text: 'drain on shutdown' })
+  onTerm()
+  onInt()
+  await isolated.removePartyConnection(peer, Date.now(), { code: 1006 })
+  const saved = memoryStore.participants.get(joined.participantId)
+  assert.equal(saved.departureDeadline, null)
+  assert.equal(saved.leftAt, null)
+  let closed = false
+  const closing = closeHook().then(() => {
+    closed = true
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(closed, false)
+  release()
+  await Promise.all([write, closing])
+  assert.equal(memoryStore.events.at(-1).event, 'server_shutdown')
+  assert.deepEqual(durableKinds(joined.sessionId), ['chat'])
+  process.removeListener('SIGTERM', onTerm)
+  process.removeListener('SIGINT', onInt)
 })

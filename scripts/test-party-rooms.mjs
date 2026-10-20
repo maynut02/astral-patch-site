@@ -7,9 +7,16 @@ import { PARTY_CHARACTER_IDS, PARTY_ORDERS, PARTY_UNSELECTED_ID, getPartyCharact
 const storedRooms = new Map()
 const storedSessions = new Map()
 const storedParticipants = new Map()
+const connectionEvents = []
+function activeParticipants(sessionId) {
+  return [...storedParticipants.values()]
+    .filter(participant => participant.sessionId === sessionId && participant.leftAt === null && participant.reconnectTokenHash != null)
+    .map(participant => structuredClone(participant))
+}
 function storedMessage(message) {
   if (message.kind !== 'chat') return structuredClone(message)
-  return { ...structuredClone(message), participant: structuredClone(storedParticipants.get(message.participant.id) || message.participant) }
+  const participant = storedParticipants.get(message.participant.id) || message.participant
+  return { ...structuredClone(message), participant: { id: participant.id, nickname: participant.nickname, characterId: participant.characterId, order: participant.order } }
 }
 const memoryStore = {
   async openRoom(roomId, sessionId, createdAt, expiresAt) {
@@ -20,16 +27,27 @@ const memoryStore = {
       storedRooms.set(roomId, room)
       storedSessions.set(sessionId, room)
     }
-    return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.slice(-300).map(storedMessage) }
+    return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.slice(-300).map(storedMessage), participants: activeParticipants(room.sessionId) }
   },
   async findRoom(roomId) {
     const room = storedRooms.get(roomId)
     if (!room || Date.parse(room.expiresAt) <= Date.now()) return null
-    return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.slice(-300).map(storedMessage) }
+    return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.slice(-300).map(storedMessage), participants: activeParticipants(room.sessionId) }
   },
-  async addParticipant(_sessionId, participant) { storedParticipants.set(participant.id, structuredClone(participant)) },
-  async updateParticipant(participant) { storedParticipants.set(participant.id, structuredClone(participant)) },
-  async appendMessage(sessionId, message) { storedSessions.get(sessionId).messages.push(structuredClone(message)) },
+  async upsertParticipant(sessionId, participant, reconnectTokenHash) {
+    storedParticipants.set(participant.id, { ...structuredClone(participant), sessionId, reconnectTokenHash, departureDeadline: null, leftAt: null })
+  },
+  async updateParticipant(participant) { Object.assign(storedParticipants.get(participant.id), structuredClone(participant)) },
+  async setDepartureDeadline(participantId, deadline) { storedParticipants.get(participantId).departureDeadline = deadline },
+  async discardParticipant(participantId) { storedParticipants.get(participantId).leftAt = new Date().toISOString() },
+  async appendMessage(sessionId, message, leftParticipantId) {
+    const room = storedSessions.get(sessionId)
+    const existing = room.messages.find(candidate => candidate.id === message.id || (candidate.kind === 'chat' && message.kind === 'chat' && candidate.participant.id === message.participant.id && candidate.clientMessageId === message.clientMessageId))
+    if (existing) return storedMessage(existing)
+    if (leftParticipantId) Object.assign(storedParticipants.get(leftParticipantId), { leftAt: message.createdAt, departureDeadline: null })
+    room.messages.push(structuredClone(message))
+    return storedMessage(message)
+  },
   async getMessagesBefore(sessionId, beforeId, limit) {
     const all = storedSessions.get(sessionId).messages
     const before = all.findIndex(message => message.id === beforeId)
@@ -49,7 +67,9 @@ const memoryStore = {
     if (room) storedRooms.delete(room.roomId)
     storedSessions.delete(sessionId)
   },
-  async deleteExpiredRooms() {}
+  async deleteExpiredRooms() {},
+  async recordConnectionEvent(event) { connectionEvents.push(structuredClone(event)) },
+  async deleteOldConnectionEvents() {}
 }
 setPartyChatStore(memoryStore)
 
@@ -78,7 +98,7 @@ test('room IDs require six ASCII digits and preserve leading zeros', async () =>
 test('entering an ID creates or returns the same room, and idle rooms expire', async (t) => {
   assert.equal(PARTY_LIMITS.emptyRoomTtlMs, 3 * 60_000)
   const startedAt = Date.now()
-  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: startedAt })
+  t.mock.timers.enable({ apis: ['Date', 'setInterval', 'setTimeout'], now: startedAt })
   const pings = []
   const participant = {
     id: 'member',
@@ -117,6 +137,9 @@ test('entering an ID creates or returns the same room, and idle rooms expire', a
   t.mock.timers.tick(PARTY_LIMITS.heartbeatIntervalMs)
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(getPartyRoom('001234')?.participantCount, 0)
+  // heartbeat 만료 뒤에도 재접속 유예가 끝나야 방이 비고 TTL이 시작된다.
+  t.mock.timers.tick(PARTY_LIMITS.connectionLossGraceMs)
+  for (let flush = 0; flush < 5; flush++) await new Promise(resolve => setImmediate(resolve))
 
   const emptiedAt = Date.now()
   t.mock.timers.setTime(emptiedAt + PARTY_LIMITS.emptyRoomTtlMs - 1)
@@ -400,7 +423,7 @@ test('unselected transitions preserve player orders and clear spectator orders i
   const restoredPeer = { id: 'unselected-restored', send() {}, close() {} }
   assert.equal(restarted.registerPartyConnection(restoredPeer, restoredPeer.id), true)
   t.after(() => restarted.removePartyConnection(restoredPeer))
-  const restored = await restarted.joinPartyRoom(restoredPeer, { roomId: '223346', nickname: '미선택 플레이어', characterId: PARTY_UNSELECTED_ID, order: 'P4' })
+  const restored = await restarted.joinPartyRoom(restoredPeer, { roomId: '223346', nickname: '미선택 플레이어', characterId: PARTY_UNSELECTED_ID, order: 'P4', reconnectToken: joined.reconnectToken })
   assert.equal(restored.ok, true)
   assert.equal(restored.sessionId, joined.sessionId)
   assert.deepEqual(restored.messages.filter(message => message.kind === 'chat').map(message => [message.participant.characterId, message.participant.order]), [[PARTY_UNSELECTED_ID, 'P4'], [PARTY_UNSELECTED_ID, 'P4']])
@@ -439,9 +462,9 @@ test('a failed database write does not add a chat message to the room', async (t
   assert.equal((await joinPartyRoom(writer, { roomId: '998878', nickname: '작성자', characterId: '101' })).ok, true)
   setPartyChatStore({
     ...memoryStore,
-    async appendMessage(sessionId, message) {
+    async appendMessage(sessionId, message, leftParticipantId) {
       if (message.kind === 'chat' && message.text === '저장 실패') throw new Error('database unavailable')
-      await memoryStore.appendMessage(sessionId, message)
+      return memoryStore.appendMessage(sessionId, message, leftParticipantId)
     }
   })
   await assert.rejects(sendPartyChat(writer, { text: '저장 실패' }), /database unavailable/)
@@ -628,12 +651,12 @@ test('disconnecting while recordPartyJoin is persisting does not throw and dedup
   let blockJoinNotice = true
   setPartyChatStore({
     ...memoryStore,
-    async appendMessage(sessionId, message) {
+    async appendMessage(sessionId, message, leftParticipantId) {
       if (blockJoinNotice && message.kind === 'join') {
         blockJoinNotice = false
         await noticeGate
       }
-      await memoryStore.appendMessage(sessionId, message)
+      return memoryStore.appendMessage(sessionId, message, leftParticipantId)
     }
   })
 
@@ -671,12 +694,12 @@ test('intentional leave publishes presence before the blocked leave write resolv
   let blockLeave = true
   setPartyChatStore({
     ...memoryStore,
-    async appendMessage(sessionId, message) {
+    async appendMessage(sessionId, message, leftParticipantId) {
       if (blockLeave && message.kind === 'leave') {
         blockLeave = false
         await leaveGate
       }
-      await memoryStore.appendMessage(sessionId, message)
+      return memoryStore.appendMessage(sessionId, message, leftParticipantId)
     }
   })
 
@@ -712,9 +735,9 @@ test('a failed leave write publishes no leave notice and keeps the nickname rese
 
   setPartyChatStore({
     ...memoryStore,
-    async appendMessage(sessionId, message) {
+    async appendMessage(sessionId, message, leftParticipantId) {
       if (message.kind === 'leave') throw new Error('leave write failed')
-      await memoryStore.appendMessage(sessionId, message)
+      return memoryStore.appendMessage(sessionId, message, leftParticipantId)
     }
   })
 
@@ -754,7 +777,7 @@ test('socket loss reserves the nickname for the grace window and expiry publishe
   const blocked = await joinPartyRoom(rival, { roomId: '667794', nickname: 'ＧＲＡＣＥ', characterId: '101' })
   assert.equal(blocked.ok, false)
   assert.equal(blocked.code, 'NICKNAME_TAKEN')
-  assert.equal(blocked.retryAfterMs, PARTY_LIMITS.reconnectGraceMs)
+  assert.equal(blocked.retryAfterMs, PARTY_LIMITS.connectionLossGraceMs)
 
   // 유효 토큰 소유자는 예약을 무시하고 재개한다.
   assert.equal(canResumePartyParticipant('667794', 'grace', joined.reconnectToken), true)
@@ -780,7 +803,7 @@ test('socket loss reserves the nickname for the grace window and expiry publishe
   await removePartyConnection(rival, Date.now(), 'loss')
   assert.equal(takePresence().length, 0)
 
-  const expiresAt = Date.now() + PARTY_LIMITS.reconnectGraceMs
+  const expiresAt = Date.now() + PARTY_LIMITS.connectionLossGraceMs
   t.mock.timers.setTime(expiresAt - 1)
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(isPartyNicknameTaken('667794', 'grace'), true)
@@ -797,7 +820,7 @@ test('socket loss reserves the nickname for the grace window and expiry publishe
 
   // 만료 이후 늦게 남은 타이머는 아무 것도 만들지 않는다.
   await new Promise(resolve => setImmediate(resolve))
-  t.mock.timers.tick(PARTY_LIMITS.reconnectGraceMs)
+  t.mock.timers.tick(PARTY_LIMITS.connectionLossGraceMs)
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(leaveNotices(takePresence()).length, 0)
   assert.equal(storedSessions.get(joined.sessionId).messages.filter(message => message.kind === 'leave').length, 1)
@@ -825,7 +848,7 @@ test('a stale grace timer cannot expire a resumed identity, and a duplicated clo
   takePresence()
 
   // 유예 중 재개하면 이전 타이머를 취소한다.
-  t.mock.timers.setTime(startedAt + PARTY_LIMITS.reconnectGraceMs - 1)
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.connectionLossGraceMs - 1)
   const resumed = await joinPartyRoom(second, {
     roomId: '667795',
     nickname: 'Stale',
@@ -835,7 +858,7 @@ test('a stale grace timer cannot expire a resumed identity, and a duplicated clo
   assert.equal(resumed.ok, true)
   assert.equal(resumed.resumed, true)
 
-  t.mock.timers.tick(PARTY_LIMITS.reconnectGraceMs * 2)
+  t.mock.timers.tick(PARTY_LIMITS.connectionLossGraceMs * 2)
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(leaveNotices(takePresence()).length, 0)
   assert.equal(getPartyRoom('667795')?.participantCount, 1)
@@ -1088,7 +1111,7 @@ test('a stale grace deadline cannot expire a resumed identity early', async (t) 
   takePresence()
 
   // 만료 직전에 재개하면 이전 세대 타이머/마감이 취소된다.
-  t.mock.timers.setTime(startedAt + PARTY_LIMITS.reconnectGraceMs - 1)
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.connectionLossGraceMs - 1)
   const resumed = await joinPartyRoom(second, {
     roomId: '667800',
     nickname: '세대',
@@ -1105,7 +1128,7 @@ test('a stale grace deadline cannot expire a resumed identity early', async (t) 
   takePresence()
 
   // 이전 세대의 마감을 지나도 새 세대는 만료되지 않는다(이전 타이머/콜백은 세대 검사로 무시).
-  t.mock.timers.setTime(startedAt + PARTY_LIMITS.reconnectGraceMs)
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.connectionLossGraceMs)
   t.mock.timers.tick(1)
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(leaveNotices(takePresence()).length, 0)
@@ -1113,7 +1136,7 @@ test('a stale grace deadline cannot expire a resumed identity early', async (t) 
   assert.equal(canResumePartyParticipant('667800', '세대', resumed.reconnectToken), true)
 
   // 새 세대의 마감에만 정확히 한 건의 퇴장이 확정된다.
-  t.mock.timers.setTime(lossAt + PARTY_LIMITS.reconnectGraceMs)
+  t.mock.timers.setTime(lossAt + PARTY_LIMITS.connectionLossGraceMs)
   t.mock.timers.tick(1)
   await new Promise(resolve => setImmediate(resolve))
   const notices = leaveNotices(takePresence())
@@ -1149,12 +1172,12 @@ test('a profile change accepted during the takeover await is rejected instead of
   let blockAdmission = true
   setPartyChatStore({
     ...memoryStore,
-    async addParticipant(sessionId, participant) {
+    async upsertParticipant(sessionId, participant, reconnectTokenHash) {
       if (blockAdmission) {
         blockAdmission = false
         await admissionGate
       }
-      await memoryStore.addParticipant(sessionId, participant)
+      await memoryStore.upsertParticipant(sessionId, participant, reconnectTokenHash)
     }
   })
 
@@ -1224,7 +1247,7 @@ test('a queued admission whose pending reservation expires consumes one budget a
   takePresence()
 
   // 소유자를 손실시켜 유예 예약을 만든다. 이 시점 입장은 토큰 예외 대상이다.
-  await removePartyConnection(owner, startedAt, 'loss')
+  await removePartyConnection(owner, startedAt, { code: 4001, reason: 'page-hide' })
   takePresence()
   assert.equal(canResumePartyParticipant('667802', '만료예외', joined.reconnectToken), true)
 
@@ -1245,12 +1268,12 @@ test('a queued admission whose pending reservation expires consumes one budget a
   let blockWrite = true
   setPartyChatStore({
     ...memoryStore,
-    async appendMessage(sessionId, message) {
+    async appendMessage(sessionId, message, leftParticipantId) {
       if (blockWrite && message.kind === 'chat') {
         blockWrite = false
         await writeGate
       }
-      await memoryStore.appendMessage(sessionId, message)
+      return memoryStore.appendMessage(sessionId, message, leftParticipantId)
     }
   })
 
@@ -1266,7 +1289,7 @@ test('a queued admission whose pending reservation expires consumes one budget a
   await new Promise(resolve => setImmediate(resolve))
 
   // 큐 대기 중 유예가 만료되게 한 뒤 검사를 진행시킨다.
-  t.mock.timers.setTime(startedAt + PARTY_LIMITS.reconnectGraceMs)
+  t.mock.timers.setTime(startedAt + PARTY_LIMITS.pageHideGraceMs)
   releaseWrite()
   const [, admissionResult] = await Promise.all([blockingChat, admission])
   setPartyChatStore(memoryStore)
@@ -1292,4 +1315,230 @@ test('a queued admission whose pending reservation expires consumes one budget a
   const expiryNotices = leaveNotices(takePresence())
   assert.equal(expiryNotices.length, 1)
   assert.equal(expiryNotices[0].nickname, '만료예외')
+})
+
+test('page-hide and browser 1001 use fifteen seconds and resume cancels departure', async (t) => {
+  const now = Date.now()
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now })
+  assert.equal(PARTY_LIMITS.pageHideGraceMs, 15_000)
+  assert.equal(PARTY_LIMITS.connectionLossGraceMs, 60_000)
+  const roomId = '901001'
+  await createPartyRoom(roomId)
+  const first = { id: 'page-first', send() {}, close() {} }
+  const next = { id: 'page-next', send() {}, close() {} }
+  registerPartyConnection(first, first.id)
+  registerPartyConnection(next, next.id)
+  const joined = await joinPartyRoom(first, { roomId, nickname: 'refresh', characterId: '101' })
+  takePresence()
+  await removePartyConnection(first, now, { code: 4001, reason: 'page-hide' })
+  assert.equal(storedParticipants.get(joined.participantId).departureDeadline, new Date(now + 15_000).toISOString())
+  t.mock.timers.tick(14_999)
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  const resumed = await joinPartyRoom(next, { roomId, nickname: 'refresh', characterId: '101', reconnectToken: joined.reconnectToken })
+  assert.equal(resumed.participantId, joined.participantId)
+  assert.equal(await recordPartyJoin(next), null)
+  assert.equal(storedParticipants.get(joined.participantId).departureDeadline, null)
+  t.mock.timers.tick(15_001)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  const closedAt = Date.now()
+  await removePartyConnection(next, closedAt, { code: 1001, reason: 'going away' })
+  t.mock.timers.tick(14_999)
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  t.mock.timers.tick(1)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(leaveNotices(takePresence()).length, 1)
+  assert.equal(storedParticipants.get(joined.participantId).leftAt, new Date(closedAt + 15_000).toISOString())
+  assert.equal(connectionEvents.findLast(event => event.event === 'leave_notice' && event.participantId === joined.participantId).departure, 'page-hide')
+})
+
+test('heartbeat loss keeps a full grace window from detection so a late silent-drop reconnect resumes', async (t) => {
+  const now = Date.now()
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now })
+  const peer = { id: 'heartbeat-deadline', send() {}, close() {} }
+  const late = { id: 'heartbeat-late', send() {}, close() {} }
+  await createPartyRoom('901002')
+  registerPartyConnection(peer, peer.id)
+  registerPartyConnection(late, late.id)
+  const joined = await joinPartyRoom(peer, { roomId: '901002', nickname: 'heartbeat', characterId: '101' })
+  takePresence()
+  // 마지막 수신 뒤 60초가 지나 서버가 만료를 감지한다. 이때 바로 퇴장하면 안 된다.
+  const detectedAt = now + 60_001
+  t.mock.timers.setTime(detectedAt)
+  await removePartyConnection(peer, Date.now(), { code: 1013, reason: 'heartbeat-timeout', serverReason: 'heartbeat-timeout' })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  assert.equal(storedParticipants.get(joined.participantId).departureDeadline, new Date(detectedAt + 60_000).toISOString())
+  const disconnect = connectionEvents.findLast(event => event.event === 'disconnect' && event.connectionId === peer.id)
+  assert.equal(disconnect.departure, 'loss')
+  assert.equal(disconnect.detail.serverReason, 'heartbeat-timeout')
+
+  // 클라이언트가 단절을 늦게(마지막 수신 뒤 약 2분) 알아채고 돌아와도 같은 참여자로 이어진다.
+  t.mock.timers.setTime(detectedAt + 59_999)
+  const resumed = await joinPartyRoom(late, { roomId: '901002', nickname: 'heartbeat', characterId: '101', reconnectToken: joined.reconnectToken })
+  assert.equal(resumed.participantId, joined.participantId)
+  assert.equal(await recordPartyJoin(late), null)
+  t.mock.timers.tick(60_000)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  await removePartyConnection(late, Date.now(), 'leave')
+})
+
+test('shutdown and fresh-module restore preserve IDs, token hashes, history and durable dedupe', async () => {
+  const before = await import('../server/utils/party-chat.ts?shutdown-before')
+  const after = await import('../server/utils/party-chat.ts?shutdown-after')
+  for (const instance of [before, after]) instance.setPartyChatStore(memoryStore)
+  const presence = []
+  before.setPartyPresenceListener(update => presence.push(update))
+  const peer = { id: 'shutdown-before', send() {}, close() {} }
+  const roomId = '901003'
+  await before.createPartyRoom(roomId)
+  before.registerPartyConnection(peer, peer.id)
+  const joined = await before.joinPartyRoom(peer, { roomId, nickname: 'durable', characterId: '306', order: 'P3' })
+  await before.recordPartyJoin(peer)
+  const original = await before.sendPartyChat(peer, { text: 'before restart', clientMessageId: 'restart-dedupe' })
+  // Evict this message from BOTH in-memory dedupe and hydrated recent history.
+  for (let index = 0; index < 605; index++) {
+    await before.sendPartyChat(peer, { text: `later-${index}`, clientMessageId: `later-${index}` })
+  }
+  const saved = structuredClone(storedParticipants.get(joined.participantId))
+  assert.match(saved.reconnectTokenHash, /^[a-f0-9]{64}$/)
+  assert.notEqual(saved.reconnectTokenHash, joined.reconnectToken)
+  before.beginPartyShutdown()
+  await before.removePartyConnection(peer, Date.now(), { code: 1006 })
+  await before.finishPartyShutdown()
+  assert.deepEqual(storedParticipants.get(joined.participantId), saved)
+  assert.deepEqual(presence, [])
+  assert.equal(connectionEvents.findLast(event => event.connectionId === peer.id && event.event === 'disconnect').departure, 'shutdown')
+  assert.equal(connectionEvents.at(-1).event, 'server_shutdown')
+
+  const resumedPeer = { id: 'shutdown-after', send() {}, close() {} }
+  await after.createPartyRoom(roomId)
+  assert.equal(after.canResumePartyParticipant(roomId, 'durable', joined.reconnectToken), true)
+  assert.equal(after.isPartyNicknameTaken(roomId, 'durable'), true)
+  after.registerPartyConnection(resumedPeer, resumedPeer.id)
+  const resumed = await after.joinPartyRoom(resumedPeer, { roomId, nickname: 'durable', characterId: '306', order: 'P3', reconnectToken: joined.reconnectToken })
+  assert.equal(resumed.participantId, joined.participantId)
+  assert.equal(resumed.sessionId, joined.sessionId)
+  assert.equal(resumed.reconnectToken, joined.reconnectToken)
+  assert.equal(await after.recordPartyJoin(resumedPeer), null)
+  assert.equal(resumed.messages.filter(message => message.kind === 'leave').length, 0)
+  assert.equal(resumed.messages.at(-1).text, 'later-604')
+  const count = storedSessions.get(joined.sessionId).messages.length
+  const duplicate = await after.sendPartyChat(resumedPeer, { text: 'changed resend', clientMessageId: 'restart-dedupe' })
+  assert.deepEqual(duplicate.message, original.message)
+  assert.equal(storedSessions.get(joined.sessionId).messages.length, count)
+  const observer = { id: 'restart-observer', send() {}, close() {} }
+  after.registerPartyConnection(observer, observer.id)
+  const observed = await after.joinPartyRoom(observer, { roomId, nickname: 'observer', characterId: 'spectator' })
+  assert.equal(observed.messages.filter(message => message.id === original.message.id).length, 0)
+  const event = connectionEvents.findLast(entry => entry.event === 'join' && entry.connectionId === resumedPeer.id)
+  assert.equal(event.detail.resumed, true)
+  assert.equal(event.detail.restored, true)
+  assert.ok(event.detail.disconnectedMs >= 0)
+  after.beginPartyShutdown()
+  await after.finishPartyShutdown()
+})
+
+test('legacy rows are not restored and a past restored deadline produces one durable leave', async (t) => {
+  const now = Date.now()
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now })
+  const source = await import('../server/utils/party-chat.ts?restore-source')
+  source.setPartyChatStore(memoryStore)
+  const roomId = '901004'
+  await source.createPartyRoom(roomId)
+  assert.equal(connectionEvents.some(event => event.event === 'room_restored' && event.roomId === roomId), false)
+  const peer = { id: 'restore-expired', send() {}, close() {} }
+  source.registerPartyConnection(peer, peer.id)
+  const joined = await source.joinPartyRoom(peer, { roomId, nickname: 'expired', characterId: '101' })
+  await source.removePartyConnection(peer, now, { code: 4001, reason: 'page-hide' })
+  source.beginPartyShutdown()
+  storedParticipants.set('legacy-no-hash', { id: 'legacy-no-hash', nickname: 'legacy', characterId: '101', order: 'P1', sessionId: joined.sessionId, reconnectTokenHash: null, departureDeadline: null, leftAt: null })
+  t.mock.timers.setTime(now + PARTY_LIMITS.pageHideGraceMs + 1)
+  const restored = await import('../server/utils/party-chat.ts?restore-expired')
+  restored.setPartyChatStore(memoryStore)
+  const presence = []
+  restored.setPartyPresenceListener(update => presence.push(update))
+  await restored.createPartyRoom(roomId)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(restored.isPartyNicknameTaken(roomId, 'legacy'), false)
+  assert.equal(restored.isPartyNicknameTaken(roomId, 'expired'), false)
+  assert.equal(leaveNotices(presence).length, 1)
+  assert.equal(storedSessions.get(joined.sessionId).messages.filter(message => message.kind === 'leave').length, 1)
+  assert.equal(connectionEvents.findLast(event => event.event === 'room_restored' && event.roomId === roomId).detail.participants, 1)
+  assert.equal(connectionEvents.findLast(event => event.event === 'leave_notice' && event.participantId === joined.participantId).departure, 'restored')
+  t.mock.timers.tick(60_000)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(leaveNotices(presence).length, 1)
+  restored.beginPartyShutdown()
+  const again = await import('../server/utils/party-chat.ts?restore-expired-again')
+  again.setPartyChatStore(memoryStore)
+  await again.createPartyRoom(roomId)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(connectionEvents.findLast(event => event.event === 'room_restored' && event.roomId === roomId).detail.participants, 0)
+  assert.equal(storedSessions.get(joined.sessionId).messages.filter(message => message.kind === 'leave').length, 1)
+  again.beginPartyShutdown()
+})
+
+test('a resume admitted inside the grace window keeps its identity when persistence crosses the deadline', async (t) => {
+  t.after(() => setPartyChatStore(memoryStore))
+  const now = Date.now()
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now })
+  const roomId = '901101'
+  await createPartyRoom(roomId)
+  const first = { id: 'deadline-first', send() {}, close() {} }
+  const next = { id: 'deadline-next', send() {}, close() {} }
+  registerPartyConnection(first, first.id)
+  registerPartyConnection(next, next.id)
+  const joined = await joinPartyRoom(first, { roomId, nickname: 'deadline', characterId: '101' })
+  await removePartyConnection(first, now, { code: 4001, reason: 'page-hide' })
+  takePresence()
+  t.mock.timers.tick(PARTY_LIMITS.pageHideGraceMs - 1)
+
+  // 저장 중에 유예 마감이 지나고 만료 타이머도 실행되지만, 만료 작업은 이 입장 뒤 큐에 놓인다.
+  setPartyChatStore({
+    ...memoryStore,
+    async upsertParticipant(...args) {
+      t.mock.timers.tick(2)
+      return memoryStore.upsertParticipant(...args)
+    }
+  })
+  const resumed = await joinPartyRoom(next, { roomId, nickname: 'deadline', characterId: '101', reconnectToken: joined.reconnectToken })
+  setPartyChatStore(memoryStore)
+  await new Promise(resolve => setImmediate(resolve))
+
+  assert.equal(resumed.ok, true)
+  assert.equal(resumed.participantId, joined.participantId)
+  assert.equal(resumed.resumed, true)
+  assert.equal(leaveNotices(takePresence()).length, 0)
+  assert.equal(storedParticipants.get(joined.participantId).leftAt, null)
+  assert.equal(storedParticipants.get(joined.participantId).departureDeadline, null)
+  await removePartyConnection(next, Date.now(), 'leave')
+})
+
+test('a new admission cancelled after persistence is not restorable after a restart', async (t) => {
+  t.after(() => setPartyChatStore(memoryStore))
+  const roomId = '901102'
+  await createPartyRoom(roomId)
+  const sessionId = storedRooms.get(roomId).sessionId
+  const peer = { id: 'cancelled-admission', send() {}, close() {} }
+  registerPartyConnection(peer, peer.id)
+
+  // 참가자 저장 직후 소켓이 닫히는 경우
+  setPartyChatStore({
+    ...memoryStore,
+    async upsertParticipant(...args) {
+      await memoryStore.upsertParticipant(...args)
+      await removePartyConnection(peer, Date.now(), { code: 1006 })
+    }
+  })
+  const result = await joinPartyRoom(peer, { roomId, nickname: 'cancelled', characterId: '101' })
+  setPartyChatStore(memoryStore)
+
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'CONNECTION_CLOSED')
+  const orphan = [...storedParticipants.values()].find(item => item.sessionId === sessionId && item.nickname === 'cancelled')
+  assert.ok(orphan)
+  assert.notEqual(orphan.leftAt, null)
+  assert.equal(activeParticipants(sessionId).some(item => item.nickname === 'cancelled'), false)
 })

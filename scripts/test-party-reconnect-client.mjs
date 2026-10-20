@@ -153,8 +153,8 @@ function createEventTarget() {
     removeEventListener(type, listener) {
       listeners.get(type)?.delete(listener)
     },
-    dispatch(type) {
-      for (const listener of [...(listeners.get(type) ?? [])]) listener({ type })
+    dispatch(type, properties = {}) {
+      for (const listener of [...(listeners.get(type) ?? [])]) listener({ type, ...properties })
     }
   }
 }
@@ -280,7 +280,7 @@ test('resume record is written only after JOINED and stays out of localStorage',
   context.chat.join(credentials())
   const socket = FakeWebSocket.instances[0]
   socket.open()
-  assert.deepEqual(socket.joinMessages, [{ type: 'JOIN', roomId, ...credentials() }])
+  assert.deepEqual(socket.joinMessages, [{ type: 'JOIN', roomId, ...credentials(), diagnostics: { attempt: 1 } }])
   assert.equal(storageState.session.has(RESUME_KEY), false)
   assert.equal(storageState.local.has(RESUME_KEY), false)
 
@@ -369,7 +369,7 @@ test('records from another room or nickname are discarded instead of reused', (t
   assert.equal(recordMissingNickname.chat.getResumeContext('앨리스'), null)
 })
 
-test('SPA unmount leaves the room but a document termination keeps the token', (t) => {
+test('SPA unmount leaves the room but pagehide closes with a resumable short grace', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
 
   resetStorage()
@@ -379,6 +379,11 @@ test('SPA unmount leaves the room but a document termination keeps the token', (
   reloadSocket.open()
   reloadSocket.receive(joinedMessage())
   reload.windowTarget.dispatch('pagehide')
+  assert.deepEqual(reloadSocket.closeCalls, [{ code: 4001, reason: 'page-hide' }])
+  reload.windowTarget.dispatch('online')
+  reload.documentTarget.dispatch('visibilitychange')
+  t.mock.timers.tick(60_000)
+  assert.equal(FakeWebSocket.instances.length, 1)
   unmount(reload)
   assert.equal(reloadSocket.closeCalls.some(call => call.reason === 'leave-room'), false)
   assert.equal(storageState.session.has(RESUME_KEY), true)
@@ -392,6 +397,107 @@ test('SPA unmount leaves the room but a document termination keeps the token', (
   unmount(spaLeave)
   assert.deepEqual(leaveSocket.closeCalls, [{ code: 1000, reason: 'leave-room' }])
   assert.equal(storageState.session.has(RESUME_KEY), false)
+})
+
+test('a persisted pageshow resumes with the token, then SPA unmount explicitly leaves', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
+  resetStorage()
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  socket.receive(joinedMessage())
+  context.windowTarget.dispatch('pagehide')
+  context.windowTarget.dispatch('pageshow', { persisted: false })
+  assert.equal(FakeWebSocket.instances.length, 1)
+  t.mock.timers.tick(500)
+  context.windowTarget.dispatch('pageshow', { persisted: true })
+  const restored = FakeWebSocket.instances.at(-1)
+  assert.notEqual(restored, socket)
+  restored.open()
+  assert.equal(restored.joinMessages[0].reconnectToken, 'token-1')
+  assert.equal(restored.joinMessages[0].diagnostics.lastCloseCode, 4001)
+  assert.equal(restored.joinMessages[0].diagnostics.lastCloseReason, 'page-hide')
+  assert.equal(storageState.session.has(RESUME_KEY), true)
+  restored.receive(joinedMessage())
+  unmount(context)
+  assert.deepEqual(restored.closeCalls, [{ code: 1000, reason: 'leave-room' }])
+  assert.equal(storageState.session.has(RESUME_KEY), false)
+})
+
+test('reconnect backoff caps at five seconds plus jitter and counts connection attempts', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
+  t.mock.method(Math, 'random', () => 0.5)
+  resetStorage()
+  const context = createChat()
+  context.chat.join(credentials())
+  for (const [index, delay] of [1150, 2150, 4150, 5150, 5150].entries()) {
+    const socket = FakeWebSocket.instances.at(-1)
+    socket.open()
+    assert.equal(socket.joinMessages[0].diagnostics.attempt, index + 1)
+    socket.close(1006, '')
+    t.mock.timers.tick(delay - 1)
+    assert.equal(FakeWebSocket.instances.length, index + 1)
+    t.mock.timers.tick(1)
+    assert.equal(FakeWebSocket.instances.length, index + 2)
+  }
+})
+
+test('JOIN diagnostics report the previous close and first-JOIN navigation only', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
+  t.mock.method(performance, 'getEntriesByType', () => [{ type: 'reload' }])
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } })
+  t.after(() => {
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor)
+    else Reflect.deleteProperty(globalThis, 'navigator')
+  })
+  resetStorage()
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  assert.deepEqual(socket.joinMessages[0].diagnostics, { attempt: 1, navigationType: 'reload' })
+  socket.receive(joinedMessage())
+  context.documentTarget.visibilityState = 'hidden'
+  socket.close(1006, '')
+  context.documentTarget.visibilityState = 'visible'
+  globalThis.navigator.onLine = true
+  t.mock.timers.tick(2_000)
+  const resumed = FakeWebSocket.instances.at(-1)
+  resumed.open()
+  assert.deepEqual(resumed.joinMessages[0].diagnostics, {
+    attempt: 1, lastCloseCode: 1006, lastCloseReason: '', lastCloseAgoMs: 2_000,
+    hiddenAtClose: true, onlineAtClose: false
+  })
+  resumed.close(1013, 'backpressure')
+  t.mock.timers.tick(3_000)
+  const retry = FakeWebSocket.instances.at(-1)
+  retry.open()
+  assert.deepEqual(retry.joinMessages[0].diagnostics, {
+    attempt: 2, lastCloseCode: 1013, lastCloseReason: 'backpressure', lastCloseAgoMs: 3_000,
+    hiddenAtClose: false, onlineAtClose: true
+  })
+})
+
+test('unknown close and navigation diagnostics are omitted', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
+  t.mock.method(performance, 'getEntriesByType', () => [])
+  resetStorage()
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  assert.deepEqual(socket.joinMessages[0].diagnostics, { attempt: 1 })
+  socket.close()
+  t.mock.timers.tick(2_000)
+  const resumed = FakeWebSocket.instances.at(-1)
+  resumed.open()
+  const diagnostics = resumed.joinMessages[0].diagnostics
+  assert.equal('lastCloseCode' in diagnostics, false)
+  assert.equal('lastCloseReason' in diagnostics, false)
+  assert.equal('navigationType' in diagnostics, false)
+  assert.equal(diagnostics.lastCloseAgoMs, 2_000)
 })
 
 test('a transient join cooldown schedules a retry from retryAfterMs', (t) => {
@@ -521,9 +627,108 @@ test('a changed session marks unresolved messages instead of dropping them', (t)
 
   const retained = context.chat.messages.value.find(message => message.clientMessageId === pendingClientId)
   assert.ok(retained)
-  assert.equal(retained.delivery, 'unconfirmed')
+  // 자동 재전송할 수 없으므로 다시 입력할 수 있는 실패로 남긴다.
+  assert.equal(retained.delivery, 'failed')
   assert.match(retained.failureReason, /세션이 바뀌어/)
+  assert.equal(resumed.sent.some(message => message.type === 'CHAT'), false)
   assert.equal(JSON.parse(storageState.session.get(RESUME_KEY)).sessionId, 'session-2')
+
+  resumed.close(1006, '')
+  t.mock.timers.tick(2_000)
+  const next = FakeWebSocket.instances.at(-1)
+  next.open()
+  next.receive(joinedMessage({ sessionId: 'session-2', token: 'token-2', participants: [participant('self')] }))
+  assert.equal(next.sent.some(message => message.type === 'CHAT'), false)
+})
+
+test('a same-session JOINED with a new participant id does not auto-resend under the new identity', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
+  resetStorage()
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  socket.receive(joinedMessage({ participants: [participant('self')] }))
+  assert.equal(context.chat.send('이전 신원으로 보낸 메시지'), true)
+  const pendingClientId = context.chat.messages.value.at(-1).clientMessageId
+
+  socket.close(1006, '')
+  t.mock.timers.tick(2_000)
+  const rejoined = FakeWebSocket.instances.at(-1)
+  rejoined.open()
+  // 유예가 끝나 같은 세션에 새 참여자로 다시 입장한 경우
+  rejoined.receive({ ...joinedMessage({ token: 'token-2', participants: [participant('self-2')] }), participantId: 'self-2' })
+
+  const retained = context.chat.messages.value.find(message => message.clientMessageId === pendingClientId)
+  assert.ok(retained)
+  assert.equal(retained.delivery, 'failed')
+  assert.match(retained.failureReason, /새 참여자로/)
+  assert.equal(rejoined.sent.some(message => message.type === 'CHAT'), false)
+})
+
+test('same-session JOINED resends only unresolved non-rejected messages with their original ids', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
+  resetStorage()
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  socket.receive(joinedMessage({ participants: [participant('self')] }))
+  context.chat.send('확인 대기')
+  const timedOut = socket.sent.at(-1)
+  t.mock.timers.tick(15_000)
+  assert.equal(context.chat.messages.value.at(-1).delivery, 'unconfirmed')
+  assert.match(context.chat.messages.value.at(-1).failureReason, /자동으로 재전송/)
+
+  context.chat.send('서버 거절')
+  const rejected = socket.sent.at(-1)
+  socket.receive({ type: 'ERROR', code: 'RATE_LIMITED', message: '잠시 기다려 주세요.', clientMessageId: rejected.clientMessageId })
+  context.chat.send('이미 저장됨')
+  const confirmed = socket.sent.at(-1)
+  context.chat.send('전송 중')
+  const sending = socket.sent.at(-1)
+  socket.close(1006, '')
+  assert.match(context.chat.messages.value.at(-1).failureReason, /자동으로 재전송/)
+  t.mock.timers.tick(2_000)
+  const resumed = FakeWebSocket.instances.at(-1)
+  resumed.open()
+  resumed.receive(joinedMessage({
+    messages: [chatMessage('stored-1', confirmed.clientMessageId, '앨리스')],
+    participants: [participant('self')]
+  }))
+  assert.deepEqual(resumed.sent.filter(message => message.type === 'CHAT'), [timedOut, sending])
+  for (const original of [timedOut, sending]) {
+    const local = context.chat.messages.value.find(message => message.clientMessageId === original.clientMessageId)
+    assert.equal(local.delivery, 'sending')
+    assert.equal(local.failureReason, undefined)
+  }
+  assert.equal(context.chat.messages.value.find(message => message.clientMessageId === rejected.clientMessageId).delivery, 'failed')
+  assert.equal(context.chat.messages.value.filter(message => message.clientMessageId === confirmed.clientMessageId).length, 1)
+  t.mock.timers.tick(14_999)
+  assert.equal(context.chat.messages.value.at(-1).delivery, 'sending')
+  t.mock.timers.tick(1)
+  assert.equal(context.chat.messages.value.at(-1).delivery, 'unconfirmed')
+})
+
+test('a repeated same-session JOINED resends sending messages and confirmation cancels the restarted timer', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
+  resetStorage()
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  socket.receive(joinedMessage({ participants: [participant('self')] }))
+  context.chat.send('전송 중인 메시지')
+  const sent = socket.sent.at(-1)
+  t.mock.timers.tick(10_000)
+  socket.receive(joinedMessage({ participants: [participant('self')] }))
+  assert.deepEqual(socket.sent.filter(message => message.type === 'CHAT'), [sent, sent])
+  t.mock.timers.tick(5_000)
+  assert.equal(context.chat.messages.value.at(-1).delivery, 'sending')
+  socket.receive({ type: 'CHAT', message: chatMessage('confirmed', sent.clientMessageId, '앨리스') })
+  t.mock.timers.tick(15_000)
+  assert.equal(context.chat.messages.value.length, 1)
+  assert.equal('delivery' in context.chat.messages.value[0], false)
 })
 
 test('a final recovery failure preserves the conversation and invalidates only the resume context', (t) => {
@@ -616,6 +821,77 @@ test('send confirmation times out without closing the socket and JOINED has a de
   silent.open()
   t.mock.timers.tick(20_500)
   assert.equal(silent.readyState, FakeWebSocket.CLOSED)
+})
+
+// 응답 없는 소켓의 close()는 브라우저가 서버의 종료 확인을 기다리느라 onclose를 바로 내지 않는다.
+function hangOnClose(socket) {
+  socket.close = (code, reason) => {
+    socket.closeCalls.push({ code, reason })
+    socket.readyState = FakeWebSocket.CLOSING
+  }
+}
+
+test('an unresponsive socket is abandoned and reconnected without waiting for the browser close handshake', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1_000 })
+  t.mock.method(Math, 'random', () => 0)
+  resetStorage()
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  hangOnClose(socket)
+  socket.open()
+  socket.receive(joinedMessage({ participants: [participant('self')] }))
+  t.mock.timers.tick(40_000)
+  assert.equal(socket.closeCalls.length, 0)
+  t.mock.timers.tick(20_000)
+  assert.deepEqual(socket.closeCalls, [{ code: 4002, reason: 'heartbeat-timeout' }])
+  assert.equal(socket.onclose, null)
+  assert.equal(context.chat.status.value, 'reconnecting')
+  t.mock.timers.tick(1_000)
+  assert.equal(FakeWebSocket.instances.length, 2)
+  const retry = FakeWebSocket.instances[1]
+  hangOnClose(retry)
+  retry.open()
+  assert.equal(retry.joinMessages[0].reconnectToken, 'token-1')
+  assert.equal(retry.joinMessages[0].diagnostics.lastCloseCode, 4002)
+  assert.equal(retry.joinMessages[0].diagnostics.lastCloseReason, 'heartbeat-timeout')
+
+  // JOINED가 기한 안에 오지 않는 연결도 onclose를 기다리지 않고 다음 시도로 넘어간다.
+  t.mock.timers.tick(20_000)
+  assert.deepEqual(retry.closeCalls, [{ code: 4002, reason: 'join-timeout' }])
+  t.mock.timers.tick(2_000)
+  assert.equal(FakeWebSocket.instances.length, 3)
+})
+
+test('returning to the page probes an open socket and replaces it only when nothing answers', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1_000 })
+  t.mock.method(Math, 'random', () => 0)
+  resetStorage()
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  socket.receive(joinedMessage({ participants: [participant('self')] }))
+
+  context.documentTarget.dispatch('visibilitychange')
+  assert.equal(socket.sent.at(-1).type, 'PING')
+  t.mock.timers.tick(1_000)
+  socket.receive({ type: 'PONG' })
+  t.mock.timers.tick(10_000)
+  assert.equal(socket.readyState, FakeWebSocket.OPEN)
+  assert.equal(FakeWebSocket.instances.length, 1)
+
+  hangOnClose(socket)
+  context.windowTarget.dispatch('online')
+  t.mock.timers.tick(4_999)
+  assert.equal(socket.closeCalls.length, 0)
+  t.mock.timers.tick(1)
+  assert.deepEqual(socket.closeCalls, [{ code: 4002, reason: 'liveness-timeout' }])
+  assert.equal(context.chat.status.value, 'reconnecting')
+  t.mock.timers.tick(1_000)
+  assert.equal(FakeWebSocket.instances.length, 2)
+  FakeWebSocket.instances[1].open()
+  assert.equal(FakeWebSocket.instances[1].joinMessages[0].reconnectToken, 'token-1')
 })
 
 // --- 페이지(SFC script) 수준 동작 검증 ---

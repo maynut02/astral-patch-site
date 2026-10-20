@@ -63,6 +63,9 @@ jobs:
       - name: Run party room tests
         run: pnpm run test:party:rooms
 
+      - name: Run party WebSocket adapter tests
+        run: pnpm run test:party:adapter
+
       - name: Typecheck
         run: pnpm run typecheck
 
