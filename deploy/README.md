@@ -156,7 +156,7 @@ docker compose -p astral-patch --profile migration run --rm db-migrate
 R2를 사용할 경우 서버 `.env`에 bucket 전용 자격 증명을 추가합니다.
 
 ```dotenv
-R2_BACKUP_ACCOUNT_ID=
+R2_ACCOUNT_ID=
 R2_BACKUP_ACCESS_KEY_ID=
 R2_BACKUP_SECRET_ACCESS_KEY=
 R2_BACKUP_BUCKET_NAME=astral-patch-db-backups
@@ -184,6 +184,28 @@ sudo systemctl start astral-patch-db-backup.service
 sudo journalctl -u astral-patch-db-backup.service -n 100 --no-pager
 sudo ls -lh /var/backups/astral-patch/
 ```
+
+## 번역 팩 배포
+
+관리자 페이지의 `번역 팩 배포` 버튼은 승인된 번역 전체를 플러그인용 팩으로 만들어 R2에 올립니다. 서버 `.env`에 다음 값을 추가합니다. `R2_ACCOUNT_ID`는 DB 백업과 같은 값을 사용합니다.
+
+```dotenv
+R2_ACCOUNT_ID=
+R2_PACK_ACCESS_KEY_ID=
+R2_PACK_SECRET_ACCESS_KEY=
+R2_PACK_BUCKET_NAME=
+```
+
+토큰에는 해당 bucket의 Object Read & Write 권한이 필요합니다. 오래된 팩 삭제에 DeleteObject를 사용합니다.
+
+업로드 객체:
+
+| 키 | 내용 | Cache-Control |
+| --- | --- | --- |
+| `translation-pack/latest.json` | 최신 팩 포인터 (`number`, `version`, `revision`, `publishedAt`, `path`, `size`, `sha256`) | `no-cache` |
+| `translation-pack/packs/{number}.json.gz` | gzip 팩. 번호는 재사용하지 않음 | `public, max-age=31536000, immutable` |
+
+Cloudflare는 `.json`을 기본 캐시하지 않고 `.gz`는 캐시하므로 별도 Cache Rule이나 퍼지가 필요 없습니다. 배포 기록은 `translation_pack_publications`에 남습니다. 응답 후 백그라운드에서 최근 10개와 게임 버전/리비전별 마지막 팩을 제외한 팩 객체를 삭제하며, 실패한 삭제는 다음 배포 때 다시 시도합니다.
 
 ## 로컬 개발 DB 터널
 

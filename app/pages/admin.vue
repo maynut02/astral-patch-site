@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import type { AdminPatchWatcherConfig, AdminUserEntry, AdminUsersResponse } from '#shared/types/admin'
+import type {
+  AdminPatchWatcherConfig,
+  AdminTranslationPackPublication,
+  AdminTranslationPackStatus,
+  AdminUserEntry,
+  AdminUsersResponse
+} from '#shared/types/admin'
 import { isUserRole, type UserRole } from '#shared/types/user'
 import { formatEditorDate } from '~/utils/editor-helpers'
 import { getUserRoleMeta } from '~/utils/user-role'
@@ -23,6 +29,8 @@ const updatingUserId = ref<string | null>(null)
 const gameVersionInput = ref('')
 const isPatchWatcherConfirmOpen = ref(false)
 const isUpdatingPatchWatcher = ref(false)
+const isTranslationPackConfirmOpen = ref(false)
+const isPublishingTranslationPack = ref(false)
 const { user: currentUser } = useUserSession()
 const { showToast } = useAppToast()
 
@@ -34,6 +42,13 @@ const {
   error: patchWatcherError,
   refresh: refreshPatchWatcher
 } = await useFetch<AdminPatchWatcherConfig>('/api/admin/patch-watcher')
+
+const {
+  data: translationPackStatus,
+  status: translationPackFetchStatus,
+  error: translationPackError,
+  refresh: refreshTranslationPack
+} = await useFetch<AdminTranslationPackStatus>('/api/admin/translation-pack')
 
 const {
   data,
@@ -117,6 +132,34 @@ async function updatePatchWatcherGameVersion(): Promise<void> {
     await refreshPatchWatcher()
   } finally {
     isUpdatingPatchWatcher.value = false
+  }
+}
+
+async function publishTranslationPack(): Promise<void> {
+  if (isPublishingTranslationPack.value) {
+    return
+  }
+
+  isPublishingTranslationPack.value = true
+
+  try {
+    const publication = await $fetch<AdminTranslationPackPublication>('/api/admin/translation-pack/publish', {
+      method: 'POST'
+    })
+    isTranslationPackConfirmOpen.value = false
+    showToast({
+      id: 'admin-translation-pack-published',
+      title: `번역 팩 #${publication.number}을 배포했습니다.`
+    })
+  } catch (publishError) {
+    showToast({
+      id: 'admin-translation-pack-publish-failed',
+      title: '번역 팩을 배포하지 못했습니다.',
+      description: publishError instanceof Error ? publishError.message : undefined
+    })
+  } finally {
+    isPublishingTranslationPack.value = false
+    await refreshTranslationPack()
   }
 }
 
@@ -283,6 +326,139 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
       </div>
     </section>
 
+    <section class="border border-default">
+      <div class="flex flex-col gap-3 border-b border-default bg-muted px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex items-center gap-2">
+          <UIcon
+            name="i-tabler-package-export"
+            class="size-5 text-muted"
+          />
+          <div>
+            <h2 class="text-sm font-semibold text-default">
+              번역 팩 배포
+            </h2>
+            <p class="text-xs text-muted">
+              승인된 번역 전체를 플러그인이 내려받는 번역 팩으로 배포합니다.
+            </p>
+          </div>
+        </div>
+
+        <UBadge
+          v-if="translationPackStatus"
+          :color="translationPackStatus.pendingChangeCount > 0 ? 'warning' : 'success'"
+          variant="soft"
+        >
+          {{ translationPackStatus.pendingChangeCount > 0
+            ? `미배포 변경 ${translationPackStatus.pendingChangeCount.toLocaleString()}건`
+            : '최신 상태' }}
+        </UBadge>
+      </div>
+
+      <div v-if="translationPackFetchStatus === 'pending'" class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <USkeleton class="h-9 w-32" />
+        <USkeleton class="h-24 w-full" />
+      </div>
+
+      <div v-else-if="translationPackError" class="p-4">
+        <UAlert
+          color="error"
+          variant="soft"
+          title="번역 팩 상태를 불러오지 못했습니다."
+          description="데이터베이스 연결과 translation_pack_publications 마이그레이션을 확인해 주세요."
+        >
+          <template #actions>
+            <UButton
+              color="error"
+              variant="outline"
+              size="sm"
+              @click="refreshTranslationPack()"
+            >
+              다시 시도
+            </UButton>
+          </template>
+        </UAlert>
+      </div>
+
+      <div v-else-if="translationPackStatus" class="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-end">
+        <div class="flex flex-col gap-4">
+          <div>
+            <UButton
+              icon="i-tabler-upload"
+              color="neutral"
+              variant="soft"
+              :loading="isPublishingTranslationPack"
+              :disabled="isPublishingTranslationPack || !translationPackStatus.currentGame"
+              @click="isTranslationPackConfirmOpen = true"
+            >
+              배포
+            </UButton>
+          </div>
+
+          <UAlert
+            v-if="!translationPackStatus.currentGame"
+            color="error"
+            variant="soft"
+            icon="i-tabler-alert-triangle"
+            title="처리된 INT_STEAM 게임 리비전이 없어 배포할 수 없습니다."
+          />
+        </div>
+
+        <dl class="grid gap-3 border border-default p-3 text-sm">
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-muted">
+              마지막 배포
+            </dt>
+            <dd class="font-medium text-default">
+              {{ translationPackStatus.latest ? `#${translationPackStatus.latest.number}` : '없음' }}
+            </dd>
+          </div>
+          <template v-if="translationPackStatus.latest">
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-muted">
+                게임 버전
+              </dt>
+              <dd class="text-right text-toned">
+                {{ translationPackStatus.latest.gameVersion }} r{{ translationPackStatus.latest.revision }}
+              </dd>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-muted">
+                배포 시각
+              </dt>
+              <dd class="text-right text-toned">
+                {{ formatEditorDate(translationPackStatus.latest.publishedAt) }}
+              </dd>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-muted">
+                배포자
+              </dt>
+              <dd class="text-right text-toned">
+                {{ translationPackStatus.latest.publishedBy ?? '-' }}
+              </dd>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-muted">
+                항목 수
+              </dt>
+              <dd class="text-right text-toned">
+                lang {{ translationPackStatus.latest.langCount.toLocaleString() }}
+                · STR {{ translationPackStatus.latest.strCount.toLocaleString() }}
+              </dd>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-muted">
+                크기
+              </dt>
+              <dd class="text-right text-toned">
+                {{ Math.ceil(translationPackStatus.latest.gzipByteSize / 1024).toLocaleString() }} KB
+              </dd>
+            </div>
+          </template>
+        </dl>
+      </div>
+    </section>
+
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <UInput
         v-model="search"
@@ -432,6 +608,44 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
           @click="updatePatchWatcherGameVersion"
         >
           변경
+        </UButton>
+      </template>
+    </UModal>
+
+    <UModal
+      v-model:open="isTranslationPackConfirmOpen"
+      title="번역 팩을 배포할까요?"
+      :description="translationPackStatus?.currentGame
+        ? `현재 승인된 번역 전체로 새 팩을 만듭니다. 게임 버전은 ${translationPackStatus.currentGame.gameVersion} r${translationPackStatus.currentGame.revision}으로 기록됩니다.`
+        : undefined"
+      :ui="{ footer: 'justify-end' }"
+    >
+      <template #body>
+        <UAlert
+          color="warning"
+          variant="soft"
+          icon="i-tabler-alert-triangle"
+          title="배포 즉시 플러그인 사용자에게 적용됩니다."
+          description="플러그인은 다음 게임 실행 때 새 팩을 내려받습니다."
+        />
+      </template>
+
+      <template #footer="{ close }">
+        <UButton
+          color="neutral"
+          variant="outline"
+          :disabled="isPublishingTranslationPack"
+          @click="close"
+        >
+          취소
+        </UButton>
+        <UButton
+          color="warning"
+          icon="i-tabler-upload"
+          :loading="isPublishingTranslationPack"
+          @click="publishTranslationPack"
+        >
+          배포
         </UButton>
       </template>
     </UModal>

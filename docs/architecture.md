@@ -61,6 +61,7 @@ translation_units / source_versions
 - 승인 당시 원문과 현재 원문이 다르면 UI에서 `확인 필요`로 표시합니다.
 - `유지`는 기존 승인 문구를 현재 원문 버전에 대한 `retain_confirmation` 제안으로 등록합니다.
 - 실제 번역 수정은 `translation_edit`로 기록하며, 승인 페이지에서 유지 확인 요청과 분리해 검토합니다.
+- 관리자 페이지의 `번역 팩 배포`는 `translations`의 `ko` 행 전체를 R2 `translation-pack/`에 gzip 팩으로 올립니다. 팩 번호는 `translation_pack_number_seq`에서 받아 누적되며, 플러그인은 `latest.json`의 번호만 비교합니다.
 
 ## 에디터 상태
 
@@ -86,6 +87,7 @@ translation_units / source_versions
 | 용어집 | `/api/editor/dictionaries/*` |
 | 프로필 | `/api/profile`, `GET /api/users/:handle` |
 | 인증 | `/auth/login`, `/auth/google`, `/auth/continue` |
+| 관리자 | `/api/admin/users`, `/api/admin/patch-watcher`, `GET /api/admin/translation-pack`, `POST /api/admin/translation-pack/publish` |
 
 ## 데이터베이스
 
@@ -93,7 +95,7 @@ Schema migration은 이 저장소의 `database/migrations`에서만 관리합니
 
 주요 테이블:
 
-- 번역: `translation_units`, `source_versions`, `translations`, `translation_changes`, `translation_change_groups`
+- 번역: `translation_units`, `source_versions`, `translations`, `translation_changes`, `translation_change_groups`, `translation_pack_publications`
 - 원문 이력: `source_changes`, `source_revision_change_summary`, `version_items`
 - 사용자: `app_users`, `app_user_social_links`
 - 용어집: `editor_dictionaries`, `editor_dictionary_entries`

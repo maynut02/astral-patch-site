@@ -24,3 +24,21 @@ export interface AdminPatchWatcherConfig {
   enabled: boolean
   updatedAt: string
 }
+
+export interface AdminTranslationPackPublication {
+  number: number
+  gameVersion: string
+  revision: string
+  publishedAt: string
+  publishedBy: string | null
+  gzipByteSize: number
+  langCount: number
+  strCount: number
+}
+
+export interface AdminTranslationPackStatus {
+  latest: AdminTranslationPackPublication | null
+  /** Approved translation rows changed since the latest publication. Deleted rows are not counted. */
+  pendingChangeCount: number
+  currentGame: { gameVersion: string, revision: string } | null
+}
