@@ -259,7 +259,7 @@ function reloadReleases(): void {
           <div class="flex flex-col gap-5 p-5">
             <div class="flex flex-col">
               <UIcon name="i-tabler-plug" class="size-7 md:size-8" />
-              <span class="text-xs text-muted mt-3">{{ windowsPlugin?.asset?.name ?? 'AstralWindowsPlugin-v*.zip' }}</span>
+              <span class="text-xs text-muted mt-3">{{ windowsPlugin?.asset?.name ?? 'AstralPartyKoreanPlugin-v*.zip' }}</span>
               <span class="text-xl font-medium mt-1">Windows 패치 플러그인</span>
             </div>
 
@@ -688,6 +688,13 @@ function reloadReleases(): void {
                   />
                   게임 실행 시 패치 자동 확인
                 </div>
+                <div class="flex items-center gap-2 bg-elevated px-3 py-2.5 text-sm text-toned">
+                  <UIcon
+                    name="i-tabler-alert-circle"
+                    class="size-4 shrink-0 text-warning"
+                  />
+                  BepInEx 별도 설치 필요
+                </div>
               </div>
 
               <ol class="flex flex-col gap-5">
@@ -710,7 +717,7 @@ function reloadReleases(): void {
                       사용하는 버전의 폴더로 이동
                     </h3>
                     <p class="text-sm leading-6 text-muted">
-                      글로벌 버전은 8vJXnINT, 중국 버전은 8vJXn6CN 폴더로 이동합니다.
+                      글로벌 버전은 <code class="text-default">8vJXnINT</code>, 중국 버전은 <code class="text-default">8vJXn6CN</code> 폴더로 이동합니다. 게임 실행 파일(<code class="text-default">AstralParty_INT.exe</code> 또는 <code class="text-default">AstralParty_CN.exe</code>)이 있는 이 폴더에 BepInEx와 플러그인을 설치합니다.
                     </p>
                   </div>
                 </li>
@@ -719,22 +726,38 @@ function reloadReleases(): void {
                   <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">3</span>
                   <div class="flex flex-col gap-1">
                     <h3 class="font-medium text-default">
-                      플러그인 파일 복사
+                      BepInEx 설치
                     </h3>
                     <p class="text-sm leading-6 text-muted">
-                      다운로드한 AstralWindowsPlugin 압축파일을 열고, 압축파일 안의 내용물을 모두 해당 게임 폴더에 붙여넣습니다. 같은 이름의 파일이 있으면 덮어씁니다.
+                      <a
+                        href="https://builds.bepinex.dev/projects/bepinex_be"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-info hover:underline"
+                      >BepInEx 빌드 페이지</a>에서 BepInEx 6 Unity IL2CPP Windows x64 배포물을 다운로드하고, 압축파일 안의 내용물을 모두 해당 게임 폴더에 붙여넣습니다. 플러그인 압축파일에는 BepInEx가 포함되어 있지 않습니다.
                     </p>
                   </div>
                 </li>
 
                 <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
                   <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">4</span>
-                  <div class="flex flex-col gap-1">
+                  <div class="flex flex-col gap-2">
                     <h3 class="font-medium text-default">
-                      게임 실행
+                      BepInEx 설정
                     </h3>
                     <p class="text-sm leading-6 text-muted">
-                      평소처럼 Steam에서 게임을 실행합니다. 최초 실행은 BepInEx 초기화와 런타임 준비 때문에 화면에 아무런 표시가 없는 상태가 잠시 이어질 수 있으며, 일정 시간이 지난 뒤 한글패치 알림이 나타납니다.
+                      게임을 처음 실행하기 전에 <code class="text-default">BepInEx/config/BepInEx.cfg</code>를 열고 아래 세 항목을 적용합니다. 폴더나 파일이 없으면 직접 만들고, 파일 이름이 <code class="text-default">BepInEx.cfg.txt</code>로 저장되지 않도록 확인합니다. 기존 설정 파일이 있다면 같은 항목을 중복으로 추가하지 말고 값만 바꿉니다.
+                    </p>
+                    <pre class="overflow-x-auto bg-elevated p-3 font-mono text-xs leading-5 text-default"><code>[Logging]
+UnityLogListening = false
+
+[Logging.Console]
+Enabled = false
+
+[Logging.Disk]
+WriteUnityLog = false</code></pre>
+                    <p class="text-sm leading-6 text-muted">
+                      설정을 저장한 뒤 Steam에서 게임을 한 번 실행하고 종료합니다. 최초 실행은 BepInEx 초기화 때문에 시간이 걸릴 수 있습니다.
                     </p>
                   </div>
                 </li>
@@ -743,10 +766,34 @@ function reloadReleases(): void {
                   <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">5</span>
                   <div class="flex flex-col gap-1">
                     <h3 class="font-medium text-default">
-                      플러그인 제거
+                      플러그인 파일 복사
                     </h3>
                     <p class="text-sm leading-6 text-muted">
-                      제거하려면 게임 폴더에서 BepInEx, dotnet, .doorstop_version, doorstop_config.ini, winhttp.dll, 적용방법.txt, LICENSE-BepInEx.txt를 삭제합니다.
+                      게임을 종료한 상태에서 다운로드한 AstralPartyKoreanPlugin 압축파일을 열고, 안의 <code class="text-default">BepInEx</code> 폴더를 해당 게임 폴더에 붙여넣어 기존 폴더와 합칩니다. 설치 후 <code class="text-default">BepInEx/patchers/AstralPartyKoreanPlugin.dataUnity3dRedirect.dll</code>과 <code class="text-default">BepInEx/plugins/AstralPartyKoreanPatch/AstralPartyKoreanPlugin.dll</code>이 있어야 합니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">6</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      게임 실행
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      평소처럼 Steam에서 게임을 실행하면 한글패치 확인과 다운로드 진행 창이 표시됩니다. 준비가 끝나면 게임이 시작되고, 게임 내 오버레이에서 패치 적용 상태를 확인할 수 있습니다.
+                    </p>
+                  </div>
+                </li>
+
+                <li class="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 md:gap-3">
+                  <span class="flex size-7 items-center justify-center bg-elevated text-sm font-semibold md:size-8">7</span>
+                  <div class="flex flex-col gap-1">
+                    <h3 class="font-medium text-default">
+                      업데이트 및 플러그인 제거
+                    </h3>
+                    <p class="text-sm leading-6 text-muted">
+                      업데이트할 때는 게임을 종료하고 새 압축파일의 DLL 두 개로 교체합니다. 제거하려면 설치한 DLL 두 개를 삭제하고, 내려받은 리소스까지 지우려면 <code class="text-default">BepInEx/AstralPartyKoreanPatch</code> 폴더도 삭제합니다. 게임 원본 파일은 덮어쓰지 않으므로 별도 복원은 필요 없습니다.
                     </p>
                   </div>
                 </li>
@@ -756,9 +803,12 @@ function reloadReleases(): void {
                 icon="i-tabler-alert-triangle-filled"
                 color="warning"
                 variant="soft"
-                title="다른 BepInEx 플러그인을 함께 사용하는 경우"
-                description="BepInEx 또는 dotnet 폴더를 통째로 삭제하면 다른 플러그인도 함께 제거될 수 있습니다. 다른 BepInEx 플러그인을 사용 중이라면 공용 파일 삭제에 주의해 주세요."
-              />
+                title="이전 버전 플러그인에서 업데이트하는 경우"
+              >
+                <template #description>
+                  <code>BepInEx/patchers/AstralParty.DataUnity3dRedirect.dll</code>과 <code>BepInEx/plugins/AstralPartyKoreanPatch/AstralParty.AddressablesInProcessPatch.dll</code>이 남아 있다면 삭제하고, 각 DLL은 최신 이름으로 하나씩만 유지해 주세요. <code>BepInEx/AstralPartyKoreanPatch</code>의 리소스 캐시는 그대로 사용할 수 있습니다.
+                </template>
+              </UAlert>
             </div>
           </template>
 

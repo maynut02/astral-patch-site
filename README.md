@@ -1,6 +1,6 @@
 # Astral Patch Site
 
-Astral Party 한국어 번역을 조회·제안·검토하는 Nuxt 4 웹 애플리케이션입니다. 이 저장소는 웹 UI와 사용자·번역 제안·검토 기능, DB schema migration을 담당합니다. 형제 프로젝트 `astral-party-korean-patch`는 번역 원문 동기화와 패치 생성을, `astral-party-auto-patcher`는 Windows/Android 패치 도구 배포를 담당합니다.
+Astral Party 한국어 번역을 조회·제안·검토하는 Nuxt 4 웹 애플리케이션입니다. 이 저장소는 웹 UI와 사용자·번역 제안·검토 기능, DB schema migration을 담당합니다. 형제 프로젝트 `astral-party-korean-patch`는 번역 원문 동기화와 패치 생성을, `astral-party-auto-patcher`는 Windows/Android 패치 도구 배포를, `astral-party-korean-plugin`은 Windows 한글패치 플러그인 배포를 담당합니다.
 
 ## 기술 스택
 

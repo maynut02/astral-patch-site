@@ -511,7 +511,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               v-model="answers.plugin"
               :step="3"
               title="Windows 플러그인을 설치했나요?"
-              description="압축 파일의 내용물을 Astral Party 설치 폴더 안의 사용 중인 버전 폴더에 복사합니다."
+              description="BepInEx 6 Unity IL2CPP를 먼저 설치한 뒤, 플러그인 압축 파일의 BepInEx 폴더를 Astral Party 설치 폴더 안의 사용 중인 버전 폴더에 복사합니다."
               :options="yesNoOptions"
               :status="answers.plugin === 'no' ? 'warning' : 'info'"
             >
@@ -527,7 +527,10 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
                     Steam → 라이브러리 → Astral Party → 관리 → 로컬 파일 탐색으로 설치 폴더를 연 뒤 <code class="text-default">{{ steamPluginTargetFolder }}</code> 폴더로 이동합니다.
                   </p>
                   <p class="text-sm text-muted">
-                    다운로드한 압축 파일을 열고 안의 내용물을 전부 해당 폴더에 붙여넣습니다. 같은 이름의 파일이 있으면 덮어씁니다.
+                    이 폴더에 BepInEx 6 Unity IL2CPP Windows x64를 먼저 설치하고, 게임을 처음 실행하기 전에 <code class="text-default">BepInEx/config/BepInEx.cfg</code> 설정을 적용합니다. 설정 방법은 자세한 설치 방법에서 확인할 수 있습니다.
+                  </p>
+                  <p class="text-sm text-muted">
+                    그다음 다운로드한 압축 파일 안의 <code class="text-default">BepInEx</code> 폴더를 해당 폴더에 붙여넣어 기존 폴더와 합칩니다.
                   </p>
                 </div>
 
@@ -570,7 +573,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
                 variant="soft"
                 icon="i-tabler-info-circle"
                 title="최초 실행은 평소보다 오래 걸릴 수 있습니다."
-                description="처음 실행할 때는 BepInEx 초기화와 런타임 준비 때문에 화면에 아무런 표시가 없는 상태가 잠시 이어질 수 있습니다. 일정 시간이 지나 한글패치 알림이 나타날 때까지 게임을 강제 종료하지 마세요."
+                description="처음 실행할 때는 BepInEx 초기화와 한글패치 리소스 다운로드 때문에 시간이 걸릴 수 있습니다. 진행 창이 끝나고 게임이 시작될 때까지 게임을 강제 종료하지 마세요."
               />
             </HomeGuideStep>
           </template>

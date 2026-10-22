@@ -14,13 +14,16 @@ import type {
 
 const PATCH_REPOSITORY = 'maynut02/astral-party-korean-patch'
 const PATCHER_REPOSITORY = 'maynut02/astral-party-auto-patcher'
+const PLUGIN_REPOSITORY = 'maynut02/astral-party-korean-plugin'
+const PLUGIN_ASSET_PATTERN = /^astralpartykoreanplugin-v.+\.zip$/i
 const GITHUB_PAGE_SIZE = 100
 const GITHUB_MAX_PAGES = 10
 const PATCH_RELEASE_TAG_PATTERN = /^v[^_]+_r\d+(?:_p\d+)?$/
 
 const RELEASE_REPOSITORIES = {
   patch: PATCH_REPOSITORY,
-  patcher: PATCHER_REPOSITORY
+  patcher: PATCHER_REPOSITORY,
+  plugin: PLUGIN_REPOSITORY
 } as const
 
 function getGitHubHeaders(accept: string): Record<string, string> {
@@ -182,8 +185,7 @@ function isWindowsPatcherRelease(release: ReleaseNoteEntry): boolean {
 }
 
 function isWindowsPluginRelease(release: ReleaseNoteEntry): boolean {
-  return release.tagName.startsWith('windows-plugin-v')
-    || hasAsset(release, asset => /^astralwindowsplugin-v.+\.zip$/i.test(asset.name))
+  return hasAsset(release, asset => PLUGIN_ASSET_PATTERN.test(asset.name))
 }
 
 function isAndroidPatcherRelease(release: ReleaseNoteEntry): boolean {
@@ -205,11 +207,12 @@ function sortReleases(releases: ReleaseNoteEntry[]): ReleaseNoteEntry[] {
 
 function classifyReleases(
   patchSource: ReleaseNoteEntry[],
-  patcherSource: ReleaseNoteEntry[]
+  patcherSource: ReleaseNoteEntry[],
+  pluginSource: ReleaseNoteEntry[]
 ): ReleaseFeedResponse['releases'] {
   return {
     patch: sortReleases(patchSource.filter(isPatchRelease)),
-    windowsPlugin: sortReleases(patcherSource.filter(isWindowsPluginRelease)),
+    windowsPlugin: sortReleases(pluginSource.filter(isWindowsPluginRelease)),
     windowsPatcher: sortReleases(patcherSource.filter(isWindowsPatcherRelease)),
     androidPatcher: sortReleases(patcherSource.filter(isAndroidPatcherRelease))
   }
@@ -280,10 +283,8 @@ async function fetchRequiredPatcherReleases(
 
     const windowsReleases = releases.filter(isWindowsPatcherRelease)
     const androidReleases = releases.filter(isAndroidPatcherRelease)
-    const hasWindowsPlugin = releases.some(isWindowsPluginRelease)
     const hasRequiredPatchers = hasIndexedAsset(windowsReleases, windowsPatcherDownloadUrl)
       && hasIndexedAsset(androidReleases, androidPatcherDownloadUrl)
-      && hasWindowsPlugin
 
     if (rows.length < GITHUB_PAGE_SIZE || hasRequiredPatchers) {
       break
@@ -293,20 +294,41 @@ async function fetchRequiredPatcherReleases(
   return releases
 }
 
+async function fetchRequiredPluginReleases(): Promise<ReleaseNoteEntry[]> {
+  const releases: ReleaseNoteEntry[] = []
+
+  for (let page = 1; page <= GITHUB_MAX_PAGES; page += 1) {
+    const rows = await fetchReleasePage(PLUGIN_REPOSITORY, page)
+    releases.push(...normalizeReleases(rows))
+
+    const hasStablePlugin = releases.some(release => !release.prerelease && isWindowsPluginRelease(release))
+    if (rows.length < GITHUB_PAGE_SIZE || hasStablePlugin) {
+      break
+    }
+  }
+
+  return releases
+}
+
 export async function getReleaseHistoryPage(page: number): Promise<ReleaseHistoryPageResponse> {
   const normalizedPage = Math.max(1, Math.floor(page))
-  const [patchRows, patcherRows] = await Promise.all([
+  const [patchRows, patcherRows, pluginRows] = await Promise.all([
     fetchReleasePage(PATCH_REPOSITORY, normalizedPage),
-    fetchReleasePage(PATCHER_REPOSITORY, normalizedPage)
+    fetchReleasePage(PATCHER_REPOSITORY, normalizedPage),
+    fetchReleasePage(PLUGIN_REPOSITORY, normalizedPage)
   ])
 
   return {
     repositories: RELEASE_REPOSITORIES,
     fetchedAt: new Date().toISOString(),
     page: normalizedPage,
-    perPage: GITHUB_PAGE_SIZE * 2,
-    hasMore: patchRows.length === GITHUB_PAGE_SIZE || patcherRows.length === GITHUB_PAGE_SIZE,
-    releases: classifyReleases(normalizeReleases(patchRows), normalizeReleases(patcherRows))
+    perPage: GITHUB_PAGE_SIZE * 3,
+    hasMore: [patchRows, patcherRows, pluginRows].some(rows => rows.length === GITHUB_PAGE_SIZE),
+    releases: classifyReleases(
+      normalizeReleases(patchRows),
+      normalizeReleases(patcherRows),
+      normalizeReleases(pluginRows)
+    )
   }
 }
 
@@ -509,17 +531,17 @@ function resolveWindowsPatcher(
 function resolveWindowsPlugin(
   releases: ReleaseNoteEntry[]
 ): IndexedReleaseArtifact<WindowsPluginIndex> | null {
-  const candidates = sortReleases(releases.filter(isWindowsPluginRelease))
+  const candidates = sortReleases(releases.filter(release => !release.prerelease && isWindowsPluginRelease(release)))
 
   for (const release of candidates) {
-    const asset = release.assets.find(item => /^astralwindowsplugin-v.+\.zip$/i.test(item.name))
+    const asset = release.assets.find(item => PLUGIN_ASSET_PATTERN.test(item.name))
     if (!asset) {
       continue
     }
 
     return {
       index: {
-        version: versionFromTag(release.tagName, 'windows-plugin-v'),
+        version: versionFromTag(release.tagName, 'v'),
         downloadUrl: asset.downloadUrl,
         size: asset.size
       },
@@ -574,14 +596,15 @@ export async function getReleaseFeed(): Promise<ReleaseFeedResponse> {
       ?? []
   )
 
-  const [patchSource, patcherSource] = await Promise.all([
+  const [patchSource, patcherSource, pluginSource] = await Promise.all([
     fetchRequiredPatchReleases(stablePatchVersions),
     fetchRequiredPatcherReleases(
       windowsPatcherIndex?.downloadUrl ?? '',
       androidPatcherIndex?.downloadUrl ?? ''
-    )
+    ),
+    fetchRequiredPluginReleases()
   ])
-  const releases = classifyReleases(patchSource, patcherSource)
+  const releases = classifyReleases(patchSource, patcherSource, pluginSource)
 
   const stablePatchRelease = stablePatchVersions.size
     ? releases.patch.find(release => stablePatchVersions.has(release.tagName)) ?? null
@@ -601,7 +624,7 @@ export async function getReleaseFeed(): Promise<ReleaseFeedResponse> {
           }
         : null,
       windowsPatcher: resolveWindowsPatcher(windowsPatcherIndex, releases.windowsPatcher),
-      windowsPlugin: resolveWindowsPlugin(patcherSource),
+      windowsPlugin: resolveWindowsPlugin(releases.windowsPlugin),
       androidPatcher: resolveAndroidPatcher(androidPatcherIndex, releases.androidPatcher)
     }
   }

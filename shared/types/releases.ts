@@ -87,6 +87,7 @@ export interface ReleaseDistribution {
 export interface ReleaseRepositories {
   patch: string
   patcher: string
+  plugin: string
 }
 
 export interface ReleaseFeedResponse {

@@ -243,10 +243,6 @@ function isDefaultPatchAsset(name: string): boolean {
     || lowerName === 'cn_android_manual_patch.zip'
 }
 
-function isDefaultWindowsPluginAsset(name: string): boolean {
-  return /^astralwindowsplugin-v.+\.zip$/i.test(name)
-}
-
 function getVisibleAssets(release: ReleaseNoteEntry) {
   if (isDownloadExpanded(release)) {
     return release.assets
@@ -257,7 +253,7 @@ function getVisibleAssets(release: ReleaseNoteEntry) {
   }
 
   if (activeTab.value === 'windowsPlugin') {
-    return release.assets.filter(asset => isDefaultWindowsPluginAsset(asset.name))
+    return release.assets.filter(asset => /^astralpartykoreanplugin-v.+\.zip$/i.test(asset.name))
   }
 
   return release.assets

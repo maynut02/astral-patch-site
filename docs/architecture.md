@@ -11,9 +11,10 @@ PostgreSQL
   ↑ schema migrations       ↑ source sync / patch releases
 astral-patch-site           astral-party-korean-patch
         ↑ release API       astral-party-auto-patcher
+                            astral-party-korean-plugin
 ```
 
-`astral-patch-site`는 웹 애플리케이션, 사용자 상호작용과 DB migration을 담당합니다. 원문 동기화와 패치 생성은 `astral-party-korean-patch`가 담당하고, Windows/Android 패치 도구의 릴리즈와 배포 인덱스는 `astral-party-auto-patcher`가 담당합니다.
+`astral-patch-site`는 웹 애플리케이션, 사용자 상호작용과 DB migration을 담당합니다. 원문 동기화와 패치 생성은 `astral-party-korean-patch`가 담당하고, Windows/Android 패치 도구의 릴리즈와 배포 인덱스는 `astral-party-auto-patcher`가, Windows 한글패치 플러그인(BepInEx) 릴리즈는 `astral-party-korean-plugin`이 담당합니다.
 
 ## 계층별 책임
 
