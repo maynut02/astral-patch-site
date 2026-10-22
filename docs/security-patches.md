@@ -15,4 +15,6 @@ pnpm 11의 JSON `metadata.vulnerabilities`에는 예외 처리한 항목도 남�
 
 2026-10-07 CI에서 `@nuxt/devtools → launch-editor → shell-quote@1.10.0`의 [GHSA-pqg4-j6r4-53mv](https://github.com/advisories/GHSA-pqg4-j6r4-53mv)가 감지됐다. 공식 수정 버전 `1.11.0`이 있으므로 영향받는 `>=1.8.4 <1.11.0` 버전만 `pnpm overrides`로 `1.11.0`에 고정하고 lockfile을 갱신했다. 이 항목은 보안 검사 예외에 추가하지 않는다.
 
+2026-10-22 CI에서 [GHSA-587h-7wmj-h5pm](https://github.com/advisories/GHSA-587h-7wmj-h5pm)(High)이 `launch-editor@2.14.1`과 이를 포함한 `vite@8.2.2`에서 감지됐다. 경로는 `nuxt → @nuxt/devtools → launch-editor`와 Nuxt 모듈 경로의 `vite`다. 공식 수정 버전이 있으므로 `launch-editor@<2.14.2`는 `2.14.2`로, `vite@>=8.2.0 <8.2.4`는 `8.2.4`로 `pnpm overrides`에 고정하고 lockfile을 갱신했다. 이 항목은 보안 검사 예외에 추가하지 않는다.
+
 공식 수정 릴리스가 나오면 해당 버전으로 갱신하고 로컬 패치, GHSA 예외, 관련 회귀 테스트를 함께 검토한다. 새 advisory나 다른 High·Critical 취약점에는 이 예외가 적용되지 않는다.

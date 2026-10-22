@@ -12,6 +12,8 @@ overrides:
   'source-map-js@>=1.0.0 <1.2.2': 1.2.2
   'shell-quote@>=1.8.4 <1.11.0': 1.11.0
   'undici@>=8.0.0 <8.10.2': 8.10.2
+  'vite@>=8.2.0 <8.2.4': 8.2.4
+  'launch-editor@<2.14.2': 2.14.2
   # DevTools 3 still imports the removed simple-git 3 default export.
   # Keep its import patch together with this security upgrade to simple-git 4.
   '@nuxt/devtools>simple-git': 4.0.2
