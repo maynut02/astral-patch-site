@@ -38,7 +38,7 @@ function requiredEnv(name) {
 }
 
 function getR2Config() {
-  const accountId = requiredEnv('R2_BACKUP_ACCOUNT_ID')
+  const accountId = requiredEnv('R2_ACCOUNT_ID')
   const endpoint = (process.env.R2_BACKUP_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`).replace(/\/$/, '')
   const endpointUrl = new URL(endpoint)
 

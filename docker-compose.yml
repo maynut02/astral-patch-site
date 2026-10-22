@@ -17,6 +17,10 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-https://factchat-cloud.mindlogic.ai/v1/gateway}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_PACK_ACCESS_KEY_ID: ${R2_PACK_ACCESS_KEY_ID:-}
+      R2_PACK_SECRET_ACCESS_KEY: ${R2_PACK_SECRET_ACCESS_KEY:-}
+      R2_PACK_BUCKET_NAME: ${R2_PACK_BUCKET_NAME:-}
       ASTRAL_WS_ALLOWED_ORIGINS: ${ASTRAL_WS_ALLOWED_ORIGINS:-https://astral.maynutlab.com}
       # The app port is bound to loopback; nginx overwrites X-Real-IP.
       ASTRAL_TRUST_PROXY: ${ASTRAL_TRUST_PROXY:-true}
@@ -34,7 +38,7 @@ services:
       context: .
       dockerfile: Dockerfile.r2-backup
     environment:
-      R2_BACKUP_ACCOUNT_ID: ${R2_BACKUP_ACCOUNT_ID:-}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_BACKUP_ACCESS_KEY_ID: ${R2_BACKUP_ACCESS_KEY_ID:-}
       R2_BACKUP_SECRET_ACCESS_KEY: ${R2_BACKUP_SECRET_ACCESS_KEY:-}
       R2_BACKUP_BUCKET_NAME: ${R2_BACKUP_BUCKET_NAME:-}
