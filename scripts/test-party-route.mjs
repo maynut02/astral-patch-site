@@ -6,6 +6,7 @@ import { Socket } from 'node:net'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { loadPartyModuleUrls } from './test-party-module-loader.mjs'
 
 // node --experimental-strip-types scripts/test-party-route.mjs
 // Transpile the real WS route and HTTP handler and replace only the WebSocket
@@ -33,19 +34,21 @@ async function transformModule(path, imports = {}) {
 const typesUrl = await transformModule('shared/types/party.ts')
 // The store module is only the import-time default; setPartyChatStore replaces it.
 const storageStubUrl = moduleUrl('export const postgresPartyChatStore = undefined')
-const partyChatUrl = await transformModule('server/utils/party-chat.ts', {
-  '../../shared/types/party.ts': typesUrl,
-  './party-chat-storage.ts': storageStubUrl
-})
+const { partyChatUrl, limitsUrl, originUrl } = await loadPartyModuleUrls(transformModule, typesUrl, storageStubUrl)
+const { PARTY_LIMITS } = await import(limitsUrl)
 const partyChat = await import(partyChatUrl)
 const securityUrl = await transformModule('server/utils/request-security.ts')
 const wsRouteUrl = await transformModule('server/routes/ws/party.ts', {
   '../../utils/party-chat': partyChatUrl,
+  '../../utils/party-chat-limits': limitsUrl,
+  '../../utils/ws-origin': originUrl,
   '../../../shared/types/party': typesUrl
 })
 const roomsRouteUrl = await transformModule('server/api/party/rooms.post.ts', {
   '../../utils/party-chat': partyChatUrl,
-  '../../utils/request-security': securityUrl
+  '../../utils/request-security': securityUrl,
+  '../../utils/ws-origin': originUrl,
+  '../../../shared/types/party': typesUrl
 })
 
 globalThis.defineWebSocketHandler = hooks => hooks
@@ -72,12 +75,12 @@ function buildMemoryStore() {
         rooms.set(roomId, room)
         sessions.set(sessionId, room)
       }
-      return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.map(message => structuredClone(message)), participants: activeParticipants(room.sessionId) }
+      return { sessionId: room.sessionId, createdAt: room.createdAt, emptySinceMs: Date.parse(room.expiresAt) - PARTY_LIMITS.emptyRoomTtlMs, messages: room.messages.map(message => structuredClone(message)), participants: activeParticipants(room.sessionId) }
     },
     async findRoom(roomId) {
       const room = rooms.get(roomId)
       if (!room) return null
-      return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.map(message => structuredClone(message)), participants: activeParticipants(room.sessionId) }
+      return { sessionId: room.sessionId, createdAt: room.createdAt, emptySinceMs: Date.parse(room.expiresAt) - PARTY_LIMITS.emptyRoomTtlMs, messages: room.messages.map(message => structuredClone(message)), participants: activeParticipants(room.sessionId) }
     },
     async upsertParticipant(sessionId, participant, reconnectTokenHash) { participants.set(participant.id, { ...structuredClone(participant), sessionId, reconnectTokenHash, departureDeadline: null, leftAt: null }) },
     async updateParticipant(participant) { Object.assign(participants.get(participant.id), structuredClone(participant)) },
@@ -306,7 +309,7 @@ test('sendError forwards retryAfterMs only for codes that carry it', async (t) =
   const limited = createPeer('route-ip-limit')
   hooks.open(limited)
   const input = { roomId: '801003', nickname: '한도', characterId: '101' }
-  for (let index = 0; index < partyChat.PARTY_LIMITS.maxJoinAttemptsPerIp; index++) {
+  for (let index = 0; index < PARTY_LIMITS.maxJoinAttemptsPerIp; index++) {
     await send(limited, { type: 'JOIN', ...input })
   }
   await send(limited, { type: 'JOIN', ...input })
@@ -316,7 +319,7 @@ test('sendError forwards retryAfterMs only for codes that carry it', async (t) =
   }
   assert.equal(typeof rateError.retryAfterMs, 'number')
   assert.ok(rateError.retryAfterMs > 0
-    && rateError.retryAfterMs <= partyChat.PARTY_LIMITS.joinAttemptWindowMs)
+    && rateError.retryAfterMs <= PARTY_LIMITS.joinAttemptWindowMs)
   await hooks.close(limited, { code: 1006 })
 
   // 라이브 충돌은 필드 자체가 없다. 이는 재시도 가능을 뜻하지 않는다(종료 상태).
@@ -642,7 +645,7 @@ test('an invalidated owner during a blocked admission cannot admit a fresh parti
   const error = lastOfType(resumed, 'ERROR')
   assert.equal(error?.code, 'JOIN_RATE_LIMITED')
   assert.ok(error.retryAfterMs > 0
-    && error.retryAfterMs <= partyChat.PARTY_LIMITS.joinAttemptWindowMs)
+    && error.retryAfterMs <= PARTY_LIMITS.joinAttemptWindowMs)
   assert.equal(lastOfType(resumed, 'JOINED'), undefined)
   assert.equal(partyChat.getPartyRoom(roomId)?.participantCount, 1)
   // 관찰자에게는 새 입장 공지도, 추가 퇴장 공지도 생기지 않는다(퇴장은 정확히 1건).
@@ -708,8 +711,7 @@ test('signal plugin synchronously suppresses departures and drains writes on Nit
   isolated.setPartyChatStore(memoryStore)
   globalThis.defineNitroPlugin = plugin => plugin
   const plugin = (await import(await transformModule('server/plugins/party-chat-cleanup.ts', {
-    '../utils/party-chat': isolatedUrl,
-    '../utils/party-chat-storage': storageStubUrl
+    '../utils/party-chat': isolatedUrl
   }))).default
   let closeHook
   const previousTerm = process.listeners('SIGTERM')
@@ -760,4 +762,116 @@ test('signal plugin synchronously suppresses departures and drains writes on Nit
   assert.deepEqual(durableKinds(joined.sessionId), ['chat'])
   process.removeListener('SIGTERM', onTerm)
   process.removeListener('SIGINT', onInt)
+})
+
+test('join broadcasts do not wait for persistence and broadcast frames are encoded once', async (t) => {
+  const observer = createPeer('join-broadcast-observer')
+  const newcomer = createPeer('join-broadcast-newcomer')
+  const roomId = '801030'
+  const originalAppend = memoryStore.appendMessage
+  const originalError = console.error
+  const originalStringify = JSON.stringify
+  let release
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  const errors = []
+  const encodes = new Map()
+  t.after(async () => {
+    release()
+    memoryStore.appendMessage = originalAppend
+    console.error = originalError
+    JSON.stringify = originalStringify
+    await hooks.close(newcomer, { code: 1000, reason: 'leave-room' })
+    await hooks.close(observer, { code: 1000, reason: 'leave-room' })
+  })
+  hooks.open(observer)
+  await join(observer, { roomId, nickname: '관찰자', characterId: '101' })
+  await send(observer, { type: 'CHAT', text: '저장 큐 준비' })
+  console.error = (...args) => errors.push(args)
+  memoryStore.appendMessage = async (sessionId, message, leftParticipantId) => {
+    if (message.kind === 'join' && message.nickname === '새 참가자') {
+      await gate
+      throw new Error('join insert failed')
+    }
+    return originalAppend(sessionId, message, leftParticipantId)
+  }
+  JSON.stringify = (value, ...args) => {
+    if (value?.type === 'PARTICIPANTS' || value?.type === 'JOIN_NOTICE' || (value?.type === 'CHAT' && value.message)) {
+      encodes.set(value.type, (encodes.get(value.type) || 0) + 1)
+    }
+    return originalStringify(value, ...args)
+  }
+  hooks.open(newcomer)
+  await join(newcomer, { roomId, nickname: '새 참가자', characterId: '101' })
+  assert.equal(lastOfType(newcomer, 'JOINED').room.roomId, roomId)
+  assert.equal(lastOfType(observer, 'JOIN_NOTICE').notice.nickname, '새 참가자')
+  assert.equal(lastOfType(newcomer, 'JOIN_NOTICE').notice.nickname, '새 참가자')
+  assert.equal(encodes.get('JOIN_NOTICE'), 1)
+  assert.equal(encodes.get('PARTICIPANTS'), 1)
+  release()
+  await send(newcomer, { type: 'CHAT', text: '입장 다음 채팅' })
+  assert.equal(encodes.get('CHAT'), 1)
+  assert.equal(lastOfType(observer, 'CHAT').message.text, '입장 다음 채팅')
+  assert.equal(errors.length, 1)
+})
+
+test('wire parsing retains domain validation and optional player order defaults', async () => {
+  const peer = createPeer('wire-contract')
+  hooks.open(peer)
+  for (const [input, code] of [
+    [null, 'INVALID_MESSAGE'],
+    [[], 'INVALID_MESSAGE'],
+    [{ type: 1 }, 'INVALID_MESSAGE'],
+    [{ type: 'UNKNOWN' }, 'UNSUPPORTED_MESSAGE'],
+    [{ type: 'JOIN' }, 'INVALID_ROOM_ID'],
+    [{ type: 'CHAT', text: 3 }, 'NOT_IN_ROOM'],
+    [{ type: 'HISTORY', before: null }, 'NOT_IN_ROOM']
+  ]) {
+    await send(peer, input)
+    assert.equal(lastOfType(peer, 'ERROR').code, code)
+  }
+  const joined = await join(peer, { roomId: '801031', nickname: '기본 순서', characterId: '101' })
+  assert.equal(joined.participants[0].order, 'P1')
+  await send(peer, { type: 'CHAT', text: 3 })
+  assert.equal(lastOfType(peer, 'ERROR').code, 'TEXT_REQUIRED')
+  await send(peer, { type: 'SET_ORDER', order: null })
+  assert.equal(lastOfType(peer, 'ERROR').code, 'INVALID_ORDER')
+  await hooks.close(peer, { code: 1000, reason: 'leave-room' })
+})
+
+test('shared websocket origin and proxy helpers preserve both route policies', async () => {
+  const previous = {
+    NODE_ENV: process.env.NODE_ENV,
+    ASTRAL_WS_ALLOWED_ORIGINS: process.env.ASTRAL_WS_ALLOWED_ORIGINS,
+    ASTRAL_TRUST_PROXY: process.env.ASTRAL_TRUST_PROXY
+  }
+  try {
+    process.env.NODE_ENV = 'production'
+    process.env.ASTRAL_WS_ALLOWED_ORIGINS = 'https://trusted.example/path,not-an-origin'
+    const policy = await import(`${originUrl}#origin-policy-test`)
+    assert.equal(policy.isAllowedWebSocketOrigin(null), false)
+    assert.equal(policy.isAllowedWebSocketOrigin('https://astral.maynutlab.com/path'), true)
+    assert.equal(policy.isAllowedWebSocketOrigin('https://trusted.example/other'), true)
+    assert.equal(policy.isAllowedWebSocketOrigin('https://other.example'), false)
+    assert.equal(policy.isAllowedWebSocketOrigin('http://localhost:3000'), false)
+    assert.equal(policy.isAllowedWebSocketOrigin('not-an-origin'), false)
+    process.env.NODE_ENV = 'development'
+    assert.equal(policy.isAllowedWebSocketOrigin(null), true)
+    for (const origin of ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000']) {
+      assert.equal(policy.isAllowedWebSocketOrigin(origin), true)
+    }
+    process.env.ASTRAL_TRUST_PROXY = 'true'
+    assert.equal(policy.getTrustedClientIp(' 192.0.2.1 ', '192.0.2.2'), '192.0.2.1')
+    assert.equal(policy.getTrustedClientIp(' ', '192.0.2.2'), '192.0.2.2')
+    assert.equal(policy.getTrustedClientIp(undefined, undefined), 'unknown')
+    process.env.ASTRAL_TRUST_PROXY = 'false'
+    assert.equal(policy.getTrustedClientIp('192.0.2.1', '192.0.2.2'), '192.0.2.2')
+    assert.equal(policy.getTrustedClientIp('192.0.2.1', undefined), 'unknown')
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
 })

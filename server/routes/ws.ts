@@ -14,29 +14,8 @@ import {
   unregisterWsPeer
 } from '../utils/ws-hub'
 
-const DEFAULT_SITE_ORIGIN = 'https://astral.maynutlab.com'
+import { isAllowedWebSocketOrigin } from '../utils/ws-origin'
 
-function normalizeOrigin(value: string): string | null {
-  try {
-    return new URL(value).origin
-  } catch {
-    return null
-  }
-}
-
-function getAllowedOrigins(): Set<string> {
-  const origins = new Set<string>([DEFAULT_SITE_ORIGIN])
-  const configuredOrigins = process.env.ASTRAL_WS_ALLOWED_ORIGINS || ''
-
-  for (const value of configuredOrigins.split(',')) {
-    const origin = normalizeOrigin(value.trim())
-    if (origin) origins.add(origin)
-  }
-
-  return origins
-}
-
-const allowedOrigins = getAllowedOrigins()
 const allowedTopics = new Set<string>(ASTRAL_WS_TOPICS)
 
 function readTopics(value: unknown): AstralWebSocketTopic[] | null {
@@ -50,29 +29,9 @@ function readTopics(value: unknown): AstralWebSocketTopic[] | null {
   return topics as AstralWebSocketTopic[]
 }
 
-function isLocalDevelopmentOrigin(origin: URL): boolean {
-  if (process.env.NODE_ENV === 'production') return false
-
-  return origin.hostname === 'localhost'
-    || origin.hostname === '127.0.0.1'
-    || origin.hostname === '[::1]'
-    || origin.hostname === '::1'
-}
-
-function isAllowedOrigin(originHeader: string | null): boolean {
-  if (!originHeader) return process.env.NODE_ENV !== 'production'
-
-  try {
-    const origin = new URL(originHeader)
-    return allowedOrigins.has(origin.origin) || isLocalDevelopmentOrigin(origin)
-  } catch {
-    return false
-  }
-}
-
 export default defineWebSocketHandler({
   upgrade(request) {
-    if (!isAllowedOrigin(request.headers.get('origin'))) {
+    if (!isAllowedWebSocketOrigin(request.headers.get('origin'))) {
       return new Response('WebSocket origin is not allowed.', { status: 403 })
     }
   },

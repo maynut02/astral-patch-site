@@ -5,12 +5,23 @@ import { stripTypeScriptTypes } from 'node:module'
 import test from 'node:test'
 
 // Node 22.19 이상에서 node scripts/test-mod-github.mjs로 실행하며 서버나 인증 정보, 네트워크 없이 검증한다.
-// 타입과 두 런타임 가져오기를 제거한 뒤 Nitro 전역 함수의 모형을 주입한다.
+// 타입과 런타임 가져오기를 제거한 뒤 실제 오류 정책과 Nitro 전역 함수의 모형을 주입한다.
 const source = readFileSync(new URL('../server/utils/mod-github.ts', import.meta.url), 'utf8')
   .replace(/^import \{ Buffer \} from 'node:buffer'\r?\n/m, '')
   .replace(/^import \{ createError \} from 'h3'\r?\n/m, '')
+  .replace(/^import \{ getGitHubErrorDetails as getErrorDetails, toGitHubError \} from '\.\/github\/errors'\r?\n/m, '')
+  .replace(/^import \{ asNumber, asString, isRecord \} from '\.\/github\/normalizers'\r?\n/m, '')
 const executable = stripTypeScriptTypes(source).replace(/^export /gm, '')
-const loadUtility = new Function('createError', '$fetch', 'defineCachedFunction', 'process', 'Buffer', 'useStorage', `${executable}
+const errorSource = stripTypeScriptTypes(readFileSync(new URL('../server/utils/github/errors.ts', import.meta.url), 'utf8')
+  .replace(/^import \{ createError \} from 'h3'\r?\n/m, '')).replace(/^export /gm, '')
+const loadErrorPolicy = new Function('createError', `${errorSource}
+return { getGitHubErrorDetails, toGitHubError }
+`)
+const normalizerSource = stripTypeScriptTypes(readFileSync(new URL('../server/utils/github/normalizers.ts', import.meta.url), 'utf8')).replace(/^export /gm, '')
+const normalizers = new Function(`${normalizerSource}
+return { asNumber, asString, isRecord }
+`)()
+const loadUtility = new Function('createError', '$fetch', 'defineCachedFunction', 'process', 'Buffer', 'useStorage', 'getErrorDetails', 'toGitHubError', 'asNumber', 'asString', 'isRecord', `${executable}
 return { normalizeModRepository, parseModBranch, getModGitHubAbout, getModGitHubSnapshot, getModGitHubReleases, getModGitHubCommits }
 `)
 
@@ -105,8 +116,10 @@ function harness(handler = defaultResponse, token = '', storageEntries = new Map
     async setItem(key, value) { storageEntries.set(key, value) },
     async removeItem(key) { storageEntries.delete(key) }
   }
+  const createError = options => Object.assign(new Error(options.statusMessage), options)
+  const errorPolicy = loadErrorPolicy(createError)
   const api = loadUtility(
-    options => Object.assign(new Error(options.statusMessage), options),
+    createError,
     fetchMock,
     defineCachedFunction,
     { env: { GITHUB_TOKEN: token } },
@@ -114,7 +127,12 @@ function harness(handler = defaultResponse, token = '', storageEntries = new Map
     (mount) => {
       assert.equal(mount, 'cache')
       return storage
-    }
+    },
+    errorPolicy.getGitHubErrorDetails,
+    errorPolicy.toGitHubError,
+    normalizers.asNumber,
+    normalizers.asString,
+    normalizers.isRecord
   )
   return {
     ...api,

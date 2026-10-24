@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
+import { isReviewerRole } from '#shared/types/user'
 import { getDatabase } from './database'
 import { parseUuid } from './validation'
 import { broadcastWsMessage } from './ws-hub'
@@ -29,7 +30,7 @@ export function parseEditorChangeId(value: unknown): string {
   return parseUuid(value, 'Invalid translation change id')
 }
 
-function parseReviewAction(value: unknown): EditorReviewAction {
+export function parseReviewAction(value: unknown): EditorReviewAction {
   if (value !== 'approve' && value !== 'reject') {
     throw createError({
       statusCode: 400,
@@ -41,9 +42,10 @@ function parseReviewAction(value: unknown): EditorReviewAction {
 }
 
 export function assertEditorReviewPermission(user: { role?: unknown } | null | undefined): void {
+  // 검토 역할 정책과 개별 사전·모드의 소유권 정책은 서로 독립적이다.
   const role = resolveEditorRole(user)
 
-  if (role !== 'admin' && role !== 'verified') {
+  if (!isReviewerRole(role)) {
     throw createError({
       statusCode: 403,
       statusMessage: 'Verified user permission is required to review translations'

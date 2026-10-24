@@ -1,21 +1,19 @@
 <script setup lang="ts">
-import type { UserProfileDetails, UserSocialLink } from '#shared/types/profile'
 import {
   GAME_PROFILE_VALUE_MAX_LENGTH,
   HANDLE_MAX_LENGTH,
-  SOCIAL_LINK_LABEL_MAX_LENGTH,
   SOCIAL_LINK_MAX_COUNT,
-  SOCIAL_LINK_URL_MAX_LENGTH,
-  getErrorStatus,
+  type UserProfileDetails,
+  type UserSocialLink
+} from '#shared/types/profile'
+import {
   getHandleInitial,
   getPublicProfilePath,
   sanitizeGameInviteCode,
   sanitizeGameUid,
-  validateGameInviteCode,
-  validateGameUid,
-  validateHandle,
   validateSocialLink
 } from '~/utils/profile'
+import { useProfileForm } from '~/composables/use-profile-form'
 
 definePageMeta({ middleware: 'authenticated' })
 
@@ -38,25 +36,14 @@ const { showToast } = useAppToast()
 
 let socialLinkKey = 0
 
-const state = reactive({
-  handle: '',
-  gameUid: '',
-  gameInviteCode: '',
-  socialLinks: [] as SocialLinkFormRow[]
-})
-
-const errors = reactive({
-  handle: '',
-  gameUid: '',
-  gameInviteCode: '',
-  socialLinks: [] as SocialLinkError[]
-})
+const profileForm = useProfileForm()
+const { submitting, serverError } = profileForm
+const state = Object.assign(profileForm.state, { socialLinks: [] as SocialLinkFormRow[] })
+const errors = Object.assign(profileForm.errors, { socialLinks: [] as SocialLinkError[] })
 
 const savedProfileSnapshot = ref('')
 const profileLoading = ref(true)
 const profileLoadError = ref('')
-const submitting = ref(false)
-const serverError = ref('')
 const deleteModalOpen = ref(false)
 const deleteConfirmation = ref('')
 const deleting = ref(false)
@@ -81,9 +68,7 @@ function createSocialLinkRow(link?: Partial<UserSocialLink>): SocialLinkFormRow 
 
 function normalizedProfileState() {
   return {
-    handle: state.handle.trim(),
-    gameUid: state.gameUid.trim(),
-    gameInviteCode: state.gameInviteCode.trim(),
+    ...profileForm.normalizedState(),
     socialLinks: state.socialLinks.map(link => ({
       label: link.label.trim(),
       url: link.url.trim()
@@ -140,15 +125,10 @@ watch(deleteModalOpen, (open) => {
 })
 
 function validate(): boolean {
-  errors.handle = validateHandle(state.handle)
-  errors.gameUid = validateGameUid(state.gameUid)
-  errors.gameInviteCode = validateGameInviteCode(state.gameInviteCode)
+  const valid = profileForm.validate()
   errors.socialLinks = state.socialLinks.map(link => validateSocialLink(link.label, link.url))
 
-  return !errors.handle
-    && !errors.gameUid
-    && !errors.gameInviteCode
-    && errors.socialLinks.every(error => !error.label && !error.url)
+  return valid && errors.socialLinks.every(error => !error.label && !error.url)
 }
 
 function addSocialLink(): void {
@@ -171,44 +151,20 @@ async function resetProfile(): Promise<void> {
 }
 
 async function submit(): Promise<void> {
-  serverError.value = ''
+  await profileForm.submit<UserProfileDetails>({
+    validate: () => !profileLoading.value && !profileLoadError.value && validate() && isDirty.value,
+    body: normalizedProfileState,
+    onSaved: async (profile) => {
+      applyProfile(profile)
+      await fetchSession()
 
-  if (profileLoading.value || profileLoadError.value || !validate() || !isDirty.value) {
-    return
-  }
-
-  submitting.value = true
-
-  try {
-    const profile = await $fetch<UserProfileDetails>('/api/profile', {
-      method: 'PATCH',
-      body: {
-        handle: state.handle.trim(),
-        gameUid: state.gameUid.trim(),
-        gameInviteCode: state.gameInviteCode.trim(),
-        socialLinks: state.socialLinks.map(link => ({
-          label: link.label.trim(),
-          url: link.url.trim()
-        }))
-      }
-    })
-
-    applyProfile(profile)
-    await fetchSession()
-
-    showToast({
-      id: 'setting-profile-saved',
-      title: '프로필 정보를 저장했습니다.'
-    })
-  } catch (error: unknown) {
-    if (getErrorStatus(error) === 409) {
-      errors.handle = '이미 사용 중인 핸들이에요.'
-    } else {
-      serverError.value = '프로필 정보를 저장하지 못했습니다. 입력 내용을 확인한 뒤 다시 시도해 주세요.'
-    }
-  } finally {
-    submitting.value = false
-  }
+      showToast({
+        id: 'setting-profile-saved',
+        title: '프로필 정보를 저장했습니다.'
+      })
+    },
+    failureMessage: '프로필 정보를 저장하지 못했습니다. 입력 내용을 확인한 뒤 다시 시도해 주세요.'
+  })
 }
 
 async function deleteAccount(): Promise<void> {
@@ -363,83 +319,13 @@ async function deleteAccount(): Promise<void> {
           </UFormField>
         </div>
 
-        <div class="flex flex-col gap-3 border-t border-default pt-5">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <h3 class="text-sm font-medium text-default">
-                소셜미디어 링크
-              </h3>
-              <p class="mt-0.5 text-xs text-muted">
-                최대 {{ SOCIAL_LINK_MAX_COUNT }}개까지 등록할 수 있습니다.
-              </p>
-            </div>
-            <UButton
-              type="button"
-              icon="i-tabler-plus"
-              color="neutral"
-              variant="soft"
-              size="md"
-              :disabled="profileLoading || state.socialLinks.length >= SOCIAL_LINK_MAX_COUNT"
-              @click="addSocialLink"
-            >
-              링크 추가
-            </UButton>
-          </div>
-
-          <div
-            v-if="state.socialLinks.length"
-            class="flex flex-col gap-3"
-          >
-            <div
-              v-for="(link, index) in state.socialLinks"
-              :key="link.key"
-              class="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1.6fr)_auto]"
-            >
-              <UFormField :error="errors.socialLinks[index]?.label || undefined">
-                <UInput
-                  v-model="link.label"
-                  :maxlength="SOCIAL_LINK_LABEL_MAX_LENGTH"
-                  color="neutral"
-                  class="w-full"
-                  placeholder="예: X, YouTube, GitHub"
-                  :disabled="profileLoading"
-                  :ui="{ base: 'h-8 leading-5' }"
-                />
-              </UFormField>
-
-              <UFormField :error="errors.socialLinks[index]?.url || undefined">
-                <UInput
-                  v-model="link.url"
-                  :maxlength="SOCIAL_LINK_URL_MAX_LENGTH"
-                  type="url"
-                  color="neutral"
-                  class="w-full"
-                  placeholder="https://..."
-                  :disabled="profileLoading"
-                  :ui="{ base: 'h-8 leading-5' }"
-                />
-              </UFormField>
-
-              <UButton
-                type="button"
-                icon="i-tabler-trash"
-                color="error"
-                variant="ghost"
-                class="self-start"
-                aria-label="소셜 링크 삭제"
-                :disabled="profileLoading"
-                @click="removeSocialLink(index)"
-              />
-            </div>
-          </div>
-
-          <p
-            v-else
-            class="text-sm text-muted"
-          >
-            등록된 소셜미디어 링크가 없습니다.
-          </p>
-        </div>
+        <SettingSocialLinkEditor
+          :links="state.socialLinks"
+          :errors="errors.socialLinks"
+          :loading="profileLoading"
+          @add="addSocialLink"
+          @remove="removeSocialLink"
+        />
 
         <UAlert
           v-if="serverError"

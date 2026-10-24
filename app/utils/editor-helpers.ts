@@ -12,14 +12,6 @@ export function normalizeEditorHandle(value: unknown): string {
   return typeof value === 'string' ? value.trim().replace(/^@+/, '') : ''
 }
 
-export function getEditorUserPath(handle: string): string {
-  return `/@${encodeURIComponent(handle)}`
-}
-
-export function formatEditorHandle(handle: string): string {
-  return `@${handle}`
-}
-
 export function normalizeEditorVersion(value: unknown): string {
   return getEditorQueryString(value).trim().replace(/^v/i, '')
 }
@@ -28,8 +20,13 @@ export function normalizeEditorRevision(value: unknown): string {
   return getEditorQueryString(value).trim().replace(/^r/i, '')
 }
 
-export function formatEditorVersion(version: string, revision: string): string {
-  return `v${normalizeEditorVersion(version)} · r${normalizeEditorRevision(revision)}`
+export function formatEditorVersion(version: string | null | undefined, revision: string | null | undefined, omitEmptyParts = false): string {
+  const normalizedVersion = normalizeEditorVersion(version)
+  const normalizedRevision = normalizeEditorRevision(revision)
+  if (omitEmptyParts && (!normalizedVersion || !normalizedRevision)) {
+    return normalizedVersion ? `v${normalizedVersion}` : normalizedRevision ? `r${normalizedRevision}` : ''
+  }
+  return `v${normalizedVersion} · r${normalizedRevision}`
 }
 
 export function formatEditorCount(value: number): string {

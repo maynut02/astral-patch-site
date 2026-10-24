@@ -37,6 +37,10 @@ globalThis.getUserSession = async () => state.session
 globalThis.setUserSession = async (_event, session) => {
   state.session = session
 }
+globalThis.replaceUserSession = async (_event, session) => {
+  state.refreshCalls.push(session)
+  state.session = { id: 'rotated-session', ...session }
+}
 globalThis.__modHubTest = {
   getDatabase: () => state.database,
   async getModGitHubAbout(repository) {
@@ -71,7 +75,12 @@ globalThis.__modHubTest = {
 }
 
 const databaseUrl = moduleUrl('export const getDatabase = () => globalThis.__modHubTest.getDatabase()')
-const githubUrl = await transformModule('server/utils/mod-github.ts')
+const githubErrorsUrl = await transformModule('server/utils/github/errors.ts')
+const githubNormalizersUrl = await transformModule('server/utils/github/normalizers.ts')
+const githubUrl = await transformModule('server/utils/mod-github.ts', {
+  './github/errors': githubErrorsUrl,
+  './github/normalizers': githubNormalizersUrl
+})
 const githubMockUrl = moduleUrl(`
   export { normalizeModRepository, parseModBranch } from ${JSON.stringify(githubUrl)}
   export const getModGitHubAbout = (...args) => globalThis.__modHubTest.getModGitHubAbout(...args)
@@ -82,18 +91,26 @@ const githubMockUrl = moduleUrl(`
 const rateUrl = moduleUrl('export const isRateLimited = (...args) => globalThis.__modHubTest.isRateLimited(...args)')
 const validationUrl = await transformModule('server/utils/validation.ts')
 const typesUrl = await transformModule('shared/types/mod.ts')
+const userTypesUrl = await transformModule('shared/types/user.ts')
+const securityUrl = await transformModule('server/utils/request-security.ts')
+const modRateUrl = await transformModule('server/utils/mod-rate-limit.ts', {
+  './database': databaseUrl,
+  './rate-limiter': rateUrl
+})
 const hubUrl = await transformModule('server/utils/mod-hub.ts', {
   '#shared/types/mod': typesUrl,
   './database': databaseUrl,
   './mod-github': githubMockUrl,
-  './rate-limiter': rateUrl,
-  './validation': validationUrl
+  './mod-rate-limit': modRateUrl,
+  './validation': validationUrl,
+  './request-security': securityUrl
 })
 const hub = await import(hubUrl)
 const authUrl = await transformModule('server/utils/auth-user.ts', { './database': databaseUrl })
-const securityUrl = await transformModule('server/utils/request-security.ts')
-const accountUrl = await transformModule('server/utils/user-account.ts', { './database': databaseUrl, './auth-user': authUrl })
+const accountUrl = await transformModule('server/utils/user-account.ts', { './database': databaseUrl, '#shared/types/user': userTypesUrl })
 const { deleteUserAccount } = await import(accountUrl)
+const sessionRefreshMiddleware = (await import(await transformModule('server/middleware/session-refresh.ts'))).default
+const modCacheMiddleware = (await import(await transformModule('server/middleware/mod-cache.ts'))).default
 const routes = {}
 for (const [key, path, prefix] of [
   ['list', 'server/api/mods.get.ts', '../utils/'],
@@ -237,6 +254,7 @@ function event(method, path = '/api/mods', body, headers = {}) {
   const pathname = new URL(path, 'http://localhost').pathname
   const id = pathname.match(/^\/api\/mods\/([^/]+)(?:\/(?:releases|commits))?$/)?.[1]
   result.context.params = id === undefined ? {} : { id: decodeURIComponent(id) }
+  modCacheMiddleware(result)
   return result
 }
 
@@ -305,6 +323,16 @@ test('one About lookup failure keeps the list and other descriptions usable', as
   assert.equal(state.aboutActive, 0)
   assert.equal(state.snapshotCalls.length, 0)
   assert.equal(state.releaseCalls.length, 0)
+})
+
+test('duplicate repositories share one About lookup without changing list rows', async () => {
+  const base = state.mods.get(modId)
+  state.mods.set('2', { ...base, id: '2', name: '두 번째 모드', createdBy: 'other' })
+  const { mods } = await hub.getMods('owner')
+  assert.deepEqual(state.aboutCalls, ['owner/repo'])
+  assert.deepEqual(mods.map(mod => mod.id), ['1', '2'])
+  assert.deepEqual(mods.map(mod => mod.githubDescription), ['GitHub About 소개', 'GitHub About 소개'])
+  assert.deepEqual(mods.map(mod => mod.canEdit), [true, false])
 })
 
 test('About workers preserve DB order and ownership with at most six concurrent lookups', async () => {
@@ -833,4 +861,83 @@ test('account deletion reassigns mods to the same anonymous ID before removing a
   assert.match(mods.sql, /SET created_by = \? WHERE created_by = \?$/)
   assert.equal(queries.at(-1).sql, 'DELETE FROM app_users WHERE google_sub = ? RETURNING google_sub AS "googleSub"')
   assert.equal(queries.some(({ sql }) => sql.startsWith('DELETE FROM mods')), false)
+})
+
+test('HTML session refresh preserves session data and throttles rotation to one day', async (context) => {
+  let now = Date.UTC(2026, 9, 23)
+  context.mock.method(Date, 'now', () => now)
+  signIn('owner')
+  state.refreshCalls = []
+  state.session = { ...state.session, id: 'original-session', loggedInAt: 123, secure: { provider: 'google' } }
+  const original = { ...state.session }
+  const request = () => event('GET', '/', undefined, { accept: 'text/html', cookie: 'nuxt-session=sealed' })
+  await sessionRefreshMiddleware(request())
+  assert.deepEqual(state.refreshCalls, [{
+    user: original.user,
+    loggedInAt: 123,
+    secure: { provider: 'google' },
+    refreshedAt: now
+  }])
+  now += 24 * 60 * 60 * 1000 - 1
+  await sessionRefreshMiddleware(request())
+  assert.equal(state.refreshCalls.length, 1)
+  now++
+  await sessionRefreshMiddleware(request())
+  assert.equal(state.refreshCalls.length, 2)
+  assert.equal(state.refreshCalls[1].refreshedAt, now)
+  assert.equal(state.session.loggedInAt, 123)
+  assert.deepEqual(state.session.secure, original.secure)
+})
+
+test('session refresh ignores API requests, non-GET requests and anonymous sessions', async () => {
+  state.refreshCalls = []
+  signIn('owner')
+  for (const request of [
+    event('GET', '/api/mods'),
+    event('POST', '/', undefined, { accept: 'text/html', cookie: 'nuxt-session=sealed' }),
+    event('GET', '/', undefined, { accept: 'text/html' })
+  ]) {
+    await sessionRefreshMiddleware(request)
+  }
+  state.session = {}
+  await sessionRefreshMiddleware(event('GET', '/', undefined, { accept: 'text/html', cookie: 'nuxt-session=sealed' }))
+  assert.deepEqual(state.refreshCalls, [])
+})
+
+test('session user synchronization retains unrelated session values', async () => {
+  const { syncSessionUser } = await import(authUrl)
+  signIn('owner')
+  state.session = { ...state.session, id: 'session', loggedInAt: 123, refreshedAt: 456, secure: { token: 'retained' } }
+  const account = { ...state.accounts.get('owner'), handle: 'UpdatedHandle' }
+  await syncSessionUser(event('PATCH', '/api/profile'), account)
+  assert.deepEqual(state.session, {
+    id: 'session',
+    user: { id: account.googleSub, email: account.email, handle: 'UpdatedHandle', role: account.role },
+    loggedInAt: 123,
+    refreshedAt: 456,
+    secure: { token: 'retained' }
+  })
+})
+
+test('shared page validation rejects malformed and out-of-range historical pages', async () => {
+  const { parsePage } = await import(validationUrl)
+  assert.equal(parsePage(undefined, 'Invalid page'), 1)
+  assert.equal(parsePage('', 'Invalid page'), 1)
+  assert.equal(parsePage('2', 'Invalid page'), 2)
+  assert.equal(parsePage('100000', 'Invalid page'), 100000)
+  for (const page of ['2abc', '0', '-1', '1.5', '100001']) {
+    assert.throws(() => parsePage(page, 'Invalid page'), status(400))
+  }
+})
+
+test('request error codes stay internal and do not add response JSON fields', async () => {
+  const { readJsonBody, getRequestErrorCode } = await import(securityUrl)
+  await assert.rejects(readJsonBody(event('POST', '/api/mods', {}, { 'content-type': 'text/plain' })), (error) => {
+    assert.equal(error.statusCode, 415)
+    assert.equal(error.statusMessage, 'JSON request body is required')
+    assert.equal(getRequestErrorCode(error), 'JSON_REQUIRED')
+    assert.equal(error.data, undefined)
+    assert.equal('code' in error.toJSON(), false)
+    return true
+  })
 })

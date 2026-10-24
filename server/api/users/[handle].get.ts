@@ -1,8 +1,9 @@
 import { createError, getRouterParam } from 'h3'
-import type { UserSocialLink } from '#shared/types/profile'
+import { HANDLE_PATTERN } from '#shared/types/profile'
 import type { UserRole } from '#shared/types/user'
 import { getDatabase } from '../../utils/database'
-import { HANDLE_PATTERN } from '../../utils/validation'
+import { contributorCounts } from '../../utils/editor/sql'
+import { listSocialLinks } from '../../utils/profile-details'
 
 interface PublicUserRow {
   googleSub: string
@@ -18,7 +19,7 @@ interface PublicUserRow {
 export default defineEventHandler(async (event) => {
   const handle = getRouterParam(event, 'handle')?.trim()
 
-  if (!handle || handle.startsWith('@') || !HANDLE_PATTERN.test(handle)) {
+  if (!handle || !HANDLE_PATTERN.test(handle)) {
     throw createError({
       statusCode: 404,
       statusMessage: 'User could not be found'
@@ -34,8 +35,7 @@ export default defineEventHandler(async (event) => {
       users."role" AS role,
       users.game_uid AS "gameUid",
       users.game_invite_code AS "gameInviteCode",
-      count(changes.id)::int AS "translationCount",
-      count(changes.id) FILTER (WHERE changes.status = 'approved')::int AS "approvedTranslationCount",
+      ${contributorCounts(database)},
       users.created_at AS "createdAt"
     FROM app_users users
     LEFT JOIN translation_changes changes ON changes.created_by = users.google_sub
@@ -51,12 +51,7 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const socialLinks = await database<UserSocialLink[]>`
-    SELECT id, label, url
-    FROM app_user_social_links
-    WHERE user_id = ${user.googleSub}
-    ORDER BY sort_order ASC, created_at ASC
-  `
+  const socialLinks = await listSocialLinks(database, user.googleSub)
 
   return {
     handle: user.handle,

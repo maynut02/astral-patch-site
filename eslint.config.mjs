@@ -2,7 +2,7 @@ import withNuxt from './.nuxt/eslint.config.mjs'
 
 export default withNuxt(
   {
-    ignores: ['backups/**']
+    ignores: ['logs/**']
   }
 ).override('nuxt/vue/rules', {
   rules: {

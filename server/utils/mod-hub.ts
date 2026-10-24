@@ -4,33 +4,30 @@ import { createError } from 'h3'
 import type { DatabaseClient } from './database'
 import { getDatabase } from './database'
 import { getModGitHubAbout, getModGitHubCommits, getModGitHubReleases, getModGitHubSnapshot, normalizeModRepository, parseModBranch } from './mod-github'
-import { isRateLimited } from './rate-limiter'
-import { getTextLength } from './validation'
+import { assertModMutationRateLimit } from './mod-rate-limit'
+import { parseText } from './validation'
+import { getRequestErrorCode } from './request-security'
 
 export const MOD_LIST_LIMIT = 200
 const MOD_ABOUT_CONCURRENCY = 6
+// mods.id는 PostgreSQL bigint이며 정밀도 손실 없이 문자열로 전송한다.
 const MAX_MOD_ID = '9223372036854775807'
-
-const MOD_MUTATION_RATE_LIMITS = [
-  { name: 'minute', limit: 10, windowMs: 60_000 },
-  { name: 'hour', limit: 60, windowMs: 3_600_000 }
-] as const
 
 const MOD_REQUEST_ERROR_MESSAGES = new Map([
   ['Authentication is required', '모드를 변경하려면 로그인이 필요합니다.'],
-  ['Invalid request body length', '요청 본문의 길이가 올바르지 않습니다.'],
-  ['Request body is too large', '요청 본문이 너무 큽니다.'],
-  ['JSON request body is required', '모드 정보를 JSON 형식으로 전송해 주세요.'],
-  ['Request body must be a JSON object', '모드 정보를 JSON 객체로 입력해 주세요.'],
-  ['Cross-origin request is not allowed', '같은 사이트에서 모드 변경을 요청해 주세요.'],
-  ['Invalid request origin', '요청 출처가 올바르지 않습니다.'],
+  ['INVALID_BODY_LENGTH', '요청 본문의 길이가 올바르지 않습니다.'],
+  ['BODY_TOO_LARGE', '요청 본문이 너무 큽니다.'],
+  ['JSON_REQUIRED', '모드 정보를 JSON 형식으로 전송해 주세요.'],
+  ['OBJECT_REQUIRED', '모드 정보를 JSON 객체로 입력해 주세요.'],
+  ['CROSS_ORIGIN', '같은 사이트에서 모드 변경을 요청해 주세요.'],
+  ['INVALID_ORIGIN', '요청 출처가 올바르지 않습니다.'],
   ['Bad Request', '올바른 JSON 요청을 전송해 주세요.']
 ])
 
 export function rethrowModRequestError(error: unknown): never {
   if (error && typeof error === 'object' && 'statusCode' in error && typeof error.statusCode === 'number'
     && 'statusMessage' in error && typeof error.statusMessage === 'string') {
-    const statusMessage = MOD_REQUEST_ERROR_MESSAGES.get(error.statusMessage)
+    const statusMessage = MOD_REQUEST_ERROR_MESSAGES.get(getRequestErrorCode(error) ?? error.statusMessage)
     if (statusMessage) {
       throw createError({ statusCode: error.statusCode, statusMessage })
     }
@@ -39,8 +36,8 @@ export function rethrowModRequestError(error: unknown): never {
 }
 
 type ModRow = Omit<ModEntry, 'createdAt' | 'updatedAt' | 'canDelete'> & {
-  createdAt: Date | string
-  updatedAt: Date | string
+  createdAt: Date
+  updatedAt: Date
 }
 
 export function parseModId(value: unknown): string {
@@ -51,24 +48,16 @@ export function parseModId(value: unknown): string {
   return value
 }
 
-function parseText(value: unknown, label: string, maxLength: number, required = false): string {
-  if (!required && (value === undefined || value === null)) {
-    return ''
-  }
-
-  if (typeof value !== 'string') {
-    throw createError({ statusCode: 400, statusMessage: `${label}을(를) 문자열로 입력해 주세요.` })
-  }
-
-  const text = value.trim()
-  if (required && !text) {
-    throw createError({ statusCode: 400, statusMessage: `${label}을(를) 입력해 주세요.` })
-  }
-  if (text.includes('\0') || getTextLength(text) > maxLength) {
-    throw createError({ statusCode: 400, statusMessage: `${label}은(는) ${maxLength}자 이하의 올바른 텍스트여야 합니다.` })
-  }
-
-  return text
+function parseModText(value: unknown, label: string, maxLength: number, required = false): string {
+  return parseText(value, {
+    field: label,
+    maxLength,
+    required,
+    rejectNul: true,
+    typeMessage: `${label}을(를) 문자열로 입력해 주세요.`,
+    emptyMessage: `${label}을(를) 입력해 주세요.`,
+    lengthMessage: `${label}은(는) ${maxLength}자 이하의 올바른 텍스트여야 합니다.`
+  })
 }
 
 export function parseModSaveInput(value: unknown, current?: ModEntry): ModSaveInput {
@@ -84,9 +73,9 @@ export function parseModSaveInput(value: unknown, current?: ModEntry): ModSaveIn
   }
 
   return {
-    name: parseText(input.name === undefined ? current?.name : input.name, '모드 이름', 120, true),
-    summary: parseText(input.summary === undefined ? current?.summary : input.summary, '모드 요약', 300),
-    description: parseText(input.description === undefined ? current?.description : input.description, '모드 설명', 20_000),
+    name: parseModText(input.name === undefined ? current?.name : input.name, '모드 이름', 120, true),
+    summary: parseModText(input.summary === undefined ? current?.summary : input.summary, '모드 요약', 300),
+    description: parseModText(input.description === undefined ? current?.description : input.description, '모드 설명', 20_000),
     repository: normalizeModRepository(input.repository === undefined ? current?.repository : input.repository),
     platforms: MOD_PLATFORMS.filter(platform => platforms.includes(platform))
   }
@@ -105,8 +94,8 @@ function toMod(row: ModRow): ModEntry {
     isOwner: row.isOwner,
     canEdit: row.canEdit,
     canDelete: row.canEdit,
-    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
-    updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
   }
 }
 
@@ -136,10 +125,14 @@ async function requireMod(database: DatabaseClient, modId: string, viewerId: str
   return mod
 }
 
-async function assertMutationRateLimit(database: DatabaseClient, userId: string): Promise<void> {
-  if (await isRateLimited(database, `mod-mutation:${userId}`, MOD_MUTATION_RATE_LIMITS)) {
-    throw createError({ statusCode: 429, statusMessage: '모드 변경 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' })
+async function requireModRepository(database: DatabaseClient, modId: string): Promise<string> {
+  const [mod] = await database<{ repository: string }[]>`
+    SELECT repository FROM mods WHERE id = ${modId}
+  `
+  if (!mod) {
+    throw createError({ statusCode: 404, statusMessage: '모드를 찾을 수 없습니다.' })
   }
+  return mod.repository
 }
 
 function rethrowSaveError(error: unknown): never {
@@ -167,15 +160,30 @@ export async function getMods(viewerId: string | null = null): Promise<ModListRe
   `
 
   const mods: ModListEntry[] = rows.map(row => ({ ...toMod(row), githubDescription: '' }))
+  const repositoryMods = new Map<string, ModListEntry[]>()
+  for (const mod of mods) {
+    try {
+      const repository = normalizeModRepository(mod.repository)
+      const entries = repositoryMods.get(repository)
+      if (entries) entries.push(mod)
+      else repositoryMods.set(repository, [mod])
+    } catch {
+      // 기존과 같이 유효하지 않거나 조회에 실패한 저장소의 About은 비워 둔다.
+    }
+  }
+  const repositories = [...repositoryMods.entries()]
   let nextIndex = 0
-  await Promise.all(Array.from({ length: Math.min(MOD_ABOUT_CONCURRENCY, mods.length) }, async () => {
-    while (nextIndex < mods.length) {
-      const mod = mods[nextIndex++]
-      if (!mod) return
+  // GitHub 유틸의 기존 타임아웃·재시도·마지막 성공값 캐시를 그대로 사용한다.
+  await Promise.all(Array.from({ length: Math.min(MOD_ABOUT_CONCURRENCY, repositories.length) }, async () => {
+    while (nextIndex < repositories.length) {
+      const entry = repositories[nextIndex++]
+      if (!entry) return
+      const [repository, entries] = entry
       try {
-        mod.githubDescription = await getModGitHubAbout(mod.repository)
+        const description = await getModGitHubAbout(repository)
+        for (const mod of entries) mod.githubDescription = description
       } catch {
-        mod.githubDescription = ''
+        // 한 저장소의 실패가 나머지 목록을 중단하지 않는다.
       }
     }
   }))
@@ -201,13 +209,8 @@ export async function getModDetail(modIdValue: unknown, viewerId: string | null 
 export async function getModCommits(modIdValue: unknown, branchValue: unknown): Promise<ModCommitResponse> {
   const modId = parseModId(modIdValue)
   const branch = branchValue === undefined ? undefined : parseModBranch(branchValue)
-  const [mod] = await getDatabase()<{ repository: string }[]>`
-    SELECT repository FROM mods WHERE id = ${modId}
-  `
-  if (!mod) {
-    throw createError({ statusCode: 404, statusMessage: '모드를 찾을 수 없습니다.' })
-  }
-  return getModGitHubCommits(mod.repository, branch)
+  const repository = await requireModRepository(getDatabase(), modId)
+  return getModGitHubCommits(repository, branch)
 }
 
 export async function getModReleases(modIdValue: unknown, pageValue: unknown): Promise<ModReleasePageResponse> {
@@ -218,20 +221,14 @@ export async function getModReleases(modIdValue: unknown, pageValue: unknown): P
     throw createError({ statusCode: 400, statusMessage: '릴리스 페이지는 1부터 1000 사이의 정수여야 합니다.' })
   }
 
-  const [mod] = await getDatabase()<{ repository: string }[]>`
-    SELECT repository FROM mods WHERE id = ${modId}
-  `
-  if (!mod) {
-    throw createError({ statusCode: 404, statusMessage: '모드를 찾을 수 없습니다.' })
-  }
-
-  return getModGitHubReleases(mod.repository, page)
+  const repository = await requireModRepository(getDatabase(), modId)
+  return getModGitHubReleases(repository, page)
 }
 
 export async function createMod(userId: string, inputValue: unknown): Promise<ModEntry> {
   const input = parseModSaveInput(inputValue)
   const database = getDatabase()
-  await assertMutationRateLimit(database, userId)
+  await assertModMutationRateLimit(userId)
   const github = await getModGitHubSnapshot(input.repository)
   const repository = normalizeModRepository(github.repository)
   let modId: string
@@ -263,7 +260,7 @@ export async function updateMod(userId: string, modIdValue: unknown, inputValue:
   }
 
   const input = parseModSaveInput(inputValue, current)
-  await assertMutationRateLimit(database, userId)
+  await assertModMutationRateLimit(userId)
   let repository = current.repository
   if (input.repository.toLowerCase() !== current.repository.toLowerCase()) {
     const github = await getModGitHubSnapshot(input.repository)
@@ -299,7 +296,7 @@ export async function deleteMod(userId: string, modIdValue: unknown): Promise<Mo
   if (!current.canDelete) {
     throw createError({ statusCode: 403, statusMessage: '모드는 등록자나 관리자만 삭제할 수 있습니다.' })
   }
-  await assertMutationRateLimit(database, userId)
+  await assertModMutationRateLimit(userId)
   const [deleted] = await database<{ id: string }[]>`
     DELETE FROM mods AS m
     WHERE m.id = ${modId} AND EXISTS (

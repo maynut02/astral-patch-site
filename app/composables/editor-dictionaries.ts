@@ -8,54 +8,23 @@ import type {
 
 export type EditorDictionaryRequestStatus = 'idle' | 'pending' | 'success' | 'error'
 
-const EMPTY_DICTIONARY_ENTRIES: EditorDictionaryEntriesResponse = {
-  entries: [],
-  total: 0,
-  page: 1,
-  pageSize: 50,
-  totalPages: 1
+function createEmptyDictionaryEntries(): EditorDictionaryEntriesResponse {
+  return { entries: [], total: 0, page: 1, pageSize: 50, totalPages: 1 }
 }
 
-// 용어집 목록·항목 조회와 생성 폼 상태를 한 곳에서 관리한다.
-export function useEditorDictionaries() {
-  const { loggedIn } = useUserSession()
-  const { showLoginRequiredToast } = useAppToast()
-
+export function useEditorDictionaryList() {
   const dictionaries = ref<EditorDictionary[]>([])
   const dictionariesStatus = ref<EditorDictionaryRequestStatus>('idle')
   const dictionariesError = ref('')
   const dictionariesRequestId = ref(0)
   const selectedDictionaryId = ref<string | null>(null)
 
-  const dictionaryEntries = ref<EditorDictionaryEntriesResponse>({ ...EMPTY_DICTIONARY_ENTRIES })
+  const dictionaryEntries = ref<EditorDictionaryEntriesResponse>(createEmptyDictionaryEntries())
   const dictionaryEntriesStatus = ref<EditorDictionaryRequestStatus>('idle')
   const dictionaryEntriesError = ref('')
   const dictionaryEntriesSearchInput = ref('')
   const dictionaryEntriesSearch = ref('')
   const dictionaryEntriesRequestId = ref(0)
-
-  const dictionaryModalOpen = ref(false)
-  const dictionaryEntryModalOpen = ref(false)
-  const dictionaryModalSaving = ref(false)
-  const dictionaryEntryModalSaving = ref(false)
-  const dictionaryModalError = ref('')
-  const dictionaryEntryModalError = ref('')
-
-  const dictionaryForm = reactive<{
-    name: string
-    description: string
-    visibility: EditorDictionaryVisibility
-  }>({
-    name: '',
-    description: '',
-    visibility: 'private'
-  })
-
-  const dictionaryEntryForm = reactive({
-    sourceText: '',
-    translation: '',
-    note: ''
-  })
 
   const selectedDictionary = computed(() => dictionaries.value.find(dictionary =>
     dictionary.id === selectedDictionaryId.value
@@ -79,7 +48,7 @@ export function useEditorDictionaries() {
 
       if (selectedDictionaryId.value && !response.dictionaries.some(dictionary => dictionary.id === selectedDictionaryId.value)) {
         selectedDictionaryId.value = null
-        dictionaryEntries.value = { ...EMPTY_DICTIONARY_ENTRIES }
+        dictionaryEntries.value = createEmptyDictionaryEntries()
       }
     } catch {
       if (requestId !== dictionariesRequestId.value) {
@@ -96,7 +65,7 @@ export function useEditorDictionaries() {
     const requestId = ++dictionaryEntriesRequestId.value
 
     if (!dictionaryId) {
-      dictionaryEntries.value = { ...EMPTY_DICTIONARY_ENTRIES }
+      dictionaryEntries.value = createEmptyDictionaryEntries()
       dictionaryEntriesStatus.value = 'idle'
       dictionaryEntriesError.value = ''
       return
@@ -144,6 +113,54 @@ export function useEditorDictionaries() {
     void loadDictionaryEntries()
   }
 
+  return {
+    dictionaries,
+    dictionariesStatus,
+    dictionariesError,
+    selectedDictionaryId,
+    selectedDictionary,
+    dictionaryEntries,
+    dictionaryEntriesStatus,
+    dictionaryEntriesError,
+    dictionaryEntriesSearchInput,
+    dictionaryEntriesSearch,
+    dictionaryEntryItems,
+    loadDictionaries,
+    loadDictionaryEntries,
+    selectDictionary,
+    runDictionaryEntrySearch
+  }
+}
+
+export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictionaryList>) {
+  const { dictionaries, dictionariesStatus, selectedDictionaryId, dictionaryEntries, dictionaryEntriesStatus, loadDictionaryEntries, loadDictionaries } = list
+
+  const { loggedIn } = useUserSession()
+  const { showLoginRequiredToast } = useAppToast()
+
+  const dictionaryModalOpen = ref(false)
+  const dictionaryEntryModalOpen = ref(false)
+  const dictionaryModalSaving = ref(false)
+  const dictionaryEntryModalSaving = ref(false)
+  const dictionaryModalError = ref('')
+  const dictionaryEntryModalError = ref('')
+
+  const dictionaryForm = reactive<{
+    name: string
+    description: string
+    visibility: EditorDictionaryVisibility
+  }>({
+    name: '',
+    description: '',
+    visibility: 'private'
+  })
+
+  const dictionaryEntryForm = reactive({
+    sourceText: '',
+    translation: '',
+    note: ''
+  })
+
   function openCreateDictionary(): void {
     if (!loggedIn.value) {
       showLoginRequiredToast('editor-dictionary-login-required')
@@ -181,7 +198,7 @@ export function useEditorDictionaries() {
       dictionaries.value = [dictionary, ...dictionaries.value]
       dictionariesStatus.value = 'success'
       selectedDictionaryId.value = dictionary.id
-      dictionaryEntries.value = { ...EMPTY_DICTIONARY_ENTRIES }
+      dictionaryEntries.value = createEmptyDictionaryEntries()
       dictionaryEntriesStatus.value = 'idle'
       dictionaryModalOpen.value = false
     } catch {
@@ -238,17 +255,6 @@ export function useEditorDictionaries() {
   }
 
   return {
-    dictionaries,
-    dictionariesStatus,
-    dictionariesError,
-    selectedDictionaryId,
-    selectedDictionary,
-    dictionaryEntries,
-    dictionaryEntriesStatus,
-    dictionaryEntriesError,
-    dictionaryEntriesSearchInput,
-    dictionaryEntriesSearch,
-    dictionaryEntryItems,
     dictionaryModalOpen,
     dictionaryEntryModalOpen,
     dictionaryModalSaving,
@@ -257,9 +263,6 @@ export function useEditorDictionaries() {
     dictionaryEntryModalError,
     dictionaryForm,
     dictionaryEntryForm,
-    loadDictionaries,
-    selectDictionary,
-    runDictionaryEntrySearch,
     openCreateDictionary,
     createDictionary,
     openCreateDictionaryEntry,

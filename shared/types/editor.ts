@@ -17,16 +17,7 @@ export type EditorDiffMode = 'unified' | 'split'
 
 export const EDITOR_ALL_CATEGORY_VALUE = '__all_category__'
 export const EDITOR_ALL_REVISION_VALUE = '__all_revision__'
-
-export interface EditorSelectOption {
-  label: string
-  value: string
-}
-
-export interface EditorFiltersResponse {
-  categories: EditorSelectOption[]
-  revisions: EditorSelectOption[]
-}
+export const MAX_TRANSLATION_CHARACTERS = 10_000
 
 export type EditorChangeStatus = 'pending' | 'approved' | 'rejected' | 'superseded'
 export type EditorChangeKind = 'translation_edit' | 'retain_confirmation'

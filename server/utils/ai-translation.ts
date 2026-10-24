@@ -1,7 +1,8 @@
-import type { EditorAiTranslationResponse } from '#shared/types/editor'
+import { MAX_TRANSLATION_CHARACTERS, type EditorAiTranslationResponse } from '#shared/types/editor'
 import { createError } from 'h3'
 import { getDatabase } from './database'
 import { getTextLength } from './validation'
+import { logServerError } from './server-log'
 
 interface AiTranslationSourceRow {
   itemId: string
@@ -31,7 +32,6 @@ interface GatewayError {
 
 const AI_TRANSLATION_MODEL = 'gpt-6-luna'
 const MAX_SOURCE_CHARACTERS = 40_000
-const MAX_TRANSLATION_CHARACTERS = 10_000
 
 function buildTranslationPrompt(source: AiTranslationSourceRow): string {
   return [
@@ -152,7 +152,7 @@ export async function generateEditorAiTranslation(
     })
   } catch (error: unknown) {
     const status = getGatewayStatus(error)
-    console.error('[ai-translation] gateway request failed', {
+    logServerError('ai-translation', 'gateway request failed', {
       status,
       message: error instanceof Error ? error.message : 'Unknown error'
     })

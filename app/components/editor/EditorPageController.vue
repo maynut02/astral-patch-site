@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useEditorVisualViewportInset } from '~/composables/editor-visual-viewport'
+
 const props = withDefaults(defineProps<{
   totalPages: number
   disabled?: boolean
@@ -9,11 +11,8 @@ const props = withDefaults(defineProps<{
 const page = defineModel<number>('page', { required: true })
 const pageInput = ref(String(page.value))
 const pagePopoverOpen = ref(false)
-const keyboardInset = ref(0)
 const isPageInputFocused = ref(false)
-let visualViewport: VisualViewport | null = null
-
-const KEYBOARD_INSET_THRESHOLD = 80
+const { keyboardInset, updateKeyboardInset } = useEditorVisualViewportInset(isPageInputFocused)
 
 const normalizedTotalPages = computed(() => Math.max(1, Math.trunc(props.totalPages) || 1))
 
@@ -43,18 +42,6 @@ function goToInputPage(): void {
   setPage(requestedPage)
 }
 
-function updateKeyboardInset(): void {
-  if (!isPageInputFocused.value || !visualViewport || visualViewport.scale !== 1) {
-    keyboardInset.value = 0
-    return
-  }
-
-  const visualViewportBottom = visualViewport.offsetTop + visualViewport.height
-  const nextInset = Math.max(0, window.innerHeight - visualViewportBottom)
-
-  keyboardInset.value = nextInset >= KEYBOARD_INSET_THRESHOLD ? Math.round(nextInset) : 0
-}
-
 function handlePageInputFocus(event: FocusEvent): void {
   isPageInputFocused.value = true
 
@@ -79,20 +66,6 @@ function handlePageInputBlur(): void {
   isPageInputFocused.value = false
   keyboardInset.value = 0
 }
-
-onMounted(() => {
-  visualViewport = window.visualViewport
-
-  window.addEventListener('resize', updateKeyboardInset)
-  visualViewport?.addEventListener('resize', updateKeyboardInset)
-  visualViewport?.addEventListener('scroll', updateKeyboardInset)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateKeyboardInset)
-  visualViewport?.removeEventListener('resize', updateKeyboardInset)
-  visualViewport?.removeEventListener('scroll', updateKeyboardInset)
-})
 
 watch(page, (value) => {
   pageInput.value = String(value)

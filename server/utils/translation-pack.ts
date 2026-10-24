@@ -8,6 +8,7 @@ import type {
 import type { CurrentSessionUser } from './auth-user'
 import { getDatabase, type DatabaseClient } from './database'
 import { deleteR2Object, getTranslationPackBucketConfig, putR2Object, type R2BucketConfig } from './r2'
+import { logServerError } from './server-log'
 
 // Runtime translation pack consumed by the Korean plugin. Every route reads the INT_STEAM
 // translation units, so one pack serves all routes; the plugin picks the target lang asset
@@ -138,19 +139,24 @@ async function deleteRetiredPacks(database: DatabaseClient, config: R2BucketConf
     ORDER BY number
   `
 
-  for (const pack of retired) {
-    try {
-      await deleteR2Object(config, pack.objectKey)
-      await database`
-        UPDATE translation_pack_publications
-        SET object_deleted_at = now()
-        WHERE number = ${pack.number}
-      `
-    } catch (error: unknown) {
-      // Left with object_deleted_at NULL, so the next publish retries it.
-      console.error(`[translation-pack] failed to delete retired pack ${pack.objectKey}`, error)
+  let nextIndex = 0
+  await Promise.all(Array.from({ length: Math.min(4, retired.length) }, async () => {
+    while (nextIndex < retired.length) {
+      const pack = retired[nextIndex++]
+      if (!pack) return
+      try {
+        await deleteR2Object(config, pack.objectKey)
+        await database`
+          UPDATE translation_pack_publications
+          SET object_deleted_at = now()
+          WHERE number = ${pack.number}
+        `
+      } catch (error: unknown) {
+        // 실패한 객체는 NULL로 남아 다음 발행 때 기존과 같이 재시도한다.
+        logServerError('translation-pack', `failed to delete retired pack ${pack.objectKey}`, error)
+      }
     }
-  }
+  }))
 }
 
 export async function publishTranslationPack(publisher: CurrentSessionUser): Promise<AdminTranslationPackPublication> {
@@ -265,7 +271,7 @@ export async function publishTranslationPack(publisher: CurrentSessionUser): Pro
   // Retention runs after the response so slow deletes cannot push the request past the proxy
   // timeout; a failed or interrupted cleanup is retried by the next publish.
   void deleteRetiredPacks(database, config).catch((error: unknown) => {
-    console.error('[translation-pack] retention cleanup failed', error)
+    logServerError('translation-pack', 'retention cleanup failed', error)
   })
 
   return publication

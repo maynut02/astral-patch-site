@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { UserRole } from '~/utils/user-role'
+import { getUserRoleMeta, type UserRole } from '~/utils/user-role'
 import {
   formatHandle,
   getPublicProfilePath,
@@ -28,7 +28,8 @@ const props = withDefaults(defineProps<{
 const normalizedHandle = computed(() => normalizeHandle(props.handle).replace(/^@+/, ''))
 const displayHandle = computed(() => formatHandle(normalizedHandle.value, props.fallback))
 const profilePath = computed(() => props.to || getPublicProfilePath(normalizedHandle.value))
-const hasRoleIcon = computed(() => hasUserRoleIcon(props.role))
+const roleMeta = computed(() => getUserRoleMeta(props.role))
+const hasRoleIcon = computed(() => roleMeta.value !== null)
 
 function handleClick(event: MouseEvent) {
   if (props.stopPropagation) {
@@ -53,9 +54,18 @@ function handleClick(event: MouseEvent) {
       class="min-w-0 truncate"
       :class="[textClass, hasRoleIcon ? '-mt-0.5' : '']"
     >{{ displayHandle }}</span>
-    <AppUserRoleIcon
-      :role="role"
-      :icon-class="iconClass"
-    />
+    <UTooltip
+      v-if="roleMeta"
+      :text="roleMeta.label"
+      :delay-duration="0"
+    >
+      <UIcon
+        :name="roleMeta.icon"
+        role="img"
+        :aria-label="roleMeta.label"
+        class="shrink-0 text-muted"
+        :class="iconClass"
+      />
+    </UTooltip>
   </span>
 </template>

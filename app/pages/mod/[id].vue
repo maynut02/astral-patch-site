@@ -3,13 +3,13 @@ import type { ModDetailResponse, ModEntry } from '#shared/types/mod'
 import { getRequestErrorMessage } from '~/utils/request-error'
 
 const route = useRoute()
-const { loggedIn, user } = useUserSession()
+const { loggedIn } = useUserSession()
 const { showToast } = useAppToast()
 const editorOpen = ref(false)
 const deleteOpen = ref(false)
 const editorTarget = ref<{ id: string, session: string } | null>(null)
 const deletedId = ref('')
-const sessionKey = computed(() => JSON.stringify([loggedIn.value, user.value?.id, user.value?.role]))
+const sessionKey = useSessionKey()
 const permissionSession = ref<string | null>(sessionKey.value)
 const modId = computed(() => typeof route.params.id === 'string' ? route.params.id : '')
 const { data, status, error, refresh } = await useFetch<ModDetailResponse>(() => `/api/mods/${encodeURIComponent(modId.value)}`)
@@ -21,15 +21,22 @@ useAstralPageSeo(
   () => detail.value?.github?.description || '모드의 소개, GitHub README, 최근 커밋과 버전별 다운로드를 확인하세요.'
 )
 
+function canManage(action: 'edit' | 'delete', id = modId.value): boolean {
+  return managementEnabled.value
+    && loggedIn.value
+    && Boolean(action === 'edit' ? detail.value?.mod.canEdit : detail.value?.mod.canDelete)
+    && modId.value === id
+}
+
 function openEditor(): void {
-  if (!managementEnabled.value || !loggedIn.value || !detail.value?.mod.canEdit) return
+  if (!canManage('edit')) return
   deleteOpen.value = false
   editorTarget.value = { id: modId.value, session: sessionKey.value }
   editorOpen.value = true
 }
 
 function openDelete(): void {
-  if (!managementEnabled.value || !loggedIn.value || !detail.value?.mod.canDelete) return
+  if (!canManage('delete')) return
   editorOpen.value = false
   editorTarget.value = null
   deleteOpen.value = true
@@ -44,7 +51,7 @@ async function refreshDetail(): Promise<void> {
 async function handleSaved(mod: ModEntry): Promise<void> {
   const target = editorTarget.value
   if (!target || target.id !== mod.id || target.session !== sessionKey.value
-    || !managementEnabled.value || !loggedIn.value || !detail.value?.mod.canEdit || modId.value !== mod.id) return
+    || !canManage('edit', mod.id)) return
   editorTarget.value = null
   if (data.value?.mod.id === mod.id) data.value = { ...data.value, mod }
   await Promise.allSettled([
@@ -57,7 +64,7 @@ async function handleSaved(mod: ModEntry): Promise<void> {
 }
 
 async function handleDeleted(id: string): Promise<void> {
-  if (!managementEnabled.value || !loggedIn.value || !detail.value?.mod.canDelete || modId.value !== id) return
+  if (!canManage('delete', id)) return
   deletedId.value = id
   deleteOpen.value = false
   editorOpen.value = false

@@ -5,8 +5,7 @@ import {
   PARTY_ORDERS,
   PARTY_ROOM_ID_PATTERN,
   PARTY_SPECTATOR_ID,
-  PARTY_UNSELECTED_ID,
-  getPartyCharacterImage,
+  getPartyCharacterImage as characterImage,
   getPartyTextLength,
   type PartyCharacter,
   type PartyCharacterId,
@@ -14,7 +13,9 @@ import {
   type PartyRoomSummary
 } from '#shared/types/party'
 import { readBrowserStorage, writeBrowserStorage } from '~/utils/browser-storage'
-import { getRequestErrorMessage } from '~/utils/request-error'
+import { getRequestErrorMessage, getRequestErrorStatus } from '~/utils/request-error'
+import { validatePartyNickname } from '~/utils/party-nickname'
+import { getPartyCharacterIcon as characterIcon, getPartyCharacterName, formatPartyTime as formatTime, orderColors, orderHoverColors } from '~/utils/party-ui'
 
 definePageMeta({ partyChat: true, key: route => route.path })
 const route = useRoute()
@@ -32,8 +33,9 @@ const room = ref<PartyRoomSummary | null>(handoff)
 const roomError = ref<{ statusCode?: number, message?: string } | null>(null)
 const roomStatus = ref<'idle' | 'pending' | 'success' | 'error'>(handoff ? 'success' : 'idle')
 const { data: characters, error: charactersError, status: charactersStatus, refresh: refreshCharacters } = await useFetch<PartyCharacter[]>('/api/party/characters', { default: () => [] })
-const { status, messages, participants, participantId, activeCharacterId, activeOrder, error, admissionErrorCode, recovering, joined, loadingOlder, hasOlder, historyError, join, send, takeLocalMessage, loadOlder, changeCharacter, changeOrder, getResumeContext, clearResumeContext, retryAdmission } = usePartyChat(roomId)
+const { status, messages, appendedMessageVersion, participants, participantId, activeCharacterId, activeOrder, error, admissionErrorCode, recovering, joined, loadingOlder, hasOlder, historyError, join, send, takeLocalMessage, loadOlder, changeCharacter, changeOrder, getResumeContext, clearResumeContext, retryAdmission } = usePartyChat(roomId)
 const nickname = ref(providedNickname || '')
+const nicknameValidation = computed(() => validatePartyNickname(nickname.value))
 const nicknameError = ref('')
 const submittingNickname = ref(false)
 const showNicknameModal = ref(!providedNickname && PARTY_ROOM_ID_PATTERN.test(roomId))
@@ -130,7 +132,7 @@ async function refreshRoom() {
     roomStatus.value = 'success'
   } catch (cause) {
     if (isPageUnmounted || controller.signal.aborted || generation !== roomRequestGeneration) return
-    if (resume && isNicknameTakenResponse(cause)) {
+    if (resume && getRequestErrorStatus(cause) === 409) {
       // 소유권이 확인되지 않은 재개 기록만 버리고, 새로 고침 복구에서는 모달을 강제하지 않는다.
       clearResumeContext()
       roomError.value = {
@@ -141,28 +143,14 @@ async function refreshRoom() {
       return
     }
     if (room.value || joined.value) return
-    const statusCode = (cause as { statusCode?: number, data?: { statusCode?: number } })?.statusCode
-      ?? (cause as { data?: { statusCode?: number } })?.data?.statusCode
     roomError.value = {
-      statusCode,
+      statusCode: getRequestErrorStatus(cause),
       message: getRequestErrorMessage(cause, '채팅방을 열지 못했습니다.')
     }
     roomStatus.value = 'error'
   }
 }
 
-const orderColors: Record<PartyOrder, string> = {
-  P1: 'bg-error/15 text-error',
-  P2: 'bg-success/15 text-success',
-  P3: 'bg-info/15 text-info',
-  P4: 'bg-warning/15 text-warning'
-}
-const orderHoverColors: Record<PartyOrder, string> = {
-  P1: 'enabled:hover:bg-error/15',
-  P2: 'enabled:hover:bg-success/15',
-  P3: 'enabled:hover:bg-info/15',
-  P4: 'enabled:hover:bg-warning/15'
-}
 const characterNames = computed(() => new Map<PartyCharacterId, string>(characters.value.map(character => [character.id, character.name])))
 const selectedCharacterName = computed(() => characterName(characterId.value))
 const activeParticipantIds = computed(() => new Set(participants.value.map(participant => participant.id)))
@@ -222,7 +210,7 @@ onMounted(() => {
 
   if (!providedNickname) nickname.value = readBrowserStorage('party-nickname') || ''
   const trimmedNickname = nickname.value.trim()
-  const validNickname = Boolean(trimmedNickname) && getPartyTextLength(trimmedNickname) <= PARTY_MAX_NICKNAME_LENGTH
+  const validNickname = !nicknameValidation.value.error
   const storedResume = validNickname ? getResumeContext(trimmedNickname) : null
   if (providedNickname && validNickname) profileReady.value = true
   if (storedResume) {
@@ -263,9 +251,9 @@ function handleComposerBlur() {
 function enterRoom() {
   if (isPageUnmounted || connecting.value) return
   formError.value = ''
-  const trimmed = nickname.value.trim()
-  if (!trimmed || getPartyTextLength(trimmed) > PARTY_MAX_NICKNAME_LENGTH) {
-    formError.value = '20자 이내의 닉네임을 입력해 주세요.'
+  const { nickname: trimmed, error: validationError } = nicknameValidation.value
+  if (validationError) {
+    formError.value = validationError
     return
   }
   nickname.value = trimmed
@@ -273,17 +261,11 @@ function enterRoom() {
   join({ nickname: nickname.value, characterId: PARTY_SPECTATOR_ID, order: null }, getResumeContext(nickname.value) ?? undefined)
 }
 
-function isNicknameTakenResponse(cause: unknown): boolean {
-  if (!cause || typeof cause !== 'object') return false
-  const response = cause as { statusCode?: unknown, data?: { statusCode?: unknown } }
-  return response.statusCode === 409 || response.data?.statusCode === 409
-}
-
 async function submitNickname() {
   if (submittingNickname.value || isPageUnmounted) return
-  const name = nickname.value.trim()
-  if (!name || getPartyTextLength(name) > PARTY_MAX_NICKNAME_LENGTH) {
-    nicknameError.value = '20자 이내의 닉네임을 입력해 주세요.'
+  const { nickname: name, error: validationError } = nicknameValidation.value
+  if (validationError) {
+    nicknameError.value = validationError
     return
   }
 
@@ -312,7 +294,7 @@ async function submitNickname() {
     enterRoom()
   } catch (cause) {
     if (isPageUnmounted || controller.signal.aborted) return
-    if (isNicknameTakenResponse(cause)) {
+    if (getRequestErrorStatus(cause) === 409) {
       nicknameError.value = '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
     } else {
       formError.value = getRequestErrorMessage(cause, '채팅방에 들어가지 못했습니다. 다시 시도해 주세요.')
@@ -443,34 +425,13 @@ async function scrollToBottom() {
   unread.value = 0
 }
 
-watch(messages, (current, previous) => {
-  const latest = current.at(-1)
-  if (!latest) return
-  const latestKey = latest.kind === 'chat' ? latest.clientMessageId : latest.id
-  if (previous.some((message) => {
-    const key = message.kind === 'chat' ? message.clientMessageId : message.id
-    return key === latestKey
-  })) return
+watch(appendedMessageVersion, () => {
   if (nearBottom.value) void scrollToBottom()
   else unread.value++
 })
 
-function characterImage(id: PartyCharacterId) {
-  return getPartyCharacterImage(id)
-}
-
 function characterName(id: PartyCharacterId) {
-  if (id === PARTY_UNSELECTED_ID) return '미선택'
-  return id === PARTY_SPECTATOR_ID ? '관전' : characterNames.value.get(id) || `캐릭터 #${id}`
-}
-
-function characterIcon(id: PartyCharacterId) {
-  if (id === PARTY_UNSELECTED_ID) return 'i-tabler-user-question'
-  return id === PARTY_SPECTATOR_ID ? 'i-tabler-eye' : undefined
-}
-
-function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return getPartyCharacterName(id, characterNames.value)
 }
 
 async function copyLink() {
@@ -955,7 +916,7 @@ function togglePip() {
                           v-model="draft"
                           aria-label="채팅 메시지"
                           :placeholder="status === 'connected' ? '메시지 입력...' : '다시 연결되면 메시지를 보낼 수 있습니다.'"
-                          :maxlength="2000"
+                          :maxlength="PARTY_MAX_TEXT_LENGTH"
                           :rows="1"
                           class="block w-full resize-none appearance-none border-0 bg-transparent p-4 text-base/5 text-highlighted placeholder:text-dimmed focus:outline-none md:text-sm"
                           @input="onComposerInput"
@@ -1001,7 +962,7 @@ function togglePip() {
                 <UInput
                   v-model="nickname"
                   placeholder="파티원에게 표시할 이름"
-                  :maxlength="40"
+                  :maxlength="PARTY_MAX_NICKNAME_LENGTH"
                   required
                   autofocus
                   autocomplete="nickname"
@@ -1029,7 +990,7 @@ function togglePip() {
               color="info"
               variant="soft"
               :loading="submittingNickname"
-              :disabled="submittingNickname || !nickname.trim() || getPartyTextLength(nickname.trim()) > PARTY_MAX_NICKNAME_LENGTH"
+              :disabled="submittingNickname || Boolean(nicknameValidation.error)"
             />
           </template>
         </UModal>

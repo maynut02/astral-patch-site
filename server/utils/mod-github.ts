@@ -2,22 +2,12 @@ import { Buffer } from 'node:buffer'
 import { createError } from 'h3'
 import type { ModCommit, ModCommitResponse, ModGitHubSnapshot, ModReleasePageResponse } from '#shared/types/mod'
 import type { ReleaseAssetInfo, ReleaseNoteEntry } from '#shared/types/releases'
+import { getGitHubErrorDetails as getErrorDetails, toGitHubError } from './github/errors'
+import { asNumber, asString, isRecord } from './github/normalizers'
 
 const RELEASE_PAGE_SIZE = 20
 const CACHE_MAX_AGE = 5 * 60
 const README_MAX_LENGTH = 100_000
-
-function asString(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
-
-function asNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
 
 export function normalizeModRepository(value: unknown): string {
   // 원문을 검사해 경로 탐색, 인증 정보, 이스케이프 구분자, 포트와 다른 호스트를 차단한다.
@@ -70,45 +60,6 @@ function fetchGitHub(repository: string, endpoint = '', query: Record<string, st
     retry: 1,
     retryDelay: 250,
     retryStatusCodes: [408, 500, 502, 503, 504]
-  })
-}
-
-function getErrorDetails(error: unknown) {
-  const value = error as {
-    statusCode?: number
-    status?: number
-    data?: { message?: unknown }
-    response?: { status?: number, headers?: { get?: (name: string) => string | null } }
-  } | null
-  return {
-    status: value?.response?.status ?? value?.statusCode ?? value?.status ?? 0,
-    message: asString(value?.data?.message),
-    remaining: value?.response?.headers?.get?.('x-ratelimit-remaining'),
-    retryAfter: value?.response?.headers?.get?.('retry-after')
-  }
-}
-
-function toGitHubError(error: unknown) {
-  const details = getErrorDetails(error)
-  if (details.status === 429 || (details.status === 403 && (
-    details.remaining === '0' || details.retryAfter || /rate.?limit|abuse/i.test(details.message)
-  ))) {
-    return createError({
-      statusCode: 429,
-      statusMessage: 'GitHub API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.'
-    })
-  }
-  if (details.status === 404) {
-    return createError({
-      statusCode: 404,
-      statusMessage: 'GitHub 저장소를 찾을 수 없거나 비공개 저장소입니다.'
-    })
-  }
-  return createError({
-    statusCode: 502,
-    statusMessage: details.status === 401 || details.status === 403
-      ? 'GitHub 저장소에 접근할 수 없습니다. 잠시 후 다시 시도해 주세요.'
-      : 'GitHub 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'
   })
 }
 

@@ -1,8 +1,10 @@
+import { PARTY_ROOM_ID_LENGTH } from '#shared/types/party'
+
 export function sanitizePartyNumberInput(event: Event): void {
   const input = event.target as HTMLInputElement
   const original = input.value
   const cursor = input.selectionStart ?? original.length
-  const value = original.replace(/[^0-9]/g, '').slice(0, 6)
+  const value = original.replace(/[^0-9]/g, '').slice(0, PARTY_ROOM_ID_LENGTH)
   if (value === original) return
 
   // Update the native input before UInput reads it, even if the model is unchanged.
@@ -20,7 +22,7 @@ export function pastePartyNumber(event: ClipboardEvent): void {
 
   const start = input.selectionStart ?? input.value.length
   const end = input.selectionEnd ?? start
-  const available = Math.max(0, 6 - (input.value.length - (end - start)))
+  const available = Math.max(0, PARTY_ROOM_ID_LENGTH - (input.value.length - (end - start)))
   input.setRangeText(digits.slice(0, available), start, end, 'end')
   input.dispatchEvent(new Event('input', { bubbles: true }))
 }

@@ -1,5 +1,6 @@
 import { createError } from 'h3'
 import { withDatabaseRetry, type DatabaseClient } from './database'
+import { sourceVersionFields, sourceVersionJoins } from './editor/sql'
 import type {
   EditorChangeKind,
   EditorChangeStatus,
@@ -283,20 +284,12 @@ export async function getEditorSourceChanges(
         'category', tu.namespace,
         'unitKey', tu.unit_key,
         'changeType', sc.change_type,
-        'beforeCnS', old_sv.cn_s,
-        'beforeEn', old_sv.en,
-        'beforeJp', old_sv.jp,
-        'beforeCnT', old_sv.cn_t,
-        'afterCnS', new_sv.cn_s,
-        'afterEn', new_sv.en,
-        'afterJp', new_sv.jp,
-        'afterCnT', new_sv.cn_t,
+        ${sourceVersionFields(database, true)},
         'createdAt', sc.created_at
       ) AS entry
     FROM source_changes sc
     JOIN translation_units tu ON tu.id = sc.unit_id
-    LEFT JOIN source_versions old_sv ON old_sv.id = sc.old_source_version_id
-    LEFT JOIN source_versions new_sv ON new_sv.id = sc.new_source_version_id
+    ${sourceVersionJoins(database)}
     WHERE sc.revision_id = ${revisionId}
     ORDER BY tu.namespace ASC, tu.unit_key ASC, sc.unit_id ASC
     LIMIT ${EDITOR_LOG_PAGE_SIZE}

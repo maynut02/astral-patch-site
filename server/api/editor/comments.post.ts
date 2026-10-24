@@ -7,7 +7,7 @@ import { parseUuid } from '../../utils/validation'
 export default defineEventHandler(async (event) => {
   const user = await requireCurrentSessionUser(event)
   await assertEditorCommentRateLimit(user.id)
-  const body = await readJsonBody<{ unitId?: unknown, body?: unknown }>(event)
+  const body = await readJsonBody(event)
   const unitId = parseUuid(body.unitId, 'Invalid comment item id')
 
   return createEditorComment(unitId, user.id, body.body)

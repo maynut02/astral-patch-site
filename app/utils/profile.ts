@@ -1,10 +1,10 @@
-export const HANDLE_MAX_LENGTH = 20
-export const GAME_PROFILE_VALUE_MAX_LENGTH = 64
-export const SOCIAL_LINK_LABEL_MAX_LENGTH = 30
-export const SOCIAL_LINK_URL_MAX_LENGTH = 500
-export const SOCIAL_LINK_MAX_COUNT = 10
-
-const HANDLE_PATTERN = /^[A-Za-z0-9]+$/
+import {
+  GAME_PROFILE_VALUE_MAX_LENGTH,
+  HANDLE_CHARACTER_PATTERN,
+  HANDLE_MAX_LENGTH,
+  SOCIAL_LINK_LABEL_MAX_LENGTH,
+  SOCIAL_LINK_URL_MAX_LENGTH
+} from '#shared/types/profile'
 
 export function normalizeHandle(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -17,7 +17,7 @@ export function validateHandle(value: string): string {
     return '핸들을 입력해 주세요.'
   }
 
-  if (!HANDLE_PATTERN.test(handle)) {
+  if (!HANDLE_CHARACTER_PATTERN.test(handle)) {
     return '핸들은 영문과 숫자만 사용할 수 있어요.'
   }
 
@@ -132,22 +132,6 @@ export function getSocialLinkIcon(value: string): string | null {
   } catch {
     return null
   }
-}
-
-export function getErrorStatus(error: unknown): number | undefined {
-  if (typeof error !== 'object' || error === null) {
-    return undefined
-  }
-
-  if ('status' in error && typeof error.status === 'number') {
-    return error.status
-  }
-
-  if ('statusCode' in error && typeof error.statusCode === 'number') {
-    return error.statusCode
-  }
-
-  return undefined
 }
 
 export function formatHandle(value: unknown, fallback = '@handle'): string {

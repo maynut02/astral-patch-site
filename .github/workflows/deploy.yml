@@ -99,23 +99,10 @@ jobs:
 
             APP_PORT="$(sed -n 's/^ASTRAL_APP_PORT=//p' .env | tail -1 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             APP_PORT="${APP_PORT:-3001}"
-            case "$APP_PORT" in
-              *[!0-9]*|'')
-                echo "Invalid ASTRAL_APP_PORT: $APP_PORT" >&2
-                exit 1
-                ;;
-            esac
-            if [ "$APP_PORT" -lt 1 ] || [ "$APP_PORT" -gt 65535 ]; then
-              echo "ASTRAL_APP_PORT must be between 1 and 65535: $APP_PORT" >&2
-              exit 1
-            fi
 
-            # WebSocket 프록시를 포함한 Nginx 설정을 저장소 템플릿과 동기화한다.
+            # WebSocket 프록시를 포함한 Nginx 설정을 저장소 템플릿과 동기화한다(포트 검증 포함).
             NGINX_CONFIG="$(mktemp)"
-            sed \
-              -e 's|__ASTRAL_DOMAIN__|astral.maynutlab.com|g' \
-              -e "s|__ASTRAL_APP_PORT__|${APP_PORT}|g" \
-              deploy/nginx/astral-patch-site.conf.template > "$NGINX_CONFIG"
+            sh deploy/render-nginx-config.sh deploy/nginx/astral-patch-site.conf.template astral.maynutlab.com "$APP_PORT" > "$NGINX_CONFIG"
             sudo -n install -m 0644 "$NGINX_CONFIG" /etc/nginx/conf.d/astral-patch-site.conf
             rm -f "$NGINX_CONFIG"
             sudo -n nginx -t

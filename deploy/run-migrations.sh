@@ -48,6 +48,26 @@ migration_files() {
   find "$MIGRATION_DIR" -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9]_*.sql' -print | sort
 }
 
+# scripts/check-migrations.mjs와 같은 규칙: 0001부터 빈 번호 없이 이어져야 한다.
+check_migration_sequence() {
+  expected=1
+  for file in $(migration_files); do
+    name="$(basename "$file")"
+    prefix="$(printf '%s' "$name" | cut -c1-4)"
+    expected_prefix="$(printf '%04d' "$expected")"
+    if [ "$prefix" != "$expected_prefix" ]; then
+      echo "[migrate] migration sequence is incomplete: expected $expected_prefix, found $name" >&2
+      exit 1
+    fi
+    expected=$((expected + 1))
+  done
+
+  if [ "$expected" -eq 1 ]; then
+    echo "[migrate] no migrations found in $MIGRATION_DIR" >&2
+    exit 1
+  fi
+}
+
 adopt_existing_schema() {
   if [ "${ASTRAL_MIGRATION_ADOPT_CONFIRM:-}" != "YES" ]; then
     echo "[migrate] refusing to adopt migration history without ASTRAL_MIGRATION_ADOPT_CONFIRM=YES" >&2
@@ -107,6 +127,7 @@ if [ ! -d "$MIGRATION_DIR" ]; then
   exit 1
 fi
 
+check_migration_sequence
 wait_for_database
 ensure_history_table
 

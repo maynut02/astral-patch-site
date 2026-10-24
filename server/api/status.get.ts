@@ -1,4 +1,4 @@
-import { getPatchWatcherStatus } from '../utils/patch-watcher-status'
+import { getPatchWatcherStatus } from '../utils/patch-watcher/status'
 
 export default defineCachedEventHandler(async () => getPatchWatcherStatus(), {
   maxAge: 30,

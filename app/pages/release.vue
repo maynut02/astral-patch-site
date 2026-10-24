@@ -4,14 +4,11 @@ import type {
   ReleaseHistoryPageResponse,
   ReleaseNoteEntry
 } from '#shared/types/releases'
+import { formatCount, formatDate, formatFileSize, formatFetchedAgo as formatRelativeFetchedAgo } from '~/utils/format'
+import { useRelativeNow } from '~/composables/use-relative-now'
+import { RELEASE_TAB_ITEMS as releaseTabs } from '~/utils/patch-routes'
 
 useAstralPageSeo('릴리즈 노트')
-
-const releaseTabs: Array<{ label: string, value: ReleaseFeedKey, icon: string }> = [
-  { label: '한글패치', value: 'patch', icon: 'i-tabler-package' },
-  { label: '패치 프로그램', value: 'windowsPatcher', icon: 'i-tabler-brand-windows' },
-  { label: '패치 앱', value: 'androidPatcher', icon: 'i-tabler-brand-android' }
-]
 
 const activeTab = ref<ReleaseFeedKey>('patch')
 const expandedDownloads = ref<Set<string>>(new Set())
@@ -64,7 +61,7 @@ const loadMoreTrigger = ref<HTMLElement | null>(null)
 let loadMoreObserver: IntersectionObserver | undefined
 
 function sortReleaseEntries(entries: ReleaseNoteEntry[]): ReleaseNoteEntry[] {
-  return entries.sort((left, right) => {
+  return [...entries].sort((left, right) => {
     const leftTime = new Date(left.publishedAt).getTime()
     const rightTime = new Date(right.publishedAt).getTime()
     return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime)
@@ -85,12 +82,12 @@ function mergeReleaseEntries(
 }
 
 function applyHistoryPage(page: ReleaseHistoryPageResponse, replace = false): void {
-  const next = replace ? createEmptyReleaseGroups() : { ...releases.value }
+  const next = createEmptyReleaseGroups()
 
   for (const key of Object.keys(next) as ReleaseFeedKey[]) {
     next[key] = replace
       ? [...page.releases[key]]
-      : mergeReleaseEntries(next[key], page.releases[key])
+      : mergeReleaseEntries(releases.value[key], page.releases[key])
   }
 
   releases.value = next
@@ -114,26 +111,9 @@ const activeTabLabel = computed(() =>
   releaseTabs.find(tab => tab.value === activeTab.value)?.label ?? '릴리즈'
 )
 
-const numberFormatter = new Intl.NumberFormat('ko-KR')
-const dateFormatter = new Intl.DateTimeFormat('ko-KR', {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-  timeZone: 'Asia/Seoul'
-})
-
-const relativeTimeNow = ref<number | null>(null)
-let relativeTimeTimer: ReturnType<typeof setInterval> | undefined
+const relativeTimeNow = useRelativeNow()
 
 onMounted(() => {
-  relativeTimeNow.value = Date.now()
-  relativeTimeTimer = setInterval(() => {
-    relativeTimeNow.value = Date.now()
-  }, 1000)
-
   loadMoreObserver = new IntersectionObserver((entries) => {
     if (entries.some(entry => entry.isIntersecting)) {
       void loadMoreReleaseHistory()
@@ -148,10 +128,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (relativeTimeTimer) {
-    clearInterval(relativeTimeTimer)
-  }
-
   loadMoreObserver?.disconnect()
 })
 
@@ -179,60 +155,8 @@ function updateActiveTab(value: string | number): void {
   }
 }
 
-function formatCount(value: number): string {
-  return numberFormatter.format(value)
-}
-
-function formatDate(value: string): string {
-  if (!value) {
-    return '시간 정보 없음'
-  }
-
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '시간 정보 없음' : dateFormatter.format(date)
-}
-
 function formatFetchedAgo(value: string): string {
-  if (!value) {
-    return '시간 정보 없음'
-  }
-
-  const fetchedAt = new Date(value).getTime()
-  if (Number.isNaN(fetchedAt)) {
-    return '시간 정보 없음'
-  }
-
-  const now = relativeTimeNow.value ?? fetchedAt
-  const elapsedSeconds = Math.max(0, Math.floor((now - fetchedAt) / 1000))
-
-  if (elapsedSeconds < 60) {
-    return `${elapsedSeconds}초 전`
-  }
-
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
-  if (elapsedMinutes < 60) {
-    return `${elapsedMinutes}분 전`
-  }
-
-  const elapsedHours = Math.floor(elapsedMinutes / 60)
-  if (elapsedHours < 24) {
-    return `${elapsedHours}시간 전`
-  }
-
-  return `${Math.floor(elapsedHours / 24)}일 전`
-}
-
-function formatFileSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 B'
-  }
-
-  const units = ['B', 'KB', 'MB', 'GB']
-  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  const value = bytes / (1024 ** unitIndex)
-  const fractionDigits = unitIndex === 0 || value >= 100 ? 0 : value >= 10 ? 1 : 2
-
-  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
+  return formatRelativeFetchedAgo(value, relativeTimeNow.value)
 }
 
 function isDefaultPatchAsset(name: string): boolean {

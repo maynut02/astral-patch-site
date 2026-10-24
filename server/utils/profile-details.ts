@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
-import type { EditableUserProfile, UserSocialLink } from '#shared/types/profile'
+import {
+  GAME_PROFILE_VALUE_MAX_LENGTH,
+  HANDLE_PATTERN,
+  SOCIAL_LINK_LABEL_MAX_LENGTH,
+  SOCIAL_LINK_MAX_COUNT,
+  SOCIAL_LINK_URL_MAX_LENGTH,
+  type EditableUserProfile,
+  type UserSocialLink
+} from '#shared/types/profile'
 import type { UserRole } from '#shared/types/user'
-import { HANDLE_PATTERN, getTextLength } from './validation'
-import { getDatabase } from './database'
-
-const GAME_VALUE_MAX_LENGTH = 64
-const SOCIAL_LINK_LABEL_MAX_LENGTH = 30
-const SOCIAL_LINK_URL_MAX_LENGTH = 500
-const SOCIAL_LINK_MAX_COUNT = 10
+import { getTextLength, parseText } from './validation'
+import { getDatabase, type DatabaseClient } from './database'
 
 interface ProfileRow {
   googleSub: string
@@ -39,11 +42,11 @@ export type UserProfileUpdateInput = Record<string, unknown> & {
 }
 
 function parseHandle(value: unknown): string {
-  if (typeof value !== 'string') {
-    throw createError({ statusCode: 400, statusMessage: 'Handle is required' })
-  }
-
-  const handle = value.trim()
+  const handle = parseText(value, {
+    field: 'Handle',
+    required: true,
+    emptyMessage: 'Handle may contain only letters and numbers'
+  })
 
   if (!HANDLE_PATTERN.test(handle)) {
     throw createError({
@@ -61,15 +64,7 @@ function parseOptionalGameValue(
   pattern: RegExp,
   invalidMessage: string
 ): string | null {
-  if (value === undefined || value === null) {
-    return null
-  }
-
-  if (typeof value !== 'string') {
-    throw createError({ statusCode: 400, statusMessage: `${field} must be text` })
-  }
-
-  const normalized = value.trim()
+  const normalized = parseText(value, { field })
 
   if (!normalized) {
     return null
@@ -79,7 +74,7 @@ function parseOptionalGameValue(
     throw createError({ statusCode: 400, statusMessage: invalidMessage })
   }
 
-  if (getTextLength(normalized) > GAME_VALUE_MAX_LENGTH) {
+  if (getTextLength(normalized) > GAME_PROFILE_VALUE_MAX_LENGTH) {
     throw createError({ statusCode: 400, statusMessage: `${field} is too long` })
   }
 
@@ -105,16 +100,24 @@ function parseSocialLinks(value: unknown): Omit<UserSocialLink, 'id'>[] {
     }
 
     const candidate = entry as { label?: unknown, url?: unknown }
-    const label = typeof candidate.label === 'string' ? candidate.label.trim() : ''
-    const url = typeof candidate.url === 'string' ? candidate.url.trim() : ''
-
-    if (!label || getTextLength(label) > SOCIAL_LINK_LABEL_MAX_LENGTH) {
-      throw createError({ statusCode: 400, statusMessage: `Social link ${index + 1} label is invalid` })
-    }
-
-    if (!url || getTextLength(url) > SOCIAL_LINK_URL_MAX_LENGTH) {
-      throw createError({ statusCode: 400, statusMessage: `Social link ${index + 1} URL is invalid` })
-    }
+    const labelMessage = `Social link ${index + 1} label is invalid`
+    const urlMessage = `Social link ${index + 1} URL is invalid`
+    const label = parseText(candidate.label, {
+      field: 'Social link label',
+      required: true,
+      maxLength: SOCIAL_LINK_LABEL_MAX_LENGTH,
+      typeMessage: labelMessage,
+      emptyMessage: labelMessage,
+      lengthMessage: labelMessage
+    })
+    const url = parseText(candidate.url, {
+      field: 'Social link URL',
+      required: true,
+      maxLength: SOCIAL_LINK_URL_MAX_LENGTH,
+      typeMessage: urlMessage,
+      emptyMessage: urlMessage,
+      lengthMessage: urlMessage
+    })
 
     let parsedUrl: URL
 
@@ -130,6 +133,15 @@ function parseSocialLinks(value: unknown): Omit<UserSocialLink, 'id'>[] {
 
     return { label, url: parsedUrl.toString() }
   })
+}
+
+export async function listSocialLinks(database: DatabaseClient, googleSub: string): Promise<UserSocialLink[]> {
+  return database<SocialLinkRow[]>`
+    SELECT id, label, url
+    FROM app_user_social_links
+    WHERE user_id = ${googleSub}
+    ORDER BY sort_order ASC, created_at ASC
+  `
 }
 
 export async function getUserProfileDetails(googleSub: string): Promise<SavedUserProfile> {
@@ -150,12 +162,7 @@ export async function getUserProfileDetails(googleSub: string): Promise<SavedUse
     throw createError({ statusCode: 404, statusMessage: 'User could not be found' })
   }
 
-  const socialLinks = await database<SocialLinkRow[]>`
-    SELECT id, label, url
-    FROM app_user_social_links
-    WHERE user_id = ${googleSub}
-    ORDER BY sort_order ASC, created_at ASC
-  `
+  const socialLinks = await listSocialLinks(database, googleSub)
 
   return {
     googleSub: user.googleSub,
@@ -216,32 +223,21 @@ export async function saveUserProfileDetails(
         WHERE user_id = ${googleSub}
       `
 
-      const savedSocialLinks: UserSocialLink[] = []
-
-      for (const [index, link] of socialLinks.entries()) {
-        const id = randomUUID()
-        const [savedLink] = await transaction<SocialLinkRow[]>`
-          INSERT INTO app_user_social_links (
-            id,
-            user_id,
-            label,
-            url,
-            sort_order
-          )
-          VALUES (
-            ${id},
-            ${googleSub},
-            ${link.label},
-            ${link.url},
-            ${index}
-          )
-          RETURNING id, label, url
-        `
-
-        if (savedLink) {
-          savedSocialLinks.push(savedLink)
-        }
-      }
+      const savedSocialLinks = socialLinks.length === 0
+        ? []
+        : await transaction<SocialLinkRow[]>`
+        WITH inserted AS (
+          INSERT INTO app_user_social_links (id, user_id, label, url, sort_order)
+          SELECT link.id::uuid, ${googleSub}, link.label, link.url, link.ordinality::int - 1
+          FROM unnest(
+            ${transaction.array(socialLinks.map(() => randomUUID()))}::text[],
+            ${transaction.array(socialLinks.map(link => link.label))}::text[],
+            ${transaction.array(socialLinks.map(link => link.url))}::text[]
+          ) WITH ORDINALITY AS link(id, label, url, ordinality)
+          RETURNING id, label, url, sort_order
+        )
+        SELECT id, label, url FROM inserted ORDER BY sort_order ASC
+      `
 
       return {
         googleSub: user.googleSub,

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import {
   PARTY_MAX_NICKNAME_LENGTH,
+  PARTY_ROOM_ID_LENGTH,
   PARTY_ROOM_ID_PATTERN,
-  getPartyTextLength,
   type PartyRoomSummary
 } from '#shared/types/party'
 import { readBrowserStorage } from '~/utils/browser-storage'
-import { getRequestErrorMessage } from '~/utils/request-error'
+import { getRequestErrorMessage, getRequestErrorStatus } from '~/utils/request-error'
+import { validatePartyNickname } from '~/utils/party-nickname'
 import { pastePartyNumber, sanitizePartyNumberInput } from '~/utils/party-number-input'
 
 useAstralPageSeo('파티 채팅', '인게임 방 ID와 닉네임을 입력해 파티원과 대화하세요.')
@@ -14,6 +15,7 @@ useAstralPageSeo('파티 채팅', '인게임 방 ID와 닉네임을 입력해 �
 const route = useRoute()
 const roomId = ref(typeof route.query.roomId === 'string' && PARTY_ROOM_ID_PATTERN.test(route.query.roomId) ? route.query.roomId : '')
 const nickname = ref('')
+const nicknameValidation = computed(() => validatePartyNickname(nickname.value))
 const submitting = ref(false)
 const entryError = ref('')
 const nicknameError = ref('')
@@ -30,12 +32,6 @@ watch([roomId, nickname], () => {
   nicknameError.value = ''
 }, { flush: 'sync' })
 
-function isNicknameTakenResponse(cause: unknown): boolean {
-  if (!cause || typeof cause !== 'object') return false
-  const error = cause as { statusCode?: unknown, data?: { statusCode?: unknown } }
-  return error.statusCode === 409 || error.data?.statusCode === 409
-}
-
 async function enterRoom() {
   if (submitting.value) return
   const id = roomId.value
@@ -43,9 +39,9 @@ async function enterRoom() {
     entryError.value = '방 ID는 숫자 6자리로 입력해 주세요.'
     return
   }
-  const name = nickname.value.trim()
-  if (!name || getPartyTextLength(name) > PARTY_MAX_NICKNAME_LENGTH) {
-    nicknameError.value = '20자 이내의 닉네임을 입력해 주세요.'
+  const { nickname: name, error: validationError } = nicknameValidation.value
+  if (validationError) {
+    nicknameError.value = validationError
     return
   }
   entryError.value = ''
@@ -60,7 +56,7 @@ async function enterRoom() {
     enteredNickname.value = name
     await navigateTo(`/party/${encodeURIComponent(id)}`)
   } catch (cause) {
-    if (isNicknameTakenResponse(cause)) {
+    if (getRequestErrorStatus(cause) === 409) {
       nicknameError.value = '이미 사용 중인 닉네임입니다. 다른 닉네임을 입력해 주세요.'
     } else {
       entryError.value = getRequestErrorMessage(cause, '채팅방에 들어가지 못했습니다. 다시 시도해 주세요.')
@@ -90,8 +86,8 @@ async function enterRoom() {
           inputmode="numeric"
           :pattern="PARTY_ROOM_ID_PATTERN.source"
           placeholder="숫자 6자리"
-          :minlength="6"
-          :maxlength="6"
+          :minlength="PARTY_ROOM_ID_LENGTH"
+          :maxlength="PARTY_ROOM_ID_LENGTH"
           required
           autocomplete="off"
           autofocus
@@ -111,7 +107,7 @@ async function enterRoom() {
         <UInput
           v-model="nickname"
           placeholder="파티원에게 표시할 이름"
-          :maxlength="40"
+          :maxlength="PARTY_MAX_NICKNAME_LENGTH"
           required
           autocomplete="nickname"
           color="neutral"
@@ -126,7 +122,7 @@ async function enterRoom() {
         color="info"
         variant="soft"
         :loading="submitting"
-        :disabled="submitting || !PARTY_ROOM_ID_PATTERN.test(roomId) || !nickname.trim() || getPartyTextLength(nickname.trim()) > PARTY_MAX_NICKNAME_LENGTH"
+        :disabled="submitting || !PARTY_ROOM_ID_PATTERN.test(roomId) || Boolean(nicknameValidation.error)"
         block
         class="py-2"
       />

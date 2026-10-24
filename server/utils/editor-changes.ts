@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
-import { BOT_HANDLE } from './auth-user'
+import { BOT_HANDLE } from '#shared/types/user'
 import { getDatabase } from './database'
 import { getTextLength, parseUuid } from './validation'
 import { broadcastWsMessage } from './ws-hub'
-import type { EditorChangeStatus, EditorHistoryResponse, EditorSaveResponse } from '../../shared/types/editor'
-
-const MAX_TRANSLATION_CHARACTERS = 10_000
+import { sourceVersionFields, sourceVersionJoins } from './editor/sql'
+import { MAX_TRANSLATION_CHARACTERS, type EditorChangeStatus, type EditorHistoryResponse, type EditorSaveResponse } from '#shared/types/editor'
 
 interface CurrentEditorTranslation {
   sourceVersionId: string | null
@@ -315,20 +314,12 @@ export async function getEditorHistory(unitId: string): Promise<EditorHistoryRes
         src.revision AS revision,
         NULL::text AS "previousText",
         NULL::text AS "proposedText",
-        old_sv.cn_s AS "beforeCnS",
-        old_sv.en AS "beforeEn",
-        old_sv.jp AS "beforeJp",
-        old_sv.cn_t AS "beforeCnT",
-        new_sv.cn_s AS "afterCnS",
-        new_sv.en AS "afterEn",
-        new_sv.jp AS "afterJp",
-        new_sv.cn_t AS "afterCnT",
+        ${sourceVersionFields(database)},
         sc.created_at AS "createdAt"
       FROM source_changes sc
       JOIN source_revision_change_summary src ON src.revision_id = sc.revision_id
       JOIN app_users source_creator ON source_creator.google_sub = sc.created_by
-      LEFT JOIN source_versions old_sv ON old_sv.id = sc.old_source_version_id
-      LEFT JOIN source_versions new_sv ON new_sv.id = sc.new_source_version_id
+      ${sourceVersionJoins(database)}
       WHERE sc.unit_id = ${unitId}
 
       UNION ALL

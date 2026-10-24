@@ -1,11 +1,10 @@
+import { isReviewerRole } from '#shared/types/user'
+import { useReadySession } from '~/composables/use-ready-session'
+
 export default defineNuxtRouteMiddleware(async () => {
-  const { ready, loggedIn, user, fetch } = useUserSession()
+  const { loggedIn, user } = await useReadySession()
 
-  if (!ready.value) {
-    await fetch()
-  }
-
-  if (!loggedIn.value || (user.value?.role !== 'admin' && user.value?.role !== 'verified')) {
+  if (!loggedIn.value || !isReviewerRole(user.value?.role)) {
     return navigateTo('/')
   }
 })

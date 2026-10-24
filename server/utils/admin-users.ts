@@ -4,8 +4,7 @@ import type {
   AdminUserRoleUpdateResponse,
   AdminUsersResponse
 } from '#shared/types/admin'
-import { isUserRole, resolveUserRole, type UserRole } from '#shared/types/user'
-import { BOT_GOOGLE_SUB } from './auth-user'
+import { BOT_GOOGLE_SUB, isManageableUserRole, isReservedBotAccount, resolveUserRole, type UserRole } from '#shared/types/user'
 import { getDatabase } from './database'
 
 interface AdminUserRow {
@@ -16,8 +15,6 @@ interface AdminUserRow {
   createdAt: Date
   lastLoginAt: Date | null
 }
-
-const MANAGEABLE_USER_ROLES = new Set<UserRole>(['admin', 'verified', 'user'])
 
 function toAdminUserEntry(row: AdminUserRow): AdminUserEntry {
   return {
@@ -62,7 +59,7 @@ export async function updateAdminUserRole(
     throw createError({ statusCode: 400, statusMessage: 'User id is required' })
   }
 
-  if (!isUserRole(value) || !MANAGEABLE_USER_ROLES.has(value)) {
+  if (!isManageableUserRole(value)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid user role' })
   }
 
@@ -87,7 +84,7 @@ export async function updateAdminUserRole(
       throw createError({ statusCode: 404, statusMessage: 'User could not be found' })
     }
 
-    if (targetUserId === BOT_GOOGLE_SUB || target.role === 'bot') {
+    if (isReservedBotAccount(targetUserId, target.role)) {
       throw createError({
         statusCode: 400,
         statusMessage: 'The reserved bot account role cannot be changed'

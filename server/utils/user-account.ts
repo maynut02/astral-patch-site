@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { UserRole } from '#shared/types/user'
+import { isReservedBotAccount, type UserRole } from '#shared/types/user'
 import { createError } from 'h3'
-import { BOT_GOOGLE_SUB } from './auth-user'
 import { getDatabase } from './database'
 
 export async function deleteUserAccount(googleSub: string): Promise<void> {
@@ -22,7 +21,7 @@ export async function deleteUserAccount(googleSub: string): Promise<void> {
       })
     }
 
-    if (account.role === 'bot' || googleSub === BOT_GOOGLE_SUB) {
+    if (isReservedBotAccount(googleSub, account.role)) {
       throw createError({
         statusCode: 403,
         statusMessage: 'Bot accounts cannot be deleted'

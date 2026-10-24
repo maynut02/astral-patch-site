@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { canResumePartyParticipant, changePartyCharacter, changePartyOrder, createPartyRoom, getPartyHistory, getPartyRoom, isPartyCharacterId, isPartyNicknameTaken, joinPartyRoom, normalizePartyRoomId, PARTY_LIMITS, recordPartyJoin, registerPartyConnection, removePartyConnection, sendPartyChat, setPartyChatStore, setPartyPresenceListener, touchPartyConnection } from '../server/utils/party-chat.ts'
-import { PARTY_CHARACTER_IDS, PARTY_ORDERS, PARTY_UNSELECTED_ID, getPartyCharacterImage } from '../shared/types/party.ts'
+import { canResumePartyParticipant, changePartyCharacter, changePartyOrder, createPartyRoom, getPartyHistory, getPartyRoom, isPartyCharacterId, isPartyNicknameTaken, joinPartyRoom, normalizePartyNickname, normalizePartyRoomId, recordPartyJoin, registerPartyConnection, removePartyConnection, sendPartyChat, setPartyChatStore, setPartyPresenceListener, touchPartyConnection } from '../server/utils/party-chat.ts'
+import { PARTY_LIMITS } from '../server/utils/party-chat-limits.ts'
+import { PARTY_CHARACTER_IDS, PARTY_MAX_NICKNAME_LENGTH, PARTY_MAX_TEXT_LENGTH, PARTY_ORDERS, PARTY_UNSELECTED_ID, getPartyCharacterImage, getPartyTextLength } from '../shared/types/party.ts'
 
 // node --experimental-strip-types scripts/test-party-rooms.mjs
 const storedRooms = new Map()
@@ -27,12 +28,12 @@ const memoryStore = {
       storedRooms.set(roomId, room)
       storedSessions.set(sessionId, room)
     }
-    return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.slice(-300).map(storedMessage), participants: activeParticipants(room.sessionId) }
+    return { sessionId: room.sessionId, createdAt: room.createdAt, emptySinceMs: Date.parse(room.expiresAt) - PARTY_LIMITS.emptyRoomTtlMs, messages: room.messages.slice(-300).map(storedMessage), participants: activeParticipants(room.sessionId) }
   },
   async findRoom(roomId) {
     const room = storedRooms.get(roomId)
     if (!room || Date.parse(room.expiresAt) <= Date.now()) return null
-    return { sessionId: room.sessionId, createdAt: room.createdAt, expiresAt: room.expiresAt, messages: room.messages.slice(-300).map(storedMessage), participants: activeParticipants(room.sessionId) }
+    return { sessionId: room.sessionId, createdAt: room.createdAt, emptySinceMs: Date.parse(room.expiresAt) - PARTY_LIMITS.emptyRoomTtlMs, messages: room.messages.slice(-300).map(storedMessage), participants: activeParticipants(room.sessionId) }
   },
   async upsertParticipant(sessionId, participant, reconnectTokenHash) {
     storedParticipants.set(participant.id, { ...structuredClone(participant), sessionId, reconnectTokenHash, departureDeadline: null, leftAt: null })
@@ -228,7 +229,7 @@ test('room history respects message and byte limits', async (t) => {
   assert.deepEqual(earlier.messages.map(message => message.text), ['short-0', 'short-1', 'short-2', 'short-3', 'short-4'])
   assert.ok(earlier.messages.every(message => message.participant.characterId === '306'))
 
-  const longText = '😀'.repeat(1000)
+  const longText = '가'.repeat(PARTY_MAX_TEXT_LENGTH)
   for (let index = 0; index < 100; index++) {
     assert.equal((await sendPartyChat(sender, { text: longText })).ok, true)
   }
@@ -1541,4 +1542,152 @@ test('a new admission cancelled after persistence is not restorable after a rest
   assert.ok(orphan)
   assert.notEqual(orphan.leftAt, null)
   assert.equal(activeParticipants(sessionId).some(item => item.nickname === 'cancelled'), false)
+})
+
+test('party lengths and nickname admission use UTF-16 code units', async (t) => {
+  assert.equal(getPartyTextLength('😀'), 2)
+  assert.equal(getPartyTextLength('a😀'), 3)
+  const nickname = '😀'.repeat(PARTY_MAX_NICKNAME_LENGTH / 2)
+  assert.equal(normalizePartyNickname(nickname), nickname)
+  assert.equal(normalizePartyNickname(`${nickname}a`), null)
+  const peer = { id: 'utf16-lengths', send() {}, close() {} }
+  t.after(() => removePartyConnection(peer))
+  assert.equal((await createPartyRoom('774411')).ok, true)
+  assert.equal(registerPartyConnection(peer, peer.id), true)
+  assert.equal((await joinPartyRoom(peer, { roomId: '774411', nickname, characterId: 'spectator' })).ok, true)
+  const text = '😀'.repeat(PARTY_MAX_TEXT_LENGTH / 2)
+  assert.equal((await sendPartyChat(peer, { text })).ok, true)
+  assert.equal((await sendPartyChat(peer, { text: `${text}a` })).code, 'TEXT_TOO_LONG')
+  assert.equal((await sendPartyChat(peer, { text: '😀'.repeat(PARTY_MAX_TEXT_LENGTH) })).code, 'TEXT_TOO_LONG')
+})
+
+test('join notices survive a failed write and still precede queued chats', async (t) => {
+  const writer = { id: 'join-write-failure', send() {}, close() {} }
+  const reader = { id: 'join-write-reader', send() {}, close() {} }
+  t.after(async () => {
+    setPartyChatStore(memoryStore)
+    await removePartyConnection(writer)
+    await removePartyConnection(reader)
+  })
+  await createPartyRoom('774412')
+  assert.equal(registerPartyConnection(writer, writer.id), true)
+  assert.equal((await joinPartyRoom(writer, { roomId: '774412', nickname: '입장', characterId: '101' })).ok, true)
+  let release
+  let entered
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  const started = new Promise((resolve) => {
+    entered = resolve
+  })
+  const originalError = console.error
+  const errors = []
+  console.error = (...args) => errors.push(args)
+  t.after(() => {
+    console.error = originalError
+  })
+  setPartyChatStore({
+    ...memoryStore,
+    async appendMessage(sessionId, message, leftParticipantId) {
+      if (message.kind === 'join') {
+        entered()
+        await gate
+        throw new Error('join storage unavailable')
+      }
+      return memoryStore.appendMessage(sessionId, message, leftParticipantId)
+    }
+  })
+  const entry = recordPartyJoin(writer)
+  assert.equal(entry.notice.kind, 'join')
+  assert.deepEqual(entry.peers, [writer])
+  await started
+  let sent = false
+  const chat = sendPartyChat(writer, { text: '입장 다음 메시지' }).then((result) => {
+    sent = true
+    return result
+  })
+  await Promise.resolve()
+  assert.equal(sent, false)
+  release()
+  assert.equal((await chat).ok, true)
+  assert.equal(errors.length, 1)
+  assert.equal(registerPartyConnection(reader, reader.id), true)
+  const joined = await joinPartyRoom(reader, { roomId: '774412', nickname: '독자', characterId: '101' })
+  assert.deepEqual(joined.messages.map(message => message.kind), ['join', 'chat'])
+  assert.equal(joined.messages[0].id, entry.notice.id)
+})
+
+test('chat recipients are captured before persistence waits', async (t) => {
+  const writer = { id: 'recipient-snapshot-writer', send() {}, close() {} }
+  const reader = { id: 'recipient-snapshot-reader', send() {}, close() {} }
+  t.after(async () => {
+    setPartyChatStore(memoryStore)
+    await removePartyConnection(writer)
+    await removePartyConnection(reader)
+  })
+  await createPartyRoom('774413')
+  for (const peer of [writer, reader]) {
+    assert.equal(registerPartyConnection(peer, peer.id), true)
+    assert.equal((await joinPartyRoom(peer, { roomId: '774413', nickname: peer.id.slice(-6), characterId: '101' })).ok, true)
+  }
+  let release
+  let entered
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  const started = new Promise((resolve) => {
+    entered = resolve
+  })
+  setPartyChatStore({
+    ...memoryStore,
+    async appendMessage(...args) {
+      entered()
+      await gate
+      return memoryStore.appendMessage(...args)
+    }
+  })
+  const chat = sendPartyChat(writer, { text: '수신자 스냅샷' })
+  await started
+  const removal = removePartyConnection(reader)
+  release()
+  assert.deepEqual((await chat).peers, [writer, reader])
+  await removal
+})
+
+test('chat recipients include peers admitted ahead of the queued chat', async (t) => {
+  const writer = { id: 'recipient-late-writer', send() {}, close() {} }
+  const joiner = { id: 'recipient-late-joiner', send() {}, close() {} }
+  t.after(async () => {
+    setPartyChatStore(memoryStore)
+    await removePartyConnection(writer)
+    await removePartyConnection(joiner)
+  })
+  await createPartyRoom('774414')
+  assert.equal(registerPartyConnection(writer, writer.id), true)
+  assert.equal((await joinPartyRoom(writer, { roomId: '774414', nickname: '작성자', characterId: '101' })).ok, true)
+  let release
+  let entered
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  const started = new Promise((resolve) => {
+    entered = resolve
+  })
+  setPartyChatStore({
+    ...memoryStore,
+    async upsertParticipant(...args) {
+      entered()
+      await gate
+      return memoryStore.upsertParticipant(...args)
+    }
+  })
+  assert.equal(registerPartyConnection(joiner, joiner.id), true)
+  const joining = joinPartyRoom(joiner, { roomId: '774414', nickname: '늦은입장', characterId: '101' })
+  await started
+  const chat = sendPartyChat(writer, { text: '입장 중 메시지' })
+  release()
+  const joined = await joining
+  assert.equal(joined.ok, true)
+  assert.equal(joined.messages.some(message => message.kind === 'chat'), false)
+  assert.deepEqual((await chat).peers, [writer, joiner])
 })

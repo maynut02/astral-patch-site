@@ -255,7 +255,3 @@ export function broadcastWsMessage(
 
   return sentCount
 }
-
-export function getWsConnectionCount(): number {
-  return peers.size
-}

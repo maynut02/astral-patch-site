@@ -1,17 +1,23 @@
 import { randomUUID } from 'node:crypto'
-import type { Notice, NoticesResponse } from '#shared/types/notice'
+import {
+  NOTICE_BODY_MAX_LENGTH,
+  NOTICE_TITLE_MAX_LENGTH,
+  type Notice,
+  type NoticesResponse
+} from '#shared/types/notice'
 import { createError } from 'h3'
 import type { DatabaseClient } from './database'
 import { getDatabase } from './database'
 import { parseRequiredText } from './validation'
 
-export const NOTICE_TITLE_MAX_LENGTH = 160
-export const NOTICE_BODY_MAX_LENGTH = 10_000
+type NoticeRow = Omit<Notice, 'createdAt'> & { createdAt: Date }
 
-type NoticeRow = Notice
+function toNotice(row: NoticeRow): Notice {
+  return { ...row, createdAt: row.createdAt.toISOString() }
+}
 
-async function findNotice(database: DatabaseClient, noticeId: string): Promise<Notice | null> {
-  const [notice] = await database<NoticeRow[]>`
+function noticeSelect(database: DatabaseClient) {
+  return database`
     SELECT
       n.id,
       n.title,
@@ -21,29 +27,27 @@ async function findNotice(database: DatabaseClient, noticeId: string): Promise<N
       n.created_at AS "createdAt"
     FROM notices n
     JOIN app_users author ON author.google_sub = n.created_by
+  `
+}
+
+async function findNotice(database: DatabaseClient, noticeId: string): Promise<Notice | null> {
+  const [notice] = await database<NoticeRow[]>`
+    ${noticeSelect(database)}
     WHERE n.id = ${noticeId}
   `
 
-  return notice ?? null
+  return notice ? toNotice(notice) : null
 }
 
 export async function getNotices(): Promise<NoticesResponse> {
   const database = getDatabase()
   const notices = await database<NoticeRow[]>`
-    SELECT
-      n.id,
-      n.title,
-      n.body,
-      NULLIF(BTRIM(author.handle), '') AS "authorHandle",
-      author."role" AS "authorRole",
-      n.created_at AS "createdAt"
-    FROM notices n
-    JOIN app_users author ON author.google_sub = n.created_by
+    ${noticeSelect(database)}
     ORDER BY n.created_at DESC, n.id DESC
     LIMIT 100
   `
 
-  return { notices }
+  return { notices: notices.map(toNotice) }
 }
 
 export async function createNotice(

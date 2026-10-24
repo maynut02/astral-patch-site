@@ -39,18 +39,32 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
   const drafts = ref<Record<string, EditorDraft>>({})
   const draftsReady = ref(false)
   let persistTimer: ReturnType<typeof setTimeout> | undefined
+  const serializedDrafts = new Map<string, string>()
+  const dirtyKeys = new Set<string>()
 
   function persistDrafts(): void {
     if (!import.meta.client || !draftsReady.value) {
       return
     }
 
-    if (Object.keys(drafts.value).length === 0) {
+    const keys = Object.keys(drafts.value)
+    if (!keys.length) {
       removeBrowserStorage(storageKey)
+      serializedDrafts.clear()
+      dirtyKeys.clear()
       return
     }
 
-    writeBrowserStorage(storageKey, JSON.stringify(drafts.value))
+    for (const key of dirtyKeys) {
+      const draft = drafts.value[key]
+      if (draft) serializedDrafts.set(key, JSON.stringify(draft))
+      else serializedDrafts.delete(key)
+    }
+    dirtyKeys.clear()
+
+    // 기존 단일 JSON 객체의 키 순서와 직렬화 형식을 유지한다.
+    const payload = keys.map(key => `${JSON.stringify(key)}:${serializedDrafts.get(key)}`).join(',')
+    writeBrowserStorage(storageKey, `{${payload}}`)
   }
 
   function schedulePersist(): void {
@@ -68,6 +82,12 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
     }, DRAFT_PERSIST_DELAY)
   }
 
+  function setDraft(key: string, draft: EditorDraft): void {
+    drafts.value[key] = draft
+    dirtyKeys.add(key)
+    schedulePersist()
+  }
+
   function loadDrafts(): void {
     if (!import.meta.client) {
       draftsReady.value = true
@@ -75,6 +95,8 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
     }
 
     const storedDrafts = readBrowserStorage(storageKey)
+    // 저장된 값을 정규화해 교체한 경우에만 다시 저장한다. 빈 키를 읽은 탭이 다른 탭의 임시저장을 지우지 않게 한다.
+    let replaced = false
 
     if (storedDrafts) {
       try {
@@ -96,13 +118,21 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
           }
 
           drafts.value = nextDrafts
+          replaced = true
         }
       } catch {
         drafts.value = {}
+        replaced = true
       }
     }
 
     draftsReady.value = true
+    serializedDrafts.clear()
+    for (const [key, draft] of Object.entries(drafts.value)) {
+      serializedDrafts.set(key, JSON.stringify(draft))
+    }
+    dirtyKeys.clear()
+    if (replaced) schedulePersist()
   }
 
   function applyDraftsToItems(itemsToApply: EditorItem[]): void {
@@ -110,14 +140,11 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
       return
     }
 
-    let nextDrafts = drafts.value
-    let draftsChanged = false
-
     for (const item of itemsToApply) {
       const key = getEditorDraftKey(item.id)
       const legacyKey = getLegacyEditorDraftKey(item.category, item.unitKey)
-      const currentDraft = nextDrafts[key]
-      const legacyDraft = nextDrafts[legacyKey]
+      const currentDraft = drafts.value[key]
+      const legacyDraft = drafts.value[legacyKey]
       const draft = currentDraft ?? legacyDraft
 
       if (!draft) {
@@ -125,24 +152,16 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
       }
 
       if (!currentDraft || draft.itemId !== item.id) {
-        const { [legacyKey]: _legacy, ...withoutLegacy } = nextDrafts
-        nextDrafts = {
-          ...withoutLegacy,
-          [key]: {
-            ...draft,
-            category: item.category,
-            unitKey: item.unitKey,
-            itemId: item.id
-          }
-        }
-        draftsChanged = true
+        removeDraftsByKeys([legacyKey])
+        setDraft(key, {
+          ...draft,
+          category: item.category,
+          unitKey: item.unitKey,
+          itemId: item.id
+        })
       }
 
       item.ko = draft.text
-    }
-
-    if (draftsChanged) {
-      drafts.value = nextDrafts
     }
   }
 
@@ -151,18 +170,15 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
   }
 
   function removeDraftsByKeys(keys: string[]): void {
-    const keysToRemove = new Set(keys)
-    const nextDrafts = Object.fromEntries(
-      Object.entries(drafts.value).filter(([key]) => !keysToRemove.has(key))
-    )
-    const removed = Object.keys(nextDrafts).length !== Object.keys(drafts.value).length
-
-    if (removed) {
-      drafts.value = nextDrafts
+    let removed = false
+    for (const key of keys) {
+      if (!Object.hasOwn(drafts.value, key)) continue
+      Reflect.deleteProperty(drafts.value, key)
+      dirtyKeys.add(key)
+      removed = true
     }
+    if (removed) schedulePersist()
   }
-
-  watch(drafts, schedulePersist, { deep: true })
 
   onBeforeUnmount(() => {
     if (persistTimer) {
@@ -177,7 +193,7 @@ export function useEditorDraftStorage(storageKey = DEFAULT_DRAFT_STORAGE_KEY) {
     drafts,
     draftsReady,
     loadDrafts,
-    schedulePersist,
+    setDraft,
     applyDraftsToItems,
     hasItemDraft,
     removeDraftsByKeys,
