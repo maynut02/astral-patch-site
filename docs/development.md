@@ -62,7 +62,7 @@ pnpm dev
 
 ## CI
 
-`.github/workflows/ci.yml`은 `develop` push, `release`/`master` 대상 PR, 수동 실행에서 실행됩니다.
+`.github/workflows/ci.yml`은 `release`/`master` 대상 PR(열림, 새 커밋 push, 다시 열림)과 수동 실행에서 실행됩니다. `develop` push만으로는 실행되지 않으므로, PR 없이 확인하려면 Actions에서 수동 실행합니다.
 
 1. `pnpm run db:check`
 2. 실제 PostgreSQL 컨테이너에 migration 두 번 적용 (두 번째 실행은 적용 기록을 보고 모두 건너뛰어야 성공)

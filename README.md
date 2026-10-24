@@ -1,6 +1,6 @@
 # Astral Patch Site
 
-[![ci](https://github.com/maynut02/astral-patch-site/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/maynut02/astral-patch-site/actions/workflows/ci.yml)
+[![ci](https://github.com/maynut02/astral-patch-site/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/maynut02/astral-patch-site/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Astral Party 한국어 패치 커뮤니티 사이트 — <https://astral.maynutlab.com>
