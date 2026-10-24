@@ -1,4 +1,5 @@
 import { sendRedirect } from 'h3'
+import { logServerError } from '../../utils/server-log'
 
 export default defineOAuthGoogleEventHandler({
   config: {
@@ -25,13 +26,13 @@ export default defineOAuthGoogleEventHandler({
 
       return sendRedirect(event, consumeAuthReturnTo(event))
     } catch (error) {
-      console.error('[auth/google] failed to create session', error)
+      logServerError('auth/google', 'failed to create session', error)
       return sendRedirect(event, withAuthError(consumeAuthReturnTo(event)))
     }
   },
 
   onError(event, error) {
-    console.error('[auth/google] OAuth error', error)
+    logServerError('auth/google', 'OAuth error', error)
     return sendRedirect(event, withAuthError(consumeAuthReturnTo(event)))
   }
 })

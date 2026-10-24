@@ -42,10 +42,7 @@ chmod 0755 "$ACME_ROOT" "$ACME_ROOT/.well-known" "$ACME_ROOT/.well-known/acme-ch
 render_template() {
   local source_path="$1"
   local target_path="$2"
-  sed \
-    -e "s|__ASTRAL_DOMAIN__|$ASTRAL_DOMAIN|g" \
-    -e "s|__ASTRAL_APP_PORT__|$ASTRAL_APP_PORT|g" \
-    "$source_path" > "$target_path"
+  sh "$SCRIPT_DIR/render-nginx-config.sh" "$source_path" "$ASTRAL_DOMAIN" "$ASTRAL_APP_PORT" > "$target_path"
   chmod 0644 "$target_path"
 }
 

@@ -1,7 +1,8 @@
 import { createError } from 'h3'
 import postgres from 'postgres'
 
-export type DatabaseClient = ReturnType<typeof postgres>
+// postgres.Sql은 쿼리 결과 제네릭과 array() 등 드라이버 API를 함께 보존한다.
+export type DatabaseClient = postgres.Sql
 
 const TRANSIENT_DATABASE_ERROR_CODES = new Set([
   'CONNECTION_CLOSED',

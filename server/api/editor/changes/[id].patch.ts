@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
   await assertEditorReviewRateLimit(user.id)
   const changeId = parseEditorChangeId(getRouterParam(event, 'id'))
 
-  const body = await readJsonBody<{ action?: unknown }>(event)
+  const body = await readJsonBody(event)
 
   return reviewEditorChange(changeId, user.id, body)
 })

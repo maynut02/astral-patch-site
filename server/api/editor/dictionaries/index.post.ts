@@ -4,7 +4,7 @@ import { readJsonBody } from '../../../utils/request-security'
 
 export default defineEventHandler(async (event) => {
   const user = await requireCurrentSessionUser(event)
-  const body = await readJsonBody<{ name?: unknown, description?: unknown, visibility?: unknown }>(event)
+  const body = await readJsonBody(event)
 
   return createEditorDictionary(getEditorDictionaryViewer(user), body)
 })

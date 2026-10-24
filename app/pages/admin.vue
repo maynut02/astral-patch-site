@@ -6,8 +6,9 @@ import type {
   AdminUserEntry,
   AdminUsersResponse
 } from '#shared/types/admin'
-import { isUserRole, type UserRole } from '#shared/types/user'
+import { isManageableUserRole, type UserRole } from '#shared/types/user'
 import { formatEditorDate } from '~/utils/editor-helpers'
+import { getRequestErrorMessage } from '~/utils/request-error'
 import { getUserRoleMeta } from '~/utils/user-role'
 
 definePageMeta({ middleware: 'admin' })
@@ -127,7 +128,7 @@ async function updatePatchWatcherGameVersion(): Promise<void> {
     showToast({
       id: 'admin-patch-watcher-version-update-failed',
       title: '게임 버전을 변경하지 못했습니다.',
-      description: patchWatcherUpdateError instanceof Error ? patchWatcherUpdateError.message : undefined
+      description: getRequestErrorMessage(patchWatcherUpdateError, undefined)
     })
     await refreshPatchWatcher()
   } finally {
@@ -155,7 +156,7 @@ async function publishTranslationPack(): Promise<void> {
     showToast({
       id: 'admin-translation-pack-publish-failed',
       title: '번역 팩을 배포하지 못했습니다.',
-      description: publishError instanceof Error ? publishError.message : undefined
+      description: getRequestErrorMessage(publishError, undefined)
     })
   } finally {
     isPublishingTranslationPack.value = false
@@ -164,7 +165,7 @@ async function publishTranslationPack(): Promise<void> {
 }
 
 async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
-  if (!isRoleEditable(user) || !isUserRole(value) || value === 'bot' || value === user.role || updatingUserId.value) {
+  if (!isRoleEditable(user) || !isManageableUserRole(value) || value === user.role || updatingUserId.value) {
     return
   }
 
@@ -188,7 +189,7 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
     showToast({
       id: `admin-role-update-failed-${user.id}`,
       title: '사용자 역할을 변경하지 못했습니다.',
-      description: roleError instanceof Error ? roleError.message : undefined
+      description: getRequestErrorMessage(roleError, undefined)
     })
     await refresh()
   } finally {
@@ -211,23 +212,12 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
       </div>
     </header>
 
-    <section class="border border-default">
-      <div class="flex flex-col gap-3 border-b border-default bg-muted px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex items-center gap-2">
-          <UIcon
-            name="i-tabler-radar"
-            class="size-5 text-muted"
-          />
-          <div>
-            <h2 class="text-sm font-semibold text-default">
-              패치 감시 설정
-            </h2>
-            <p class="text-xs text-muted">
-              서버의 5분 주기 패치 감시 작업이 확인할 게임 버전을 관리합니다.
-            </p>
-          </div>
-        </div>
-
+    <AdminSection
+      icon="i-tabler-radar"
+      title="패치 감시 설정"
+      description="서버의 5분 주기 패치 감시 작업이 확인할 게임 버전을 관리합니다."
+    >
+      <template #status>
         <UBadge
           v-if="patchWatcherConfig"
           :color="patchWatcherConfig.enabled ? 'success' : 'neutral'"
@@ -235,7 +225,7 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
         >
           {{ patchWatcherConfig.enabled ? '감시 활성화' : '감시 비활성화' }}
         </UBadge>
-      </div>
+      </template>
 
       <div v-if="patchWatcherStatus === 'pending'" class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div class="space-y-2">
@@ -266,8 +256,8 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
         </UAlert>
       </div>
 
-      <div v-else-if="patchWatcherConfig" class="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-end">
-        <div class="flex flex-col gap-4">
+      <AdminSectionGrid v-else-if="patchWatcherConfig">
+        <template #default>
           <UFormField
             name="gameVersion"
             label="게임 버전"
@@ -303,9 +293,9 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
             title="변경한 버전은 다음 패치 감시 주기부터 적용됩니다."
             description="새 버전에서 패치 변경이 감지되면 릴리스 빌드가 자동으로 시작될 수 있습니다."
           />
-        </div>
+        </template>
 
-        <dl class="grid gap-3 border border-default p-3 text-sm">
+        <template #details>
           <div class="flex items-center justify-between gap-3">
             <dt class="text-muted">
               현재 버전
@@ -322,27 +312,16 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
               {{ formatEditorDate(patchWatcherConfig.updatedAt) }}
             </dd>
           </div>
-        </dl>
-      </div>
-    </section>
+        </template>
+      </AdminSectionGrid>
+    </AdminSection>
 
-    <section class="border border-default">
-      <div class="flex flex-col gap-3 border-b border-default bg-muted px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex items-center gap-2">
-          <UIcon
-            name="i-tabler-package-export"
-            class="size-5 text-muted"
-          />
-          <div>
-            <h2 class="text-sm font-semibold text-default">
-              번역 팩 배포
-            </h2>
-            <p class="text-xs text-muted">
-              승인된 번역 전체를 플러그인이 내려받는 번역 팩으로 배포합니다.
-            </p>
-          </div>
-        </div>
-
+    <AdminSection
+      icon="i-tabler-package-export"
+      title="번역 팩 배포"
+      description="승인된 번역 전체를 플러그인이 내려받는 번역 팩으로 배포합니다."
+    >
+      <template #status>
         <UBadge
           v-if="translationPackStatus"
           :color="translationPackStatus.pendingChangeCount > 0 ? 'warning' : 'success'"
@@ -352,7 +331,7 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
             ? `미배포 변경 ${translationPackStatus.pendingChangeCount.toLocaleString()}건`
             : '최신 상태' }}
         </UBadge>
-      </div>
+      </template>
 
       <div v-if="translationPackFetchStatus === 'pending'" class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <USkeleton class="h-9 w-32" />
@@ -379,8 +358,8 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
         </UAlert>
       </div>
 
-      <div v-else-if="translationPackStatus" class="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-end">
-        <div class="flex flex-col gap-4">
+      <AdminSectionGrid v-else-if="translationPackStatus">
+        <template #default>
           <div>
             <UButton
               icon="i-tabler-upload"
@@ -401,9 +380,9 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
             icon="i-tabler-alert-triangle"
             title="처리된 INT_STEAM 게임 리비전이 없어 배포할 수 없습니다."
           />
-        </div>
+        </template>
 
-        <dl class="grid gap-3 border border-default p-3 text-sm">
+        <template #details>
           <div class="flex items-center justify-between gap-3">
             <dt class="text-muted">
               마지막 배포
@@ -455,9 +434,9 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
               </dd>
             </div>
           </template>
-        </dl>
-      </div>
-    </section>
+        </template>
+      </AdminSectionGrid>
+    </AdminSection>
 
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <UInput

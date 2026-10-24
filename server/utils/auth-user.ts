@@ -1,10 +1,8 @@
+import type { UserSession } from '#auth-utils'
 import type { UserRole } from '#shared/types/user'
 import { createError } from 'h3'
 import type { H3Event } from 'h3'
 import { getDatabase } from './database'
-
-export const BOT_GOOGLE_SUB = 'bot'
-export const BOT_HANDLE = 'Bot'
 
 export interface GoogleProfile {
   sub?: string
@@ -69,6 +67,25 @@ export async function upsertGoogleUser(profile: GoogleProfile): Promise<AppUser>
   return user
 }
 
+function toSessionUser(user: AppUser): CurrentSessionUser {
+  return {
+    id: user.googleSub,
+    email: user.email,
+    handle: user.handle,
+    role: user.role
+  }
+}
+
+export async function syncSessionUser(
+  event: H3Event,
+  user: AppUser,
+  session?: UserSession
+): Promise<CurrentSessionUser> {
+  const currentUser = toSessionUser(user)
+  await setUserSession(event, { ...(session ?? await getUserSession(event)), user: currentUser })
+  return currentUser
+}
+
 // 민감한 작업 전 DB의 최신 계정 정보를 읽어 세션 권한을 동기화한다.
 export async function getCurrentSessionUser(event: H3Event): Promise<CurrentSessionUser | null> {
   const session = await getUserSession(event)
@@ -94,12 +111,7 @@ export async function getCurrentSessionUser(event: H3Event): Promise<CurrentSess
     return null
   }
 
-  const currentUser: CurrentSessionUser = {
-    id: user.googleSub,
-    email: user.email,
-    handle: user.handle,
-    role: user.role
-  }
+  const currentUser = toSessionUser(user)
 
   if (
     sessionUser.id !== currentUser.id
@@ -107,10 +119,7 @@ export async function getCurrentSessionUser(event: H3Event): Promise<CurrentSess
     || sessionUser.handle !== currentUser.handle
     || sessionUser.role !== currentUser.role
   ) {
-    await setUserSession(event, {
-      ...session,
-      user: currentUser
-    })
+    await syncSessionUser(event, user, session)
   }
 
   return currentUser

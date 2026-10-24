@@ -8,20 +8,19 @@ import type {
   EditorTranslationLogEntry,
   EditorTranslationLogResponse
 } from '#shared/types/editor'
-import { getEditorDiffParts } from '~/utils/editor-diff'
+import { createEditorDiffCache } from '~/utils/editor-diff-cache'
+import { getEditorItemLocation } from '~/utils/editor-links'
+import { getRequestErrorMessage } from '~/utils/request-error'
 import { formatEditorDate } from '~/utils/editor-helpers'
 
 definePageMeta({ middleware: 'reviewer' })
 useAstralPageSeo('번역 승인')
 
-const defaultData: EditorTranslationLogResponse = {
-  entries: [],
-  total: 0,
-  page: 1,
-  pageSize: 50,
-  totalPages: 1
+function createEmptyReviewData(): EditorTranslationLogResponse {
+  return { entries: [], total: 0, page: 1, pageSize: 50, totalPages: 1 }
 }
 
+const getDiffParts = createEditorDiffCache()
 const page = ref(1)
 const reviewKind = ref<EditorChangeKind>('translation_edit')
 const reviewingId = ref<string | null>(null)
@@ -41,7 +40,7 @@ const {
   refresh
 } = await useFetch<EditorTranslationLogResponse>('/api/editor/review', {
   query: computed(() => ({ page: page.value, changeKind: reviewKind.value })),
-  default: () => defaultData
+  default: createEmptyReviewData
 })
 
 const entries = computed(() => data.value?.entries ?? [])
@@ -151,7 +150,7 @@ async function executeSingleReview(entry: EditorTranslationLogEntry, action: Edi
     showToast({
       id: `translation-review-failed-${entry.id}`,
       title: '번역 검토를 처리하지 못했습니다.',
-      description: reviewError instanceof Error ? reviewError.message : undefined
+      description: getRequestErrorMessage(reviewError, undefined)
     })
   } finally {
     reviewingId.value = null
@@ -201,7 +200,7 @@ async function executeBatchReview(ids: string[], action: EditorReviewAction): Pr
     showToast({
       id: `translation-batch-review-failed-${action}`,
       title: '선택한 번역을 처리하지 못했습니다.',
-      description: reviewError instanceof Error ? reviewError.message : undefined
+      description: getRequestErrorMessage(reviewError, undefined)
     })
   } finally {
     batchReviewAction.value = null
@@ -256,17 +255,23 @@ async function prepareApproval(
       }
 
       if (group.candidates.length === 1) {
-        selections[group.unitId] = group.candidates[0]!.id
+        const first = group.candidates[0]
+        if (first) selections[group.unitId] = first.id
       } else if (selectedCandidates.length === 1) {
-        selections[group.unitId] = selectedCandidates[0]!.id
+        const first = selectedCandidates[0]
+        if (first) selections[group.unitId] = first.id
       }
     }
 
     if (groups.every(group => group.candidates.length === 1)) {
       if (requestedEntries.length === 1) {
-        await executeSingleReview(requestedEntries[0]!, 'approve')
+        const first = requestedEntries[0]
+        if (first) await executeSingleReview(first, 'approve')
       } else {
-        await executeBatchReview(groups.map(group => group.candidates[0]!.id), 'approve')
+        await executeBatchReview(groups.flatMap((group) => {
+          const first = group.candidates[0]
+          return first ? [first.id] : []
+        }), 'approve')
       }
       return
     }
@@ -278,7 +283,7 @@ async function prepareApproval(
     showToast({
       id: 'translation-batch-review-candidates-failed',
       title: '승인 후보를 불러오지 못했습니다.',
-      description: reviewError instanceof Error ? reviewError.message : undefined
+      description: getRequestErrorMessage(reviewError, undefined)
     })
   } finally {
     isPreparingApproval.value = false
@@ -308,7 +313,10 @@ async function confirmApprovalSelection(): Promise<void> {
     return
   }
 
-  const ids = approvalGroups.value.map(group => approvalSelections.value[group.unitId]!)
+  const ids = approvalGroups.value.flatMap((group) => {
+    const id = approvalSelections.value[group.unitId]
+    return id ? [id] : []
+  })
   approvalModalOpen.value = false
   await executeBatchReview(ids, 'approve')
   resetApprovalDialog()
@@ -478,16 +486,7 @@ async function confirmApprovalSelection(): Promise<void> {
           </UBadge>
           <div class="flex flex-1">
             <NuxtLink
-              :to="{
-                path: '/translate/editor',
-                query: {
-                  file: entry.category,
-                  search: `${entry.category}_${entry.unitKey}`,
-                  searchType: 'key',
-                  match: 'exact',
-                  page: '1'
-                }
-              }"
+              :to="getEditorItemLocation(entry)"
               class="min-w-0 truncate text-sm font-medium text-default hover:underline underline-offset-2"
             >
               {{ entry.category }}_{{ entry.unitKey }}
@@ -514,18 +513,7 @@ async function confirmApprovalSelection(): Promise<void> {
             v-else
             class="whitespace-pre-wrap wrap-break-word bg-default/75 p-4 text-sm leading-6 text-toned"
           >
-            <template
-              v-for="(part, partIndex) in getEditorDiffParts(entry.previousText ?? '', entry.proposedText)"
-              :key="`${part.type}-${partIndex}`"
-            >
-              <span
-                :class="part.type === 'removed'
-                  ? 'bg-error/10 text-error'
-                  : part.type === 'added'
-                    ? 'bg-success/10 text-success'
-                    : 'text-toned'"
-              >{{ part.text }}</span>
-            </template>
+            <EditorDiffText :parts="getDiffParts(entry)" side="unified" />
             <span v-if="!entry.previousText && !entry.proposedText">빈 문자열</span>
           </p>
         </div>
@@ -548,16 +536,7 @@ async function confirmApprovalSelection(): Promise<void> {
 
             <div class="flex flex-wrap justify-end gap-2">
               <UButton
-                :to="{
-                  path: '/translate/editor',
-                  query: {
-                    file: entry.category,
-                    search: `${entry.category}_${entry.unitKey}`,
-                    searchType: 'key',
-                    match: 'exact',
-                    page: '1'
-                  }
-                }"
+                :to="getEditorItemLocation(entry)"
                 icon="i-tabler-external-link"
                 color="neutral"
                 variant="soft"
@@ -605,121 +584,15 @@ async function confirmApprovalSelection(): Promise<void> {
       />
     </div>
 
-    <UModal
+    <EditorReviewApprovalModal
       v-model:open="approvalModalOpen"
-      title="승인할 번역 선택"
-      description="같은 번역 항목에 여러 승인 대기 요청이 있습니다. 항목마다 최종 승인할 요청을 하나씩 선택해 주세요."
-      :ui="{
-        content: 'sm:max-w-240',
-        footer: 'justify-end'
-      }"
-    >
-      <template #body>
-        <div class="flex max-h-[65vh] flex-col gap-5 overflow-y-auto pr-1">
-          <UAlert
-            color="warning"
-            variant="soft"
-            icon="i-tabler-git-merge"
-            title="다른 탭과 현재 페이지 밖의 요청도 함께 표시됩니다."
-            description="같은 항목의 모든 승인 대기 요청을 비교할 수 있으며, 승인한 요청을 제외한 나머지는 자동 종료됩니다."
-          />
-
-          <section
-            v-for="group in approvalConflictGroups"
-            :key="group.unitId"
-            class="flex flex-col gap-3"
-          >
-            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-default pb-2">
-              <span class="min-w-0 truncate text-sm font-semibold text-default">
-                {{ group.category }}_{{ group.unitKey }}
-              </span>
-              <UBadge
-                color="neutral"
-                variant="soft"
-                size="sm"
-              >
-                {{ group.candidates.length }}개 요청
-              </UBadge>
-            </div>
-
-            <URadioGroup
-              :model-value="approvalSelections[group.unitId]"
-              :items="group.candidates"
-              value-key="id"
-              color="neutral"
-              variant="card"
-              :ui="{
-                fieldset: 'gap-y-2',
-                item: 'rounded-none p-3',
-                wrapper: 'min-w-0',
-                description: 'mt-2 whitespace-pre-wrap wrap-break-word leading-6'
-              }"
-              @update:model-value="setApprovalSelection(group.unitId, $event)"
-            >
-              <template #label="{ item }">
-                <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                  <span class="font-medium text-default">{{ item.handle ? `@${item.handle}` : '익명' }}</span>
-                  <UBadge
-                    :color="item.changeKind === 'retain_confirmation' ? 'neutral' : 'info'"
-                    variant="soft"
-                    size="xs"
-                  >
-                    {{ item.changeKind === 'retain_confirmation' ? '유지 확인' : '번역 수정' }}
-                  </UBadge>
-                  <time
-                    class="text-xs font-normal text-muted"
-                    :datetime="item.createdAt"
-                  >
-                    {{ formatEditorDate(item.createdAt) }}
-                  </time>
-                </span>
-              </template>
-
-              <template #description="{ item }">
-                <template v-if="item.changeKind === 'retain_confirmation'">
-                  <span class="text-muted">기존 번역 유지 · </span>
-                  <span class="text-toned">{{ item.proposedText }}</span>
-                </template>
-                <template v-else>
-                  <template
-                    v-for="(part, partIndex) in getEditorDiffParts(item.previousText ?? '', item.proposedText)"
-                    :key="`${item.id}-${part.type}-${partIndex}`"
-                  >
-                    <span
-                      :class="part.type === 'removed'
-                        ? 'bg-error/10 text-error'
-                        : part.type === 'added'
-                          ? 'bg-success/10 text-success'
-                          : 'text-toned'"
-                    >{{ part.text }}</span>
-                  </template>
-                  <span v-if="!item.previousText && !item.proposedText">빈 문자열</span>
-                </template>
-              </template>
-            </URadioGroup>
-          </section>
-        </div>
-      </template>
-
-      <template #footer="{ close }">
-        <UButton
-          color="neutral"
-          variant="outline"
-          :disabled="isReviewing"
-          @click="close"
-        >
-          취소
-        </UButton>
-        <UButton
-          color="success"
-          icon="i-tabler-check"
-          :loading="batchReviewAction === 'approve'"
-          :disabled="!approvalSelectionComplete || isReviewing"
-          @click="confirmApprovalSelection"
-        >
-          선택한 번역 승인
-        </UButton>
-      </template>
-    </UModal>
+      :groups="approvalConflictGroups"
+      :selections="approvalSelections"
+      :selection-complete="approvalSelectionComplete"
+      :busy="isReviewing"
+      :loading="batchReviewAction === 'approve'"
+      @select="setApprovalSelection"
+      @confirm="confirmApprovalSelection"
+    />
   </section>
 </template>

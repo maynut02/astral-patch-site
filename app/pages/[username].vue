@@ -2,10 +2,10 @@
 import type { UserProfileDetails } from '#shared/types/profile'
 import {
   formatHandle,
-  getErrorStatus,
   getHandleInitial,
   getSocialLinkIcon
 } from '~/utils/profile'
+import { getRequestErrorStatus } from '~/utils/request-error'
 
 definePageMeta({
   validate: (route) => {
@@ -39,7 +39,7 @@ const { data: profile, error } = await useAsyncData(`public-user-${handle}`, () 
 
 if (error.value || !profile.value) {
   throw createError({
-    statusCode: getErrorStatus(error.value) || 404,
+    statusCode: getRequestErrorStatus(error.value) || 404,
     statusMessage: '사용자를 찾을 수 없습니다.'
   })
 }

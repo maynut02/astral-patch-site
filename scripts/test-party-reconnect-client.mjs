@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
-import { registerHooks } from 'node:module'
+import { readFileSync } from 'node:fs'
+import { createRequire, registerHooks } from 'node:module'
 import test from 'node:test'
+import { pathToFileURL } from 'node:url'
 
 // 이 스크립트는 실제 소켓/DB 대신 가짜 WebSocket과 가짜 스토리지로 클라이언트 동작만 검증한다.
 const projectRoot = new URL('../', import.meta.url)
-const vueEntry = readdirSync(new URL('node_modules/.pnpm/', projectRoot))
-  .find(name => /^vue@/.test(name))
-if (!vueEntry) throw new Error('vue is not installed; run pnpm install first.')
-const vueUrl = new URL(`node_modules/.pnpm/${vueEntry}/node_modules/vue/index.mjs`, projectRoot).href
+const nuxtRequire = createRequire(createRequire(import.meta.url).resolve('nuxt/package.json'))
+const vueUrl = pathToFileURL(nuxtRequire.resolve('vue/package.json').replace(/package\.json$/, 'index.mjs')).href
 
 const storageState = { session: new Map(), local: new Map(), throwOn: new Set() }
 const fakeStorage = {
@@ -896,7 +895,8 @@ test('returning to the page probes an open socket and replaces it only when noth
 
 // --- 페이지(SFC script) 수준 동작 검증 ---
 const pageSfc = readFileSync(new URL('app/pages/party/[roomId].vue', projectRoot), 'utf8')
-const pageScript = pageSfc.slice(pageSfc.indexOf('<script setup lang="ts">') + '<script setup lang="ts">'.length, pageSfc.indexOf('</script>'))
+const pageScript = pageSfc.match(/<script setup lang="ts">([\s\S]*?)<\/script>/)?.[1]
+assert.ok(pageScript, 'party room script setup must remain available to the page harness')
 // Nuxt auto-import가 제공하는 심볼을 최소 스텁으로 주입하고 페이지 상태를 노출한다.
 globalThis.__partyPageSource = `${pagePrefix}
 ${pageScript}
@@ -1053,3 +1053,61 @@ async function nextTickVm() {
   await vue.nextTick()
   await Promise.resolve()
 }
+
+test('UTF-16 composer limits and append notifications stay aligned', () => {
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  socket.receive(joinedMessage({ participants: [participant('self')] }))
+  const version = context.chat.appendedMessageVersion.value
+  assert.equal(context.chat.send('😀'.repeat(500)), true)
+  assert.equal(context.chat.appendedMessageVersion.value, version + 1)
+  const outgoing = socket.sent.findLast(message => message.type === 'CHAT')
+  socket.receive({ type: 'CHAT', message: { ...chatMessage('confirmed-utf16', outgoing.clientMessageId), text: outgoing.text } })
+  assert.equal(context.chat.appendedMessageVersion.value, version + 1)
+  assert.equal(context.chat.send('😀'.repeat(501)), false)
+  assert.equal(context.chat.send(`${'😀'.repeat(500)}a`), false)
+  socket.receive({ type: 'JOIN_NOTICE', notice: { kind: 'join', id: 'new-notice', nickname: '밥', createdAt: new Date().toISOString() } })
+  assert.equal(context.chat.appendedMessageVersion.value, version + 2)
+})
+
+test('malformed server frames are ignored before they reach client state', () => {
+  const context = createChat()
+  context.chat.join(credentials())
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  const originalWarn = console.warn
+  const warnings = []
+  console.warn = (...args) => warnings.push(args)
+  try {
+    for (const message of [
+      null,
+      { type: 'JOINED', participants: null },
+      { type: 'CHAT', message: { kind: 'chat' } },
+      { type: 'PARTICIPANTS', participants: [null] },
+      { type: 'UNKNOWN' }
+    ]) socket.receive(message)
+    assert.equal(warnings.length, 5)
+    assert.equal(context.chat.status.value, 'connecting')
+    assert.deepEqual(context.chat.messages.value, [])
+    socket.receive(joinedMessage())
+    assert.equal(context.chat.status.value, 'connected')
+  } finally {
+    console.warn = originalWarn
+  }
+})
+
+test('nickname validation and input attributes share party limits', async () => {
+  const { PARTY_MAX_NICKNAME_LENGTH, PARTY_MAX_TEXT_LENGTH, PARTY_ROOM_ID_LENGTH } = await import(new URL('shared/types/party.ts', projectRoot).href)
+  const { validatePartyNickname } = await import(new URL('app/utils/party-nickname.ts', projectRoot).href)
+  assert.equal(validatePartyNickname('😀'.repeat(PARTY_MAX_NICKNAME_LENGTH / 2)).error, '')
+  assert.equal(validatePartyNickname('😀'.repeat(PARTY_MAX_NICKNAME_LENGTH / 2 + 1)).error, `${PARTY_MAX_NICKNAME_LENGTH}자 이내의 닉네임을 입력해 주세요.`)
+  assert.equal(PARTY_MAX_TEXT_LENGTH, 1_000)
+  assert.equal(PARTY_ROOM_ID_LENGTH, 6)
+  const entrySfc = readFileSync(new URL('app/pages/party/index.vue', projectRoot), 'utf8')
+  assert.match(entrySfc, /:maxlength="PARTY_ROOM_ID_LENGTH"/)
+  assert.match(entrySfc, /:maxlength="PARTY_MAX_NICKNAME_LENGTH"/)
+  assert.match(pageSfc, /:maxlength="PARTY_MAX_NICKNAME_LENGTH"/)
+  assert.match(pageSfc, /:maxlength="PARTY_MAX_TEXT_LENGTH"/)
+})

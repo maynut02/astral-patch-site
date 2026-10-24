@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import type { Notice, NoticesResponse } from '#shared/types/notice'
+import {
+  NOTICE_BODY_MAX_LENGTH,
+  NOTICE_TITLE_MAX_LENGTH,
+  type Notice,
+  type NoticesResponse
+} from '#shared/types/notice'
 
 useAstralPageSeo('공지사항')
-
-const NOTICE_TITLE_MAX_LENGTH = 160
-const NOTICE_BODY_MAX_LENGTH = 10_000
 
 const { user } = useUserSession()
 const { showToast } = useAppToast()

@@ -1,5 +1,6 @@
 <script setup>
-const siteTitle = '아스트랄 파티 한글패치'
+import { ASTRAL_SITE_TITLE as siteTitle, ASTRAL_SITE_DESCRIPTION as description } from '~/composables/page-seo'
+
 const route = useRoute()
 const pageUrl = withSiteUrl(computed(() => route.path))
 
@@ -21,8 +22,6 @@ useHead({
 })
 
 const toaster = { expand: false, position: 'top-center' }
-
-const description = '아스트랄 파티 한글패치의 다운로드, 설치 가이드, 번역 현황과 변경 기록을 제공하는 비공식 한국어 패치 사이트입니다.'
 
 useSeoMeta({
   description,

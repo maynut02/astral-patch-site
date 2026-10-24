@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ReleaseFeedResponse } from '#shared/types/releases'
+import { useReleaseFeed, useReleaseDistribution } from '~/composables/use-release-feed'
 
 const route = useRoute()
 
@@ -54,9 +54,9 @@ const {
   status,
   error,
   refresh
-} = await useFetch<ReleaseFeedResponse>('/api/releases')
+} = await useReleaseFeed('patcher-release-feed')
 
-const windowsPatcher = computed(() => releaseFeed.value?.distribution.windowsPatcher ?? null)
+const { windowsPatcher } = useReleaseDistribution(releaseFeed)
 const isLoading = computed(() => status.value === 'idle' || status.value === 'pending')
 
 function launchPatcher(): void {

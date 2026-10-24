@@ -1,9 +1,7 @@
-export default defineNuxtRouteMiddleware(async (to) => {
-  const { ready, loggedIn, user, fetch } = useUserSession()
+import { useReadySession } from '~/composables/use-ready-session'
 
-  if (!ready.value) {
-    await fetch()
-  }
+export default defineNuxtRouteMiddleware(async (to) => {
+  const { loggedIn, user } = await useReadySession()
 
   if (!loggedIn.value) {
     return

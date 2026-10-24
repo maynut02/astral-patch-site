@@ -1,4 +1,6 @@
 import { createError, getHeader, getRequestIP, setResponseHeader } from 'h3'
+import { PARTY_MAX_NICKNAME_LENGTH } from '../../../shared/types/party'
+import { getTrustedClientIp } from '../../utils/ws-origin'
 import { readJsonBody } from '../../utils/request-security'
 import {
   canResumePartyParticipant,
@@ -6,12 +8,7 @@ import {
   isPartyNicknameTaken,
   normalizePartyNickname
 } from '../../utils/party-chat'
-
-interface CreatePartyRoomBody extends Record<string, unknown> {
-  roomId?: unknown
-  nickname?: unknown
-  reconnectToken?: unknown
-}
+import type { PartyCreateFailure } from '../../utils/party-chat-types'
 
 interface CreateAttemptState {
   count: number
@@ -21,16 +18,7 @@ interface CreateAttemptState {
 const CREATE_ATTEMPT_LIMIT = 12
 const CREATE_ATTEMPT_WINDOW_MS = 60_000
 const createAttemptsByIp = new Map<string, CreateAttemptState>()
-
-function getClientIp(event: Parameters<typeof getRequestIP>[0]): string {
-  if (process.env.ASTRAL_TRUST_PROXY === 'true') {
-    return getHeader(event, 'x-real-ip')?.trim()
-      || getRequestIP(event)
-      || 'unknown'
-  }
-
-  return getRequestIP(event) || 'unknown'
-}
+const CREATE_ROOM_ERROR_STATUS = { INVALID_ROOM_ID: 400, ROOM_LIMIT: 503 } as const
 
 function consumeCreateAttempt(ipAddress: string, now: number): boolean {
   for (const [key, attempt] of createAttemptsByIp) {
@@ -52,27 +40,27 @@ function consumeCreateAttempt(ipAddress: string, now: number): boolean {
   return current.count <= CREATE_ATTEMPT_LIMIT
 }
 
-function throwCreateRoomError(code: string, message: string): never {
-  const statusCode = code === 'ROOM_LIMIT' ? 503 : 400
+function throwCreateRoomError(code: PartyCreateFailure['code'], message: string): never {
+  const statusCode = CREATE_ROOM_ERROR_STATUS[code]
 
   throw createError({ statusCode, message })
 }
 
 export default defineEventHandler(async (event) => {
-  if (!consumeCreateAttempt(getClientIp(event), Date.now())) {
+  if (!consumeCreateAttempt(getTrustedClientIp(getHeader(event, 'x-real-ip'), getRequestIP(event)), Date.now())) {
     throw createError({
       statusCode: 429,
       message: '방 입장 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.'
     })
   }
 
-  const body = await readJsonBody<CreatePartyRoomBody>(event)
+  const body = await readJsonBody(event)
   if ('password' in body) {
     throw createError({ statusCode: 400, message: '비밀번호 방은 더 이상 지원하지 않습니다.' })
   }
   const nickname = 'nickname' in body ? normalizePartyNickname(body.nickname) : null
   if ('nickname' in body && !nickname) {
-    throw createError({ statusCode: 400, message: '닉네임은 1~20자여야 합니다.' })
+    throw createError({ statusCode: 400, message: `닉네임은 1~${PARTY_MAX_NICKNAME_LENGTH}자여야 합니다.` })
   }
   const result = await createPartyRoom(body.roomId)
 

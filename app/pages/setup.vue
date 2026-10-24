@@ -1,14 +1,7 @@
 <script setup lang="ts">
-import {
-  GAME_PROFILE_VALUE_MAX_LENGTH,
-  HANDLE_MAX_LENGTH,
-  getErrorStatus,
-  sanitizeGameInviteCode,
-  sanitizeGameUid,
-  validateGameInviteCode,
-  validateGameUid,
-  validateHandle
-} from '~/utils/profile'
+import { GAME_PROFILE_VALUE_MAX_LENGTH, HANDLE_MAX_LENGTH } from '#shared/types/profile'
+import { sanitizeGameInviteCode, sanitizeGameUid } from '~/utils/profile'
+import { useProfileForm } from '~/composables/use-profile-form'
 
 definePageMeta({ middleware: 'setup-required' })
 
@@ -16,20 +9,8 @@ useAstralPageSeo('초기 설정')
 
 const { user, fetch: fetchSession } = useUserSession()
 
-const state = reactive({
-  handle: '',
-  gameUid: '',
-  gameInviteCode: ''
-})
-
-const errors = reactive({
-  handle: '',
-  gameUid: '',
-  gameInviteCode: ''
-})
-
-const submitting = ref(false)
-const serverError = ref('')
+const profileForm = useProfileForm()
+const { state, errors, submitting, serverError } = profileForm
 
 watch(user, (value) => {
   if (value) {
@@ -37,44 +18,16 @@ watch(user, (value) => {
   }
 }, { immediate: true })
 
-function validate(): boolean {
-  errors.handle = validateHandle(state.handle)
-  errors.gameUid = validateGameUid(state.gameUid)
-  errors.gameInviteCode = validateGameInviteCode(state.gameInviteCode)
-
-  return !errors.handle && !errors.gameUid && !errors.gameInviteCode
-}
-
 async function submit(): Promise<void> {
-  serverError.value = ''
-
-  if (!validate()) {
-    return
-  }
-
-  submitting.value = true
-
-  try {
-    await $fetch('/api/profile', {
-      method: 'PATCH',
-      body: {
-        handle: state.handle.trim(),
-        gameUid: state.gameUid.trim(),
-        gameInviteCode: state.gameInviteCode.trim()
-      }
-    })
-
-    await fetchSession()
-    await navigateTo('/auth/continue', { external: true })
-  } catch (error: unknown) {
-    if (getErrorStatus(error) === 409) {
-      errors.handle = '이미 사용 중인 핸들이에요.'
-    } else {
-      serverError.value = '프로필을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.'
-    }
-  } finally {
-    submitting.value = false
-  }
+  await profileForm.submit({
+    validate: profileForm.validate,
+    body: profileForm.normalizedState,
+    onSaved: async () => {
+      await fetchSession()
+      await navigateTo('/auth/continue', { external: true })
+    },
+    failureMessage: '프로필을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.'
+  })
 }
 </script>
 

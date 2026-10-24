@@ -10,6 +10,7 @@ declare module '#auth-utils' {
 
   interface UserSession {
     loggedInAt?: number
+    refreshedAt?: number
   }
 }
 

@@ -1,5 +1,6 @@
 import type { PartyParticipant, PartyRoomMessage } from '../../shared/types/party'
 import type { DatabaseClient } from './database.ts'
+import { PARTY_LIMITS } from './party-chat-limits.ts'
 
 async function withDatabaseRetry<T>(operation: (database: DatabaseClient) => Promise<T>): Promise<T> {
   const databaseModule = await import('./database.ts')
@@ -56,7 +57,7 @@ export interface PartyConnectionEvent {
 interface StoredPartyRoom {
   sessionId: string
   createdAt: string
-  expiresAt: string
+  emptySinceMs: number
   messages: PartyRoomMessage[]
   participants: StoredPartyParticipant[]
 }
@@ -162,7 +163,7 @@ export const postgresPartyChatStore: PartyChatStore = {
     return {
       sessionId: session.id,
       createdAt: timestamp(session.created_at),
-      expiresAt: timestamp(session.expires_at),
+      emptySinceMs: Date.parse(timestamp(session.expires_at)) - PARTY_LIMITS.emptyRoomTtlMs,
       messages: await readRecentMessages(session.id),
       participants: await readActiveParticipants(session.id)
     }
@@ -177,7 +178,7 @@ export const postgresPartyChatStore: PartyChatStore = {
     return {
       sessionId: rows[0].id,
       createdAt: timestamp(rows[0].created_at),
-      expiresAt: timestamp(rows[0].expires_at),
+      emptySinceMs: Date.parse(timestamp(rows[0].expires_at)) - PARTY_LIMITS.emptyRoomTtlMs,
       messages: await readRecentMessages(rows[0].id),
       participants: await readActiveParticipants(rows[0].id)
     }

@@ -1,4 +1,5 @@
 import { getDatabase } from './database'
+import { effectiveWorkbenchText, workbenchStatusCounts } from './editor/sql'
 import type {
   EditorCategoryProgress,
   EditorOverviewResponse,
@@ -61,35 +62,13 @@ export async function getEditorOverview(): Promise<EditorOverviewResponse> {
         wb.namespace AS category,
         wb.latest_change_status AS latest_change_status,
         wb.approved_for_current_source AS approved_for_current_source,
-        CASE
-          WHEN wb.latest_change_status = 'pending'
-            THEN COALESCE(
-              NULLIF(BTRIM(wb.latest_proposed_text), ''),
-              NULLIF(BTRIM(wb.approved_text), '')
-            )
-          ELSE NULLIF(BTRIM(wb.approved_text), '')
-        END AS effective_text
+        ${effectiveWorkbenchText(database, true)} AS effective_text
       FROM translation_workbench wb
       WHERE NULLIF(BTRIM(wb.namespace), '') IS NOT NULL
     )
     SELECT
       category,
-      count(*)::int AS total,
-      count(*) FILTER (
-        WHERE effective_text IS NOT NULL
-          AND latest_change_status IS DISTINCT FROM 'pending'
-          AND approved_for_current_source IS TRUE
-      )::int AS success,
-      count(*) FILTER (
-        WHERE effective_text IS NOT NULL
-          AND latest_change_status = 'pending'
-      )::int AS info,
-      count(*) FILTER (
-        WHERE effective_text IS NOT NULL
-          AND latest_change_status IS DISTINCT FROM 'pending'
-          AND approved_for_current_source IS NOT TRUE
-      )::int AS warning,
-      count(*) FILTER (WHERE effective_text IS NULL)::int AS untranslated
+      ${workbenchStatusCounts(database)}
     FROM workbench
     GROUP BY category
     ORDER BY category ASC
@@ -100,14 +79,7 @@ export async function getEditorOverview(): Promise<EditorOverviewResponse> {
           wb.unit_id,
           wb.latest_change_status AS latest_change_status,
           wb.approved_for_current_source AS approved_for_current_source,
-          CASE
-            WHEN wb.latest_change_status = 'pending'
-              THEN COALESCE(
-                NULLIF(BTRIM(wb.latest_proposed_text), ''),
-                NULLIF(BTRIM(wb.approved_text), '')
-              )
-            ELSE NULLIF(BTRIM(wb.approved_text), '')
-          END AS effective_text
+          ${effectiveWorkbenchText(database, true)} AS effective_text
         FROM translation_workbench wb
       ),
       version_items AS (
@@ -131,22 +103,7 @@ export async function getEditorOverview(): Promise<EditorOverviewResponse> {
         "version",
         revision,
         "detectedAt",
-        count(*)::int AS total,
-        count(*) FILTER (
-          WHERE effective_text IS NOT NULL
-            AND latest_change_status IS DISTINCT FROM 'pending'
-            AND approved_for_current_source IS TRUE
-        )::int AS success,
-        count(*) FILTER (
-          WHERE effective_text IS NOT NULL
-            AND latest_change_status = 'pending'
-        )::int AS info,
-        count(*) FILTER (
-          WHERE effective_text IS NOT NULL
-            AND latest_change_status IS DISTINCT FROM 'pending'
-            AND approved_for_current_source IS NOT TRUE
-        )::int AS warning,
-        count(*) FILTER (WHERE effective_text IS NULL)::int AS untranslated
+        ${workbenchStatusCounts(database)}
       FROM version_items
       GROUP BY id, "version", revision, "detectedAt"
       ORDER BY "detectedAt" DESC, "version" DESC, revision DESC, id DESC

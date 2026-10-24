@@ -1,6 +1,7 @@
 import { getCookie, getHeader, getMethod } from 'h3'
 
 const SESSION_COOKIE_NAME = 'nuxt-session'
+const SESSION_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 export default defineEventHandler(async (event) => {
   if (getMethod(event) !== 'GET') {
@@ -17,6 +18,11 @@ export default defineEventHandler(async (event) => {
     return
   }
 
+  const now = Date.now()
+  if (session.refreshedAt !== undefined && now - session.refreshedAt < SESSION_REFRESH_INTERVAL_MS) {
+    return
+  }
+
   const { id: _sessionId, ...sessionData } = session
-  await replaceUserSession(event, sessionData)
+  await replaceUserSession(event, { ...sessionData, refreshedAt: now })
 })

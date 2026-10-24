@@ -4,6 +4,6 @@ import { readJsonBody } from '../../utils/request-security'
 
 export default defineEventHandler(async (event) => {
   await requireAdminSession(event)
-  const body = await readJsonBody<{ gameVersion?: unknown }>(event)
+  const body = await readJsonBody(event)
   return updateAdminPatchWatcherGameVersion(body.gameVersion)
 })

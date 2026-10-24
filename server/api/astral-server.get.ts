@@ -24,7 +24,7 @@ export default defineEventHandler(async () => {
   } catch {
     throw createError({
       statusCode: 502,
-      message: '게임 서버 정보를 불러오지 못했습니다.'
+      statusMessage: '게임 서버 정보를 불러오지 못했습니다.'
     })
   }
 })

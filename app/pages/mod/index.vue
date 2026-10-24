@@ -5,14 +5,14 @@ import { MOD_PLATFORM_ITEMS, formatModDate, getModPlatformIcon, getModPlatformLa
 useAstralPageSeo('모드 허브')
 
 const router = useRouter()
-const { loggedIn, user } = useUserSession()
+const { loggedIn } = useUserSession()
 const { showToast } = useAppToast()
 const search = ref('')
 const platform = ref('all')
 const onlyMine = ref(false)
 const sort = ref('created')
 const editorOpen = ref(false)
-const sessionKey = computed(() => JSON.stringify([loggedIn.value, user.value?.id, user.value?.role]))
+const sessionKey = useSessionKey()
 const registrationSession = ref('')
 const platformItems = [{ label: '모든 플랫폼', value: 'all' }, ...MOD_PLATFORM_ITEMS]
 const sortItems = [

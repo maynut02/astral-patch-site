@@ -1,9 +1,6 @@
 name: ci
 
 on:
-  push:
-    branches:
-      - develop
   pull_request:
     branches:
       - release
@@ -60,11 +57,8 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
-      - name: Run party room tests
-        run: pnpm run test:party:rooms
-
-      - name: Run party WebSocket adapter tests
-        run: pnpm run test:party:adapter
+      - name: Run unit tests
+        run: pnpm run test:unit
 
       - name: Typecheck
         run: pnpm run typecheck
@@ -81,81 +75,7 @@ jobs:
           pnpm run test:security
           pnpm config set fetch-retries 0
           pnpm config set fetch-timeout 30000
-
-          for attempt in 1 2; do
-            stdout_file="$(mktemp)"
-            stderr_file="$(mktemp)"
-
-            set +e
-            timeout 60s pnpm audit --prod --audit-level high --json >"$stdout_file" 2>"$stderr_file"
-            audit_exit=$?
-            set -e
-
-            cat "$stdout_file"
-            cat "$stderr_file" >&2
-
-            audit_result="$(node - "$stdout_file" <<'NODE'
-          const fs = require('node:fs')
-
-          const file = process.argv[2]
-          let high = 0
-          let critical = 0
-          let timeoutError = false
-
-          try {
-            const report = JSON.parse(fs.readFileSync(file, 'utf8'))
-            // pnpm 11 metadata still counts ignored advisories. The advisory
-            // map contains the actionable results after level/exception filtering.
-            if (report?.advisories && typeof report.advisories === 'object') {
-              for (const advisory of Object.values(report.advisories)) {
-                if (advisory?.severity === 'high') high += 1
-                if (advisory?.severity === 'critical') critical += 1
-              }
-            } else {
-              high = Number(report?.metadata?.vulnerabilities?.high ?? 0)
-              critical = Number(report?.metadata?.vulnerabilities?.critical ?? 0)
-            }
-
-            const errorCode = Number(report?.error?.code ?? NaN)
-            const errorMessage = String(report?.error?.message ?? '')
-            timeoutError = errorCode === 23 || /timeout|timed out|operation was aborted/i.test(errorMessage)
-          } catch {
-            // JSON 보고서가 없는 네트워크 오류는 stderr 검사에서 판별한다.
-          }
-
-          process.stdout.write(`${high} ${critical} ${timeoutError ? 1 : 0}`)
-          NODE
-            )"
-            read -r high_count critical_count json_timeout <<<"$audit_result"
-
-            if (( high_count > 0 || critical_count > 0 )); then
-              echo "High/critical vulnerabilities found: high=${high_count}, critical=${critical_count}" >&2
-              rm -f "$stdout_file" "$stderr_file"
-              exit 1
-            fi
-
-            if [ "$audit_exit" -eq 0 ]; then
-              rm -f "$stdout_file" "$stderr_file"
-              exit 0
-            fi
-
-            if [ "$audit_exit" -eq 124 ] || [ "$json_timeout" -eq 1 ] \
-              || grep -Eqi 'timeout|timed out|operation was aborted due to timeout|error \(23\)' "$stdout_file" "$stderr_file"; then
-              rm -f "$stdout_file" "$stderr_file"
-
-              if [ "$attempt" -eq 2 ]; then
-                echo "::warning::pnpm audit could not reach the npm security advisory API because of a network timeout. High/critical vulnerability status could not be verified in this run."
-                exit 0
-              fi
-
-              sleep 10
-              continue
-            fi
-
-            echo "pnpm audit failed for a non-timeout reason (exit code ${audit_exit})." >&2
-            rm -f "$stdout_file" "$stderr_file"
-            exit "$audit_exit"
-          done
+          pnpm run audit:prod
 
       - name: Stop migration database
         if: always()

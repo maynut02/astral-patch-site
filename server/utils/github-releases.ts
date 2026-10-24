@@ -1,4 +1,3 @@
-import { createError } from 'h3'
 import type {
   AndroidPatcherIndex,
   IndexedReleaseArtifact,
@@ -11,166 +10,21 @@ import type {
   WindowsPatcherIndex,
   WindowsPluginIndex
 } from '#shared/types/releases'
+import { fetchDistributionJson, fetchReleasePage, GITHUB_PAGE_SIZE } from './github/client'
+import { asNumber, asString, isRecord, normalizeReleases } from './github/normalizers'
 
 const PATCH_REPOSITORY = 'maynut02/astral-party-korean-patch'
 const PATCHER_REPOSITORY = 'maynut02/astral-party-auto-patcher'
-const GITHUB_PAGE_SIZE = 100
+const PLUGIN_REPOSITORY = 'maynut02/astral-party-korean-plugin'
+const PLUGIN_ASSET_PATTERN = /^astralpartykoreanplugin-v.+\.zip$/i
 const GITHUB_MAX_PAGES = 10
 const PATCH_RELEASE_TAG_PATTERN = /^v[^_]+_r\d+(?:_p\d+)?$/
 
 const RELEASE_REPOSITORIES = {
   patch: PATCH_REPOSITORY,
-  patcher: PATCHER_REPOSITORY
+  patcher: PATCHER_REPOSITORY,
+  plugin: PLUGIN_REPOSITORY
 } as const
-
-function getGitHubHeaders(accept: string): Record<string, string> {
-  const token = String(process.env.GITHUB_TOKEN || '').trim()
-  const headers: Record<string, string> = {
-    'Accept': accept,
-    'User-Agent': 'astral-patch-site',
-    'X-GitHub-Api-Version': '2022-11-28'
-  }
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
-
-  return headers
-}
-
-function getGitHubErrorDetails(error: unknown): Record<string, unknown> {
-  if (!error || typeof error !== 'object') {
-    return { message: String(error) }
-  }
-
-  const value = error as {
-    message?: unknown
-    status?: unknown
-    statusCode?: unknown
-    statusMessage?: unknown
-    response?: {
-      status?: unknown
-      statusText?: unknown
-      headers?: { get?: (name: string) => string | null }
-    }
-  }
-  const headers = value.response?.headers
-
-  return {
-    message: typeof value.message === 'string' ? value.message : undefined,
-    status: typeof value.response?.status === 'number'
-      ? value.response.status
-      : typeof value.statusCode === 'number'
-        ? value.statusCode
-        : typeof value.status === 'number'
-          ? value.status
-          : undefined,
-    statusText: typeof value.response?.statusText === 'string'
-      ? value.response.statusText
-      : typeof value.statusMessage === 'string'
-        ? value.statusMessage
-        : undefined,
-    rateLimitRemaining: headers?.get?.('x-ratelimit-remaining') ?? undefined,
-    rateLimitReset: headers?.get?.('x-ratelimit-reset') ?? undefined
-  }
-}
-
-interface GitHubReleaseAsset {
-  id?: unknown
-  name?: unknown
-  content_type?: unknown
-  size?: unknown
-  download_count?: unknown
-  created_at?: unknown
-  updated_at?: unknown
-  browser_download_url?: unknown
-}
-
-interface GitHubRelease {
-  id?: unknown
-  tag_name?: unknown
-  name?: unknown
-  body?: unknown
-  html_url?: unknown
-  prerelease?: unknown
-  draft?: unknown
-  created_at?: unknown
-  published_at?: unknown
-  assets?: unknown
-}
-
-function asString(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
-
-function asNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function normalizeAsset(value: unknown): ReleaseAssetInfo | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null
-  }
-
-  const asset = value as GitHubReleaseAsset
-  const name = asString(asset.name)
-  const downloadUrl = asString(asset.browser_download_url)
-
-  if (!name || !downloadUrl) {
-    return null
-  }
-
-  return {
-    id: asNumber(asset.id),
-    name,
-    contentType: asString(asset.content_type),
-    size: asNumber(asset.size),
-    downloadCount: asNumber(asset.download_count),
-    createdAt: asString(asset.created_at),
-    updatedAt: asString(asset.updated_at),
-    downloadUrl
-  }
-}
-
-function normalizeRelease(value: unknown): ReleaseNoteEntry | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null
-  }
-
-  const release = value as GitHubRelease
-  const tagName = asString(release.tag_name)
-  const url = asString(release.html_url)
-
-  if (!tagName || !url || release.draft === true) {
-    return null
-  }
-
-  const assets = Array.isArray(release.assets)
-    ? release.assets.map(normalizeAsset).filter((asset): asset is ReleaseAssetInfo => Boolean(asset))
-    : []
-
-  return {
-    id: asNumber(release.id),
-    tagName,
-    title: asString(release.name) || tagName,
-    body: asString(release.body),
-    url,
-    prerelease: release.prerelease === true,
-    createdAt: asString(release.created_at),
-    publishedAt: asString(release.published_at) || asString(release.created_at),
-    assets
-  }
-}
-
-function normalizeReleases(rows: GitHubRelease[]): ReleaseNoteEntry[] {
-  return rows
-    .map(normalizeRelease)
-    .filter((release): release is ReleaseNoteEntry => Boolean(release))
-}
 
 function hasAsset(release: ReleaseNoteEntry, predicate: (asset: ReleaseAssetInfo) => boolean): boolean {
   return release.assets.some(predicate)
@@ -182,8 +36,7 @@ function isWindowsPatcherRelease(release: ReleaseNoteEntry): boolean {
 }
 
 function isWindowsPluginRelease(release: ReleaseNoteEntry): boolean {
-  return release.tagName.startsWith('windows-plugin-v')
-    || hasAsset(release, asset => /^astralwindowsplugin-v.+\.zip$/i.test(asset.name))
+  return hasAsset(release, asset => PLUGIN_ASSET_PATTERN.test(asset.name))
 }
 
 function isAndroidPatcherRelease(release: ReleaseNoteEntry): boolean {
@@ -205,38 +58,14 @@ function sortReleases(releases: ReleaseNoteEntry[]): ReleaseNoteEntry[] {
 
 function classifyReleases(
   patchSource: ReleaseNoteEntry[],
-  patcherSource: ReleaseNoteEntry[]
+  patcherSource: ReleaseNoteEntry[],
+  pluginSource: ReleaseNoteEntry[]
 ): ReleaseFeedResponse['releases'] {
   return {
     patch: sortReleases(patchSource.filter(isPatchRelease)),
-    windowsPlugin: sortReleases(patcherSource.filter(isWindowsPluginRelease)),
+    windowsPlugin: sortReleases(pluginSource.filter(isWindowsPluginRelease)),
     windowsPatcher: sortReleases(patcherSource.filter(isWindowsPatcherRelease)),
     androidPatcher: sortReleases(patcherSource.filter(isAndroidPatcherRelease))
-  }
-}
-
-async function fetchReleasePage(repository: string, page: number): Promise<GitHubRelease[]> {
-  try {
-    return await $fetch<GitHubRelease[]>(`https://api.github.com/repos/${repository}/releases`, {
-      query: {
-        per_page: GITHUB_PAGE_SIZE,
-        page
-      },
-      headers: getGitHubHeaders('application/vnd.github+json'),
-      retry: 1,
-      timeout: 10_000
-    })
-  } catch (error) {
-    console.error('[github-releases] GitHub releases request failed', {
-      repository,
-      page,
-      ...getGitHubErrorDetails(error)
-    })
-
-    throw createError({
-      statusCode: 502,
-      statusMessage: 'GitHub release information could not be loaded'
-    })
   }
 }
 
@@ -248,86 +77,64 @@ function hasIndexedAsset(releases: ReleaseNoteEntry[], downloadUrl: string): boo
   return releases.some(release => hasAsset(release, asset => asset.downloadUrl === downloadUrl))
 }
 
-async function fetchRequiredPatchReleases(stablePatchVersions: Set<string>): Promise<ReleaseNoteEntry[]> {
+async function fetchReleasesUntil(
+  repository: string,
+  hasRequiredReleases: (releases: ReleaseNoteEntry[]) => boolean
+): Promise<ReleaseNoteEntry[]> {
   const releases: ReleaseNoteEntry[] = []
-
+  // 종료 조건 이후의 페이지는 조회하지 않아 기존 실패 범위와 반환 목록을 유지한다.
   for (let page = 1; page <= GITHUB_MAX_PAGES; page += 1) {
-    const rows = await fetchReleasePage(PATCH_REPOSITORY, page)
+    const rows = await fetchReleasePage(repository, page)
     releases.push(...normalizeReleases(rows))
-
-    const patchReleases = releases.filter(isPatchRelease)
-    const hasStablePatch = stablePatchVersions.size > 0
-      ? patchReleases.some(release => stablePatchVersions.has(release.tagName))
-      : patchReleases.length > 0
-
-    if (rows.length < GITHUB_PAGE_SIZE || hasStablePatch) {
-      break
-    }
+    if (rows.length < GITHUB_PAGE_SIZE || hasRequiredReleases(releases)) break
   }
-
   return releases
 }
 
-async function fetchRequiredPatcherReleases(
+function fetchRequiredPatchReleases(stablePatchVersions: Set<string>): Promise<ReleaseNoteEntry[]> {
+  return fetchReleasesUntil(PATCH_REPOSITORY, (releases) => {
+    const patchReleases = releases.filter(isPatchRelease)
+    return stablePatchVersions.size > 0
+      ? patchReleases.some(release => stablePatchVersions.has(release.tagName))
+      : patchReleases.length > 0
+  })
+}
+
+function fetchRequiredPatcherReleases(
   windowsPatcherDownloadUrl: string,
   androidPatcherDownloadUrl: string
 ): Promise<ReleaseNoteEntry[]> {
-  const releases: ReleaseNoteEntry[] = []
+  return fetchReleasesUntil(PATCHER_REPOSITORY, releases => (
+    hasIndexedAsset(releases.filter(isWindowsPatcherRelease), windowsPatcherDownloadUrl)
+    && hasIndexedAsset(releases.filter(isAndroidPatcherRelease), androidPatcherDownloadUrl)
+  ))
+}
 
-  for (let page = 1; page <= GITHUB_MAX_PAGES; page += 1) {
-    const rows = await fetchReleasePage(PATCHER_REPOSITORY, page)
-    releases.push(...normalizeReleases(rows))
-
-    const windowsReleases = releases.filter(isWindowsPatcherRelease)
-    const androidReleases = releases.filter(isAndroidPatcherRelease)
-    const hasWindowsPlugin = releases.some(isWindowsPluginRelease)
-    const hasRequiredPatchers = hasIndexedAsset(windowsReleases, windowsPatcherDownloadUrl)
-      && hasIndexedAsset(androidReleases, androidPatcherDownloadUrl)
-      && hasWindowsPlugin
-
-    if (rows.length < GITHUB_PAGE_SIZE || hasRequiredPatchers) {
-      break
-    }
-  }
-
-  return releases
+function fetchRequiredPluginReleases(): Promise<ReleaseNoteEntry[]> {
+  return fetchReleasesUntil(PLUGIN_REPOSITORY, releases => (
+    releases.some(release => !release.prerelease && isWindowsPluginRelease(release))
+  ))
 }
 
 export async function getReleaseHistoryPage(page: number): Promise<ReleaseHistoryPageResponse> {
   const normalizedPage = Math.max(1, Math.floor(page))
-  const [patchRows, patcherRows] = await Promise.all([
+  const [patchRows, patcherRows, pluginRows] = await Promise.all([
     fetchReleasePage(PATCH_REPOSITORY, normalizedPage),
-    fetchReleasePage(PATCHER_REPOSITORY, normalizedPage)
+    fetchReleasePage(PATCHER_REPOSITORY, normalizedPage),
+    fetchReleasePage(PLUGIN_REPOSITORY, normalizedPage)
   ])
 
   return {
     repositories: RELEASE_REPOSITORIES,
     fetchedAt: new Date().toISOString(),
     page: normalizedPage,
-    perPage: GITHUB_PAGE_SIZE * 2,
-    hasMore: patchRows.length === GITHUB_PAGE_SIZE || patcherRows.length === GITHUB_PAGE_SIZE,
-    releases: classifyReleases(normalizeReleases(patchRows), normalizeReleases(patcherRows))
-  }
-}
-
-async function fetchDistributionJson(repository: string, filename: string): Promise<unknown | null> {
-  try {
-    return await $fetch(`https://api.github.com/repos/${repository}/contents/${filename}`, {
-      query: {
-        ref: 'distribution'
-      },
-      headers: getGitHubHeaders('application/vnd.github.raw+json'),
-      retry: 1,
-      timeout: 10_000
-    })
-  } catch (error) {
-    console.warn('[github-releases] GitHub distribution file request failed', {
-      repository,
-      filename,
-      ...getGitHubErrorDetails(error)
-    })
-
-    return null
+    perPage: GITHUB_PAGE_SIZE * 3,
+    hasMore: [patchRows, patcherRows, pluginRows].some(rows => rows.length === GITHUB_PAGE_SIZE),
+    releases: classifyReleases(
+      normalizeReleases(patchRows),
+      normalizeReleases(patcherRows),
+      normalizeReleases(pluginRows)
+    )
   }
 }
 
@@ -509,17 +316,17 @@ function resolveWindowsPatcher(
 function resolveWindowsPlugin(
   releases: ReleaseNoteEntry[]
 ): IndexedReleaseArtifact<WindowsPluginIndex> | null {
-  const candidates = sortReleases(releases.filter(isWindowsPluginRelease))
+  const candidates = sortReleases(releases.filter(release => !release.prerelease && isWindowsPluginRelease(release)))
 
   for (const release of candidates) {
-    const asset = release.assets.find(item => /^astralwindowsplugin-v.+\.zip$/i.test(item.name))
+    const asset = release.assets.find(item => PLUGIN_ASSET_PATTERN.test(item.name))
     if (!asset) {
       continue
     }
 
     return {
       index: {
-        version: versionFromTag(release.tagName, 'windows-plugin-v'),
+        version: versionFromTag(release.tagName, 'v'),
         downloadUrl: asset.downloadUrl,
         size: asset.size
       },
@@ -574,14 +381,15 @@ export async function getReleaseFeed(): Promise<ReleaseFeedResponse> {
       ?? []
   )
 
-  const [patchSource, patcherSource] = await Promise.all([
+  const [patchSource, patcherSource, pluginSource] = await Promise.all([
     fetchRequiredPatchReleases(stablePatchVersions),
     fetchRequiredPatcherReleases(
       windowsPatcherIndex?.downloadUrl ?? '',
       androidPatcherIndex?.downloadUrl ?? ''
-    )
+    ),
+    fetchRequiredPluginReleases()
   ])
-  const releases = classifyReleases(patchSource, patcherSource)
+  const releases = classifyReleases(patchSource, patcherSource, pluginSource)
 
   const stablePatchRelease = stablePatchVersions.size
     ? releases.patch.find(release => stablePatchVersions.has(release.tagName)) ?? null
@@ -601,7 +409,7 @@ export async function getReleaseFeed(): Promise<ReleaseFeedResponse> {
           }
         : null,
       windowsPatcher: resolveWindowsPatcher(windowsPatcherIndex, releases.windowsPatcher),
-      windowsPlugin: resolveWindowsPlugin(patcherSource),
+      windowsPlugin: resolveWindowsPlugin(releases.windowsPlugin),
       androidPatcher: resolveAndroidPatcher(androidPatcherIndex, releases.androidPatcher)
     }
   }

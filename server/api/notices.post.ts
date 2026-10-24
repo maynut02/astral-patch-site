@@ -4,7 +4,7 @@ import { readJsonBody } from '../utils/request-security'
 
 export default defineEventHandler(async (event) => {
   const user = await requireAdminSession(event)
-  const body = await readJsonBody<{ title?: unknown, body?: unknown }>(event)
+  const body = await readJsonBody(event)
 
   return createNotice(user.id, body.title, body.body)
 })

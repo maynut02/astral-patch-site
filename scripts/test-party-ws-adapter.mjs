@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { createRequire } from 'node:module'
 import test from 'node:test'
+import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { loadPartyModuleUrls } from './test-party-module-loader.mjs'
 
-// Exercise the real crossws 0.3.5 node adapter and Node 22's global WebSocket.
+// Exercise the real crossws node adapter used by h3 and Node 22's global WebSocket.
 // Only persistence and Nitro's defineWebSocketHandler global are replaced.
+const nuxtRequire = createRequire(createRequire(import.meta.url).resolve('nuxt/package.json'))
+const crosswsNodeAdapterUrl = pathToFileURL(
+  createRequire(nuxtRequire.resolve('h3')).resolve('crossws/adapters/node')
+).href
 const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
 async function transformModule(path, imports = {}) {
   const source = await readFile(new URL(`../${path}`, import.meta.url), 'utf8')
@@ -21,14 +28,14 @@ async function transformModule(path, imports = {}) {
 }
 
 const typesUrl = await transformModule('shared/types/party.ts')
-const partyChatUrl = await transformModule('server/utils/party-chat.ts', {
-  '../../shared/types/party.ts': typesUrl,
-  './party-chat-storage.ts': moduleUrl('export const postgresPartyChatStore = undefined')
-})
+const { partyChatUrl, limitsUrl, originUrl } = await loadPartyModuleUrls(transformModule, typesUrl, moduleUrl('export const postgresPartyChatStore = undefined'))
+const { PARTY_LIMITS } = await import(limitsUrl)
 const party = await import(partyChatUrl)
 globalThis.defineWebSocketHandler = hooks => hooks
 const hooks = (await import(await transformModule('server/routes/ws/party.ts', {
   '../../utils/party-chat': partyChatUrl,
+  '../../utils/party-chat-limits': limitsUrl,
+  '../../utils/ws-origin': originUrl,
   '../../../shared/types/party': typesUrl
 }))).default
 const rooms = new Map()
@@ -38,7 +45,7 @@ const events = []
 party.setPartyChatStore({
   async openRoom(roomId, sessionId, createdAt, expiresAt) {
     if (!rooms.has(roomId)) {
-      const room = { sessionId, createdAt, expiresAt, messages: [], participants: [] }
+      const room = { sessionId, createdAt, expiresAt, emptySinceMs: Date.parse(expiresAt) - PARTY_LIMITS.emptyRoomTtlMs, messages: [], participants: [] }
       rooms.set(roomId, room)
       sessions.set(sessionId, room)
     }
@@ -65,7 +72,7 @@ party.setPartyChatStore({
   async recordConnectionEvent(event) { events.push(structuredClone(event)) },
   async deleteOldConnectionEvents() {}
 })
-const nodeAdapter = (await import('../node_modules/.pnpm/crossws@0.3.5/node_modules/crossws/dist/adapters/node.mjs')).default
+const nodeAdapter = (await import(crosswsNodeAdapterUrl)).default
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 test('real adapter: loss resume, explicit leave, page-hide grace/resume, silent-drop takeover', { timeout: 18_000 }, async () => {
@@ -157,7 +164,7 @@ test('real adapter: loss resume, explicit leave, page-hide grace/resume, silent-
     await sleep(100)
     // 실제 어댑터가 4001/page-hide를 그대로 넘겨 짧은 유예로 분류되는지만 본다. 만료 시각 동작은 단위 테스트가 검증한다.
     const hiddenDeadline = Date.parse(participants.get(hidden.participantId).departureDeadline) - hideAt
-    assert.ok(hiddenDeadline >= party.PARTY_LIMITS.pageHideGraceMs && hiddenDeadline < party.PARTY_LIMITS.pageHideGraceMs + 1_000)
+    assert.ok(hiddenDeadline >= PARTY_LIMITS.pageHideGraceMs && hiddenDeadline < PARTY_LIMITS.pageHideGraceMs + 1_000)
     assert.equal(participants.get(hidden.participantId).leftAt, null)
     assert.deepEqual(notices(observer, mark), [])
 

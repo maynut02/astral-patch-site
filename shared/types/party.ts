@@ -27,14 +27,16 @@ export function getPartyCharacterImage(id: PartyCharacterId): string {
     : `https://file.maynutlab.com/character/UT_Item_Hero_${id}.png`
 }
 
+export const PARTY_ROOM_ID_LENGTH = 6
 export const PARTY_ROOM_ID_PATTERN = /^[0-9]{6}$/
+export const PARTY_HISTORY_CURSOR_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export const PARTY_HISTORY_MAX_MESSAGES = 300
 export const PARTY_HISTORY_MAX_BYTES = 256 * 1024
 export const PARTY_MAX_NICKNAME_LENGTH = 20
 export const PARTY_MAX_TEXT_LENGTH = 1_000
 
 export function getPartyTextLength(value: string): number {
-  return Array.from(value).length
+  return value.length
 }
 
 export interface PartyRoomSummary {
@@ -102,7 +104,7 @@ export interface PartyJoinClientMessage {
   roomId: string
   nickname: string
   characterId: PartyCharacterId
-  order: PartyOrder | null
+  order?: PartyOrder | null
   reconnectToken?: string
   diagnostics?: PartyConnectionDiagnostics
 }
@@ -139,6 +141,38 @@ export type PartyClientMessage
     | PartySetOrderClientMessage
     | PartyPingClientMessage
     | PartyHistoryClientMessage
+
+// 필드 값은 방 입장 여부와 함께 도메인에서 검사한다. 잘못된 값도 기존 오류 우선순위를 유지한다.
+export type PartyClientMessageInput = {
+  [Type in PartyClientMessage['type']]: { type: Type } & {
+    [Field in Exclude<keyof Extract<PartyClientMessage, { type: Type }>, 'type'>]?: unknown
+  }
+}[PartyClientMessage['type']]
+
+export function parsePartyClientMessage(value: unknown):
+  | { ok: true, message: PartyClientMessageInput }
+  | { ok: false, code: 'INVALID_MESSAGE' | 'UNSUPPORTED_MESSAGE', message: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !('type' in value) || typeof value.type !== 'string') {
+    return { ok: false, code: 'INVALID_MESSAGE', message: '메시지는 type을 포함한 JSON 객체여야 합니다.' }
+  }
+  const input = value as Record<string, unknown>
+  switch (input.type) {
+    case 'JOIN':
+      return { ok: true, message: { type: 'JOIN', roomId: input.roomId, nickname: input.nickname, characterId: input.characterId, order: input.order, reconnectToken: input.reconnectToken, diagnostics: input.diagnostics } }
+    case 'CHAT':
+      return { ok: true, message: { type: 'CHAT', text: input.text, clientMessageId: input.clientMessageId } }
+    case 'SET_CHARACTER':
+      return { ok: true, message: { type: 'SET_CHARACTER', characterId: input.characterId } }
+    case 'SET_ORDER':
+      return { ok: true, message: { type: 'SET_ORDER', order: input.order } }
+    case 'HISTORY':
+      return { ok: true, message: { type: 'HISTORY', before: input.before } }
+    case 'PING':
+      return { ok: true, message: { type: 'PING' } }
+    default:
+      return { ok: false, code: 'UNSUPPORTED_MESSAGE', message: '지원하지 않는 메시지 형식입니다.' }
+  }
+}
 
 export interface PartyJoinedServerMessage {
   type: 'JOINED'

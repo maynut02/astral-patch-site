@@ -1,29 +1,24 @@
 <script setup lang="ts">
-import HomeGuideStep from '~/components/HomeGuideStep.vue'
 import type {
-  EditorChangeStatus,
   EditorTranslationLogEntry,
   EditorTranslationLogResponse
 } from '#shared/types/editor'
 import type { EditorOverviewResponse } from '#shared/types/editor-overview'
 import type {
-  ReleaseAssetInfo,
   ReleaseFeedKey,
-  ReleaseFeedResponse,
   ReleaseNoteEntry
 } from '#shared/types/releases'
 import type { GameLocalizedText, GameNotice, GameServerResponse } from '#shared/types/game-server'
 import { getEditorDiffParts } from '~/utils/editor-diff'
 import { formatEditorCount, formatEditorDate, formatEditorPercent } from '~/utils/editor-helpers'
-import { EDITOR_STATUS_META, EDITOR_VISIBLE_STATUSES } from '~/utils/editor-progress'
-
-type SupportedRoute = 'INT_STEAM' | 'CN_STEAM' | 'INT_ANDROID' | 'CN_ANDROID'
-type GuideAnswerKey = 'route' | 'steamMethod' | 'resources' | 'patcher' | 'plugin' | 'started' | 'shizuku'
-
-interface ReleaseAssetMatch {
-  asset: ReleaseAssetInfo
-  release: ReleaseNoteEntry
-}
+import { createEmptyEditorOverview, EDITOR_CHANGE_STATUS_META, EDITOR_STATUS_META, EDITOR_VISIBLE_STATUSES } from '~/utils/editor-progress'
+import { cleanGameText, formatGameNoticeHtml } from '~/utils/game-notice'
+import { getEditorItemLocation } from '~/utils/editor-links'
+import { findAssetInRelease } from '~/utils/release-assets'
+import { useReleaseFeed, useReleaseDistribution } from '~/composables/use-release-feed'
+import { useHomeInstallGuide } from '~/composables/home-install-guide'
+import { RELEASE_FEED_LABELS as releaseFeedLabels } from '~/utils/patch-routes'
+import { EXTERNAL_LINKS } from '~/utils/links'
 
 interface RecentReleaseEntry {
   feed: ReleaseFeedKey
@@ -32,51 +27,15 @@ interface RecentReleaseEntry {
 
 const RECENT_ITEM_LIMIT = 5
 
-const releaseFeedLabels: Record<ReleaseFeedKey, string> = {
-  patch: '한글패치',
-  windowsPlugin: 'Windows 플러그인',
-  windowsPatcher: 'Windows 패치 프로그램',
-  androidPatcher: 'Android 패치 앱'
-}
-
-const changeStatusLabels: Record<EditorChangeStatus, string> = {
-  pending: '승인 대기',
-  approved: '승인됨',
-  rejected: '반려됨',
-  superseded: '자동 종료'
-}
-
-const changeStatusColors: Record<EditorChangeStatus, 'warning' | 'success' | 'error' | 'neutral'> = {
-  pending: 'warning',
-  approved: 'success',
-  rejected: 'error',
-  superseded: 'neutral'
-}
-
-const routeOptions = [
-  { label: 'Steam 글로벌', value: 'INT_STEAM', icon: 'i-tabler-brand-steam' },
-  { label: 'Steam 중국', value: 'CN_STEAM', icon: 'i-tabler-brand-steam' },
-  { label: 'Android 일본', value: 'INT_ANDROID', icon: 'i-tabler-brand-android' },
-  { label: 'Android 중국', value: 'CN_ANDROID', icon: 'i-tabler-brand-android' }
-]
-const yesNoOptions = [
-  { label: '예', value: 'yes' },
-  { label: '아니오', value: 'no' }
-]
-const steamMethodOptions = [
-  { label: 'Windows 플러그인', value: 'plugin', icon: 'i-tabler-plug' },
-  { label: 'Windows 패치 프로그램', value: 'patcher', icon: 'i-tabler-app-window' }
-]
-const patcherOptions = [
-  { label: '예', value: 'yes' },
-  { label: '아니오', value: 'no' },
-  { label: '사용하지 않음', value: 'manual' }
-]
+const {
+  answers, routeOptions, yesNoOptions, steamMethodOptions, patcherOptions,
+  selectedRoute, isSteam, isAndroid, launchSelectedSteam
+} = useHomeInstallGuide()
 const {
   data: releaseFeed,
   status: releaseStatus,
   error: releaseError
-} = await useFetch<ReleaseFeedResponse>('/api/releases')
+} = await useReleaseFeed('home-release-feed')
 
 const {
   data: gameServer,
@@ -103,20 +62,6 @@ const {
   lazy: true
 })
 
-function createDefaultOverview(): EditorOverviewResponse {
-  return {
-    overall: {
-      total: 0,
-      success: 0,
-      info: 0,
-      warning: 0,
-      untranslated: 0
-    },
-    categories: [],
-    versions: []
-  }
-}
-
 const {
   data: overviewData,
   status: overviewStatus,
@@ -124,32 +69,16 @@ const {
 } = useFetch<EditorOverviewResponse>('/api/editor/overview', {
   server: false,
   lazy: true,
-  default: createDefaultOverview
+  default: createEmptyEditorOverview
 })
 
-const overview = computed(() => overviewData.value ?? createDefaultOverview())
+const overview = computed(() => overviewData.value ?? createEmptyEditorOverview())
 const isOverviewLoading = computed(() => overviewStatus.value === 'idle' || overviewStatus.value === 'pending')
 
-const answers = reactive<Record<GuideAnswerKey, string | null>>({
-  route: null,
-  steamMethod: null,
-  resources: null,
-  patcher: null,
-  plugin: null,
-  started: null,
-  shizuku: null
-})
 const isDeveloperModeHelpOpen = ref(false)
 const developerModeHelpContext = ref<'pc' | 'shizuku'>('shizuku')
 const isGameNoticeOpen = ref(false)
 const selectedGameNotice = ref<GameNotice | null>(null)
-
-const selectedRoute = computed<SupportedRoute | null>(() => {
-  const route = answers.route
-  return route === 'INT_STEAM' || route === 'CN_STEAM' || route === 'INT_ANDROID' || route === 'CN_ANDROID' ? route : null
-})
-const isSteam = computed(() => selectedRoute.value === 'INT_STEAM' || selectedRoute.value === 'CN_STEAM')
-const isAndroid = computed(() => selectedRoute.value === 'INT_ANDROID' || selectedRoute.value === 'CN_ANDROID')
 
 const recentReleases = computed<RecentReleaseEntry[]>(() => {
   const releases = releaseFeed.value?.releases
@@ -175,90 +104,8 @@ function getLocalizedGameRawText(text?: GameLocalizedText): string {
   return text?.en || text?.jp || text?.cn || text?.tw || ''
 }
 
-function cleanGameText(value?: string): string {
-  return (value ?? '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p\s*>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/\[(?:\/?b|\/?color[^\]]*|\/?size[^\]]*|\/?url[^\]]*)\]/gi, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
-
 function getLocalizedGameText(text?: GameLocalizedText): string {
   return cleanGameText(getLocalizedGameRawText(text))
-}
-
-function escapeGameNoticeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll('\'', '&#039;')
-}
-
-function getSafeGameNoticeUrl(value: string): string | null {
-  const url = value.trim()
-  return /^https?:\/\//i.test(url) ? url : null
-}
-
-function formatGameNoticeHtml(value?: string): string {
-  const source = value ?? ''
-  const tokenPattern = /<[^>]*>|\[[^\]]+\]/g
-  let result = ''
-  let lastIndex = 0
-
-  for (const match of source.matchAll(tokenPattern)) {
-    const index = match.index ?? 0
-    result += escapeGameNoticeHtml(source.slice(lastIndex, index)).replace(/\r?\n/g, '<br>')
-
-    const token = match[0]
-    const normalizedToken = token.toLowerCase().replace(/\s+/g, '')
-    const colorMatch = token.match(/^\[color=(#[0-9a-f]{3}|#[0-9a-f]{6})\]$/i)
-    const sizeMatch = token.match(/^\[size=(\d{1,3})\]$/i)
-    const urlMatch = token.match(/^\[url=(.+)\]$/i)
-    const color = colorMatch?.[1]
-    const rawSize = sizeMatch?.[1]
-    const rawUrl = urlMatch?.[1]
-
-    if (normalizedToken === '<b>' || normalizedToken === '<strong>' || normalizedToken === '[b]') {
-      result += '<strong class="font-semibold">'
-    } else if (normalizedToken === '</b>' || normalizedToken === '</strong>' || normalizedToken === '[/b]') {
-      result += '</strong>'
-    } else if (normalizedToken === '<i>' || normalizedToken === '<em>') {
-      result += '<em>'
-    } else if (normalizedToken === '</i>' || normalizedToken === '</em>') {
-      result += '</em>'
-    } else if (normalizedToken === '<u>') {
-      result += '<u>'
-    } else if (normalizedToken === '</u>') {
-      result += '</u>'
-    } else if (/^<br\/?\s*>$/i.test(token)) {
-      result += '<br>'
-    } else if (color) {
-      result += `<span style="color: ${color}">`
-    } else if (/^\[\/color\]$/i.test(token)) {
-      result += '</span>'
-    } else if (rawSize) {
-      const size = Math.min(Math.max(Number(rawSize), 10), 40)
-      result += `<span style="font-size: ${size}px">`
-    } else if (/^\[\/size\]$/i.test(token)) {
-      result += '</span>'
-    } else if (rawUrl) {
-      const safeUrl = getSafeGameNoticeUrl(rawUrl)
-      if (safeUrl) {
-        result += `<a href="${escapeGameNoticeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="text-info underline-offset-2 hover:underline">`
-      }
-    } else if (/^\[\/url\]$/i.test(token)) {
-      result += '</a>'
-    }
-
-    lastIndex = index + token.length
-  }
-
-  result += escapeGameNoticeHtml(source.slice(lastIndex)).replace(/\r?\n/g, '<br>')
-  return result
 }
 
 function openGameNotice(notice: GameNotice): void {
@@ -274,7 +121,7 @@ function handleGameNoticeOpenChange(open: boolean): void {
 }
 
 function getGameNoticeBannerUrl(banner: string): string {
-  return `http://seresjp.feimogames.com/notice/banner/en/${banner}`
+  return `${EXTERNAL_LINKS.gameNoticeBannerBase}${banner}`
 }
 
 const gameNotices = computed<GameNotice[]>(() => (gameServer.value?.payload?.notices ?? [])
@@ -308,24 +155,7 @@ const gameServerIndicatorClass = computed(() => {
     : 'bg-error'
 })
 
-function findAssetInRelease(release: ReleaseNoteEntry | null, assetName: string): ReleaseAssetMatch | null {
-  if (!release) {
-    return null
-  }
-
-  const expectedName = assetName.toLowerCase()
-  const asset = release.assets.find(item => item.name.toLowerCase() === expectedName)
-  return asset ? { asset, release } : null
-}
-
-const windowsPatcher = computed(() => releaseFeed.value?.distribution.windowsPatcher ?? null)
-const windowsPlugin = computed(() => releaseFeed.value?.distribution.windowsPlugin ?? null)
-const androidPatcher = computed(() => releaseFeed.value?.distribution.androidPatcher ?? null)
-const latestPatchRelease = computed(() =>
-  releaseFeed.value?.distribution.stablePatch?.release
-  ?? releaseFeed.value?.releases.patch[0]
-  ?? null
-)
+const { windowsPatcher, windowsPlugin, androidPatcher, latestPatchRelease } = useReleaseDistribution(releaseFeed)
 const steamManualPatch = computed(() => {
   if (!isSteam.value || !selectedRoute.value) {
     return null
@@ -335,43 +165,9 @@ const steamManualPatch = computed(() => {
 })
 const steamPluginTargetFolder = computed(() => selectedRoute.value === 'CN_STEAM' ? '8vJXn6CN' : '8vJXnINT')
 
-function resetAnswers(...keys: GuideAnswerKey[]): void {
-  for (const key of keys) {
-    answers[key] = null
-  }
-}
-
-watch(() => answers.route, () => {
-  resetAnswers('steamMethod', 'resources', 'patcher', 'plugin', 'started', 'shizuku')
-})
-watch(() => answers.steamMethod, () => {
-  resetAnswers('resources', 'patcher', 'plugin', 'started')
-})
-watch(() => answers.resources, () => {
-  resetAnswers('patcher', 'plugin', 'started')
-})
-watch(() => answers.patcher, () => {
-  resetAnswers('started', 'shizuku')
-})
-
 function openDeveloperModeHelp(context: 'pc' | 'shizuku'): void {
   developerModeHelpContext.value = context
   isDeveloperModeHelpOpen.value = true
-}
-
-function launchWindowsPatcher(action: 'install' | 'remove' | 'settings', route?: SupportedRoute): void {
-  if (!import.meta.client) {
-    return
-  }
-
-  const routeSuffix = route ? `/${route}` : ''
-  window.location.href = `astral://${action}${routeSuffix}`
-}
-
-function launchSelectedSteam(action: 'install' | 'remove'): void {
-  if (selectedRoute.value === 'INT_STEAM' || selectedRoute.value === 'CN_STEAM') {
-    launchWindowsPatcher(action, selectedRoute.value)
-  }
 }
 </script>
 
@@ -391,7 +187,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
         class="block h-auto w-full md:h-100 md:object-cover"
       >
         <source
-          src="https://file.maynutlab.com/pv.mp4"
+          :src="EXTERNAL_LINKS.promotionalVideo"
           type="video/mp4"
         >
       </video>
@@ -408,7 +204,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               :delay-duration="0"
             >
               <UButton
-                to="https://store.steampowered.com/app/2622000/Astral_Party/"
+                :to="EXTERNAL_LINKS.steam"
                 icon="i-tabler-brand-steam-filled"
                 color="neutral"
                 variant="link"
@@ -421,7 +217,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               :delay-duration="0"
             >
               <UButton
-                to="https://discord.com/invite/9n2dTTqk5C"
+                :to="EXTERNAL_LINKS.homeDiscordInvite"
                 icon="i-tabler-brand-discord-filled"
                 color="neutral"
                 variant="link"
@@ -434,7 +230,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               :delay-duration="0"
             >
               <UButton
-                to="https://www.youtube.com/@AstralParty_official"
+                :to="EXTERNAL_LINKS.youtube"
                 icon="i-tabler-brand-youtube-filled"
                 color="neutral"
                 variant="link"
@@ -447,7 +243,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               :delay-duration="0"
             >
               <UButton
-                to="https://x.com/AstralParty_"
+                :to="EXTERNAL_LINKS.x"
                 icon="i-tabler-brand-x"
                 color="neutral"
                 variant="link"
@@ -470,335 +266,22 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
       </div>
     </div>
 
-    <section class="mx-auto flex w-full max-w-3xl flex-col gap-5 py-5">
-      <header class="flex items-center justify-between gap-3">
-        <h1 class="text-xl font-semibold">
-          한글패치 설치 도우미
-        </h1>
-
-        <UButton
-          to="/download"
-          trailing-icon="i-tabler-arrow-right"
-          color="neutral"
-          variant="link"
-          size="md"
-          class="shrink-0"
-        >
-          전체 보기
-        </UButton>
-      </header>
-
-      <div class="flex flex-col">
-        <HomeGuideStep
-          v-model="answers.route"
-          :step="1"
-          title="어떤 플랫폼의 한글패치가 필요하나요?"
-          description="한글패치를 설치할 플랫폼을 선택해 주세요."
-          :options="routeOptions"
-        />
-
-        <template v-if="isSteam">
-          <HomeGuideStep
-            v-model="answers.steamMethod"
-            :step="2"
-            title="어떤 방식으로 한글패치를 설치할까요?"
-            description="게임 실행 시 자동으로 패치를 확인하는 Windows 플러그인 또는 별도 패치 프로그램을 선택할 수 있습니다."
-            :options="steamMethodOptions"
-          />
-
-          <template v-if="answers.steamMethod === 'plugin'">
-            <HomeGuideStep
-              v-model="answers.plugin"
-              :step="3"
-              title="Windows 플러그인을 설치했나요?"
-              description="압축 파일의 내용물을 Astral Party 설치 폴더 안의 사용 중인 버전 폴더에 복사합니다."
-              :options="yesNoOptions"
-              :status="answers.plugin === 'no' ? 'warning' : 'info'"
-            >
-              <div
-                v-if="answers.plugin === 'no'"
-                class="flex flex-col gap-4 bg-muted p-4"
-              >
-                <div class="flex flex-col gap-1">
-                  <p class="text-sm font-medium text-default">
-                    Windows 플러그인을 다운로드해 설치해 주세요.
-                  </p>
-                  <p class="text-sm text-muted">
-                    Steam → 라이브러리 → Astral Party → 관리 → 로컬 파일 탐색으로 설치 폴더를 연 뒤 <code class="text-default">{{ steamPluginTargetFolder }}</code> 폴더로 이동합니다.
-                  </p>
-                  <p class="text-sm text-muted">
-                    다운로드한 압축 파일을 열고 안의 내용물을 전부 해당 폴더에 붙여넣습니다. 같은 이름의 파일이 있으면 덮어씁니다.
-                  </p>
-                </div>
-
-                <div class="flex flex-wrap gap-2">
-                  <UButton
-                    :href="windowsPlugin?.index.downloadUrl"
-                    :disabled="!windowsPlugin"
-                    external
-                    icon="i-tabler-file-zip"
-                    color="info"
-                    variant="soft"
-                    size="lg"
-                    class="px-4 py-2.5"
-                  >
-                    Windows 플러그인 다운로드
-                  </UButton>
-                  <UButton
-                    to="/download"
-                    icon="i-tabler-help"
-                    color="neutral"
-                    variant="soft"
-                    size="lg"
-                    class="px-4 py-2.5"
-                  >
-                    자세한 설치 방법
-                  </UButton>
-                </div>
-              </div>
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.plugin === 'yes'"
-              :step="4"
-              title="준비가 완료되었습니다."
-              description="이제 평소처럼 Steam에서 게임을 실행하면 플러그인이 한글패치 상태를 자동으로 확인합니다."
-              complete
-            >
-              <UAlert
-                color="info"
-                variant="soft"
-                icon="i-tabler-info-circle"
-                title="최초 실행은 평소보다 오래 걸릴 수 있습니다."
-                description="처음 실행할 때는 BepInEx 초기화와 런타임 준비 때문에 화면에 아무런 표시가 없는 상태가 잠시 이어질 수 있습니다. 일정 시간이 지나 한글패치 알림이 나타날 때까지 게임을 강제 종료하지 마세요."
-              />
-            </HomeGuideStep>
-          </template>
-
-          <template v-else-if="answers.steamMethod === 'patcher'">
-            <HomeGuideStep
-              v-model="answers.resources"
-              :step="3"
-              title="인게임 리소스 다운로드를 완료했나요?"
-              description="한글패치를 적용하기 전에 게임 안에서 필요한 리소스 다운로드가 완료되어 있어야 합니다."
-              :options="yesNoOptions"
-              :status="answers.resources === 'no' ? 'warning' : 'info'"
-            >
-              <UAlert
-                v-if="answers.resources === 'no'"
-                color="neutral"
-                variant="soft"
-                class="bg-muted"
-                title="먼저 인게임 리소스 다운로드를 완료해 주세요."
-                description="게임을 실행해 필요한 리소스를 모두 받은 뒤 '예'를 선택하세요."
-              />
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.resources === 'yes'"
-              v-model="answers.patcher"
-              :step="4"
-              title="Windows 패치 프로그램을 설치했나요?"
-              description="프로그램을 사용하지 않는 경우 수동 패치 파일을 받을 수 있습니다."
-              :options="patcherOptions"
-              :status="answers.patcher === 'no' ? 'warning' : answers.patcher === 'manual' ? 'success' : 'info'"
-            >
-              <div
-                v-if="answers.patcher === 'no'"
-                class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <p class="text-sm font-medium text-default">
-                    Windows 패치 프로그램 설치가 필요합니다.
-                  </p>
-                  <p class="mt-1 text-sm text-muted">
-                    프로그램을 다운로드하고 한 번 실행한 뒤 '예'를 선택하세요.
-                  </p>
-                </div>
-                <UButton
-                  :href="windowsPatcher?.index.downloadUrl"
-                  :disabled="!windowsPatcher"
-                  external
-                  icon="i-tabler-download"
-                  color="info"
-                  variant="soft"
-                  size="lg"
-                  class="shrink-0 justify-center px-4 py-2.5"
-                >
-                  Windows 패치 프로그램 다운로드
-                </UButton>
-              </div>
-
-              <div
-                v-if="answers.patcher === 'manual'"
-                class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <p class="text-sm font-medium text-default">
-                    수동 설치 파일을 사용합니다.
-                  </p>
-                  <p class="mt-1 text-sm text-muted">
-                    압축 파일 내의 설치 안내에 따라 직접 파일을 복사해 주세요.
-                  </p>
-                </div>
-                <UButton
-                  :href="steamManualPatch?.asset.downloadUrl"
-                  :disabled="!steamManualPatch"
-                  external
-                  icon="i-tabler-file-zip"
-                  color="info"
-                  variant="soft"
-                  size="lg"
-                  class="shrink-0 justify-center px-4 py-2.5"
-                >
-                  수동 패치 파일 다운로드
-                </UButton>
-              </div>
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.resources === 'yes' && answers.patcher === 'yes'"
-              v-model="answers.started"
-              :step="5"
-              title="Windows 패치 프로그램을 한 번 실행했나요?"
-              description="다운로드 후 최소 한번은 실행해야 사이트를 통해 프로그램을 실행시킬 수 있습니다."
-              :options="yesNoOptions"
-              :status="answers.started === 'no' ? 'warning' : 'info'"
-            >
-              <UAlert
-                v-if="answers.started === 'no'"
-                color="neutral"
-                variant="soft"
-                class="bg-muted"
-                title="Windows 패치 프로그램을 먼저 한 번 실행해 주세요."
-                description="프로그램 창이 정상적으로 열리는 것을 확인한 뒤 '예'를 선택하세요."
-              />
-            </HomeGuideStep>
-
-            <HomeGuideStep
-              v-if="answers.resources === 'yes' && answers.patcher === 'yes' && answers.started === 'yes'"
-              :step="6"
-              title="준비가 완료되었습니다."
-              description="원하는 작업을 선택하면 Windows 패치 프로그램이 바로 실행됩니다."
-              complete
-            >
-              <div class="flex flex-wrap gap-2">
-                <UButton
-                  icon="i-tabler-wand"
-                  color="info"
-                  variant="soft"
-                  size="lg"
-                  class="px-4 py-2.5"
-                  @click="launchSelectedSteam('install')"
-                >
-                  원클릭 한글패치 설치
-                </UButton>
-                <UButton
-                  icon="i-tabler-trash"
-                  color="error"
-                  variant="soft"
-                  size="lg"
-                  class="px-4 py-2.5"
-                  @click="launchSelectedSteam('remove')"
-                >
-                  원클릭 한글패치 삭제
-                </UButton>
-              </div>
-            </HomeGuideStep>
-          </template>
-        </template>
-
-        <template v-if="isAndroid">
-          <HomeGuideStep
-            v-model="answers.patcher"
-            :step="2"
-            title="Android 패치 앱을 설치했나요?"
-            description="패치 앱을 통해 게임 앱과 한글패치 리소스를 관리합니다."
-            :options="yesNoOptions"
-            :status="answers.patcher === 'no' ? 'warning' : 'info'"
-          >
-            <div
-              v-if="answers.patcher === 'no'"
-              class="flex flex-col gap-3 bg-muted p-4 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div>
-                <p class="text-sm font-medium text-default">
-                  Android 패치 앱 설치가 필요합니다.
-                </p>
-                <p class="mt-1 text-sm text-muted">
-                  Android 패치 앱을 다운로드해 설치한 뒤 '예'를 선택하세요.
-                </p>
-              </div>
-              <UButton
-                :href="androidPatcher?.index.downloadUrl"
-                :disabled="!androidPatcher"
-                external
-                icon="i-tabler-download"
-                color="info"
-                variant="soft"
-                size="lg"
-                class="shrink-0 justify-center px-4 py-2.5"
-              >
-                Android 패치 앱 다운로드
-              </UButton>
-            </div>
-          </HomeGuideStep>
-
-          <HomeGuideStep
-            v-if="answers.patcher === 'yes'"
-            v-model="answers.shizuku"
-            :step="3"
-            title="Shizuku를 설치하고 설정을 완료하였나요?"
-            description="Android 패치 앱이 게임을 설치하고 한글패치를 적용하기 위해서는 Shizuku 권한이 필요합니다."
-            :options="yesNoOptions"
-            :status="answers.shizuku === 'no' ? 'warning' : 'info'"
-          >
-            <template #before-options>
-              <UButton
-                icon="i-tabler-settings-code"
-                color="neutral"
-                variant="soft"
-                size="lg"
-                class="w-fit px-4 py-2.5"
-                @click="openDeveloperModeHelp('shizuku')"
-              >
-                개발자 모드 활성화 방법
-              </UButton>
-            </template>
-
-            <UAlert
-              v-if="answers.shizuku === 'no'"
-              color="neutral"
-              variant="soft"
-              class="bg-muted"
-              title="Shizuku 설정을 완료해 주세요."
-              :description="`1. [Shizuku 다운로드 및 설치] 버튼을 탭해 Shizuku를 설치하세요.\n2. [Shizuku 열기] 버튼을 탭해 Shizuku를 실행하세요.\n3. [페어링] 버튼을 탭하고, [알림 옵션] 버튼을 탭해 알림을 허용해 주세요.\n4. '개발자 옵션'으로 이동한 다음 'USB 디버깅'과 '무선 디버깅'을 활성화해 주세요.\n5. '무선 디버깅'의 왼쪽을 탭한 다음 '페어링 코드로 기기 페어링'을 탭하세요.\n6. 알림창의 '페어링 코드 입력'을 탭해 기기 페어링 코드를 입력하세요.\n7. Shizuku로 돌아가 [시작] 버튼을 탭하세요.\n8. 완료된 경우 한글패치 앱으로 돌아가 [Shizuku 권한 허용] 버튼을 탭해 접근을 허용해 주세요.`"
-              :ui="{ description: 'whitespace-pre-line leading-7' }"
-            />
-          </HomeGuideStep>
-
-          <HomeGuideStep
-            v-if="answers.patcher === 'yes' && answers.shizuku === 'yes'"
-            :step="4"
-            title="준비가 완료되었습니다."
-            description="Android 패치 앱에서 최신 게임 및 한글패치 설치를 진행합니다."
-            complete
-          >
-            <UButton
-              href="https://astral.maynutlab.com/android"
-              external
-              icon="i-tabler-device-mobile-down"
-              color="info"
-              variant="soft"
-              size="lg"
-              class="w-fit px-4 py-2.5"
-            >
-              Android 패치 앱 실행
-            </UButton>
-          </HomeGuideStep>
-        </template>
-      </div>
-    </section>
+    <HomeGuideWizard
+      :answers="answers"
+      :route-options="routeOptions"
+      :yes-no-options="yesNoOptions"
+      :steam-method-options="steamMethodOptions"
+      :patcher-options="patcherOptions"
+      :is-steam="isSteam"
+      :is-android="isAndroid"
+      :windows-patcher="windowsPatcher"
+      :windows-plugin="windowsPlugin"
+      :android-patcher="androidPatcher"
+      :steam-manual-patch="steamManualPatch"
+      :steam-plugin-target-folder="steamPluginTargetFolder"
+      :launch-selected-steam="launchSelectedSteam"
+      :open-developer-mode-help="openDeveloperModeHelp"
+    />
 
     <section class="mx-auto grid w-full max-w-400 gap-3 py-5 lg:grid-cols-2">
       <div class="flex min-w-0 flex-col gap-3">
@@ -1125,26 +608,17 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
               <NuxtLink
                 v-for="entry in recentChanges"
                 :key="entry.id"
-                :to="{
-                  path: '/translate/editor',
-                  query: {
-                    file: entry.category,
-                    search: `${entry.category}_${entry.unitKey}`,
-                    searchType: 'key',
-                    match: 'exact',
-                    page: '1'
-                  }
-                }"
+                :to="getEditorItemLocation(entry)"
                 class="flex min-w-0 flex-col gap-2 border-b border-default p-4 transition-colors last:border-b-0 hover:bg-muted"
               >
                 <div class="flex min-w-0 items-center gap-2">
                   <UBadge
-                    :color="changeStatusColors[entry.status]"
+                    :color="EDITOR_CHANGE_STATUS_META[entry.status].color"
                     variant="soft"
                     size="sm"
                     class="shrink-0"
                   >
-                    {{ changeStatusLabels[entry.status] }}
+                    {{ EDITOR_CHANGE_STATUS_META[entry.status].label }}
                   </UBadge>
                   <span
                     class="min-w-0 flex-1 truncate text-xs font-medium text-default"
@@ -1155,18 +629,7 @@ function launchSelectedSteam(action: 'install' | 'remove'): void {
                 </div>
 
                 <p class="line-clamp-2 whitespace-pre-wrap wrap-break-word text-sm leading-5 text-toned">
-                  <template
-                    v-for="(part, partIndex) in getEditorDiffParts(entry.previousText ?? '', entry.proposedText)"
-                    :key="`${part.type}-${partIndex}`"
-                  >
-                    <span
-                      :class="part.type === 'removed'
-                        ? 'bg-error/10 text-error'
-                        : part.type === 'added'
-                          ? 'bg-success/10 text-success'
-                          : 'text-toned'"
-                    >{{ part.text }}</span>
-                  </template>
+                  <EditorDiffText :parts="getEditorDiffParts(entry.previousText ?? '', entry.proposedText)" side="unified" />
                   <span v-if="!entry.previousText && !entry.proposedText">빈 문자열</span>
                 </p>
 

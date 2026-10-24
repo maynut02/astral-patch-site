@@ -1,6 +1,7 @@
 import { createError } from 'h3'
 import type { AdminPatchWatcherConfig } from '#shared/types/admin'
 import { getDatabase } from './database'
+import { parseText } from './validation'
 
 interface AdminPatchWatcherConfigRow {
   gameVersion: string
@@ -19,11 +20,11 @@ function toAdminPatchWatcherConfig(row: AdminPatchWatcherConfigRow): AdminPatchW
 }
 
 function normalizeGameVersion(value: unknown): string {
-  if (typeof value !== 'string') {
-    throw createError({ statusCode: 400, statusMessage: 'Game version is required' })
-  }
-
-  const gameVersion = value.trim()
+  const gameVersion = parseText(value, {
+    field: 'Game version',
+    required: true,
+    emptyMessage: 'Game version must use x.y.z format'
+  })
 
   if (!GAME_VERSION_PATTERN.test(gameVersion)) {
     throw createError({

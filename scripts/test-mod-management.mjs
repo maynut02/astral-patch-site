@@ -17,9 +17,31 @@ for (const file of ['app/components/mod/ModDeleteConfirm.vue', 'app/components/m
   descriptors.set(file, descriptor)
 }
 
+const composableSources = new Map(await Promise.all([
+  ['useSessionKey', 'use-session-key'],
+  ['useReadySession', 'use-ready-session']
+].map(async ([name, file]) => [
+  name,
+  await readFile(new URL(`../app/composables/${file}.ts`, import.meta.url), 'utf8')
+])))
+
+const renderer = vue.createRenderer({
+  createElement: () => ({}),
+  createText: () => ({}),
+  createComment: () => ({}),
+  insert() {},
+  remove() {},
+  setText() {},
+  setElementText() {},
+  parentNode: () => null,
+  nextSibling: () => null,
+  patchProp() {}
+})
+
 function loadComponent(file, runtime, withTemplate = false) {
   const descriptor = descriptors.get(file)
   const script = compileScript(descriptor, { id: file })
+  const composables = {}
   const evaluate = (source) => {
     const componentModule = { exports: {} }
     runInNewContext(ts.transpileModule(source, {
@@ -29,6 +51,7 @@ function loadComponent(file, runtime, withTemplate = false) {
       exports: componentModule.exports,
       computed, ref, reactive, watch, onScopeDispose, AbortController,
       ...runtime,
+      ...composables,
       require: (name) => {
         if (name === '~/utils/mod') return {
           MOD_PLATFORM_ITEMS: [{ label: 'Windows', value: 'windows', icon: 'i-tabler-brand-windows' }],
@@ -42,6 +65,9 @@ function loadComponent(file, runtime, withTemplate = false) {
       }
     })
     return componentModule.exports
+  }
+  for (const [name, source] of composableSources) {
+    composables[name] = evaluate(source)[name]
   }
   const component = evaluate(script.content).default
   if (withTemplate) {
@@ -66,7 +92,7 @@ function session() {
 
 function mountConfirm(context, overrides = {}) {
   const viewer = session()
-  const props = reactive({ open: false, mod: mod(), ...overrides })
+  const initialProps = reactive({ open: false, mod: mod(), ...overrides })
   const requests = []
   const deleted = []
   const scope = effectScope()
@@ -74,15 +100,27 @@ function mountConfirm(context, overrides = {}) {
     useUserSession: () => viewer,
     $fetch: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject }))
   })
-  const state = scope.run(() => component.setup(props, {
-    expose() {},
-    emit(event, value) {
-      if (event === 'update:open') props.open = value
-      if (event === 'deleted') deleted.push(value)
-    }
-  }))
-  context.after(() => scope.stop())
-  return { viewer, props, state, requests, deleted, scope }
+  let state
+  let props
+  const originalSetup = component.setup
+  component.setup = (componentProps, context) => {
+    props = vue.getCurrentInstance().props
+    state = originalSetup(componentProps, context)
+    return state
+  }
+  component.render = () => null
+  const app = renderer.createApp(component, {
+    ...initialProps,
+    'onUpdate:open': (value) => { props.open = value },
+    'onDeleted': value => deleted.push(value)
+  })
+  scope.run(() => app.mount({}))
+  const dispose = () => {
+    app.unmount()
+    scope.stop()
+  }
+  context.after(dispose)
+  return { viewer, props, state, requests, deleted, scope: { stop: dispose } }
 }
 
 async function flush() {

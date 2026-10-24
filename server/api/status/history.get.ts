@@ -1,19 +1,12 @@
 import { createError, getQuery } from 'h3'
-import { getPatchWatcherHistory } from '../../utils/patch-watcher-status'
+import { getPatchWatcherHistory } from '../../utils/patch-watcher/history'
+import { parsePage } from '../../utils/validation'
 
 export default defineCachedEventHandler(async (event) => {
   const query = getQuery(event)
-  const rawPage = Array.isArray(query.page) ? query.page[0] : query.page
   const rawFilter = Array.isArray(query.filter) ? query.filter[0] : query.filter
-  const page = Number.parseInt(String(rawPage ?? '1'), 10)
+  const page = parsePage(query.page, 'Invalid status history page')
   const filter = String(rawFilter ?? 'all')
-
-  if (!Number.isFinite(page) || page < 1) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Invalid status history page'
-    })
-  }
 
   if (filter !== 'all' && filter !== 'failed') {
     throw createError({

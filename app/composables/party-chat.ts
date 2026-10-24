@@ -1,175 +1,46 @@
-import {
-  PARTY_CLOSE_LEAVE,
-  PARTY_CLOSE_PAGE_HIDE,
-  PARTY_CLOSE_UNRESPONSIVE_CODE,
-  PARTY_HISTORY_MAX_MESSAGES,
-  PARTY_MAX_TEXT_LENGTH,
-  getPartyTextLength,
-  type PartyCharacterId,
-  type PartyChatMessage,
-  type PartyConnectionDiagnostics,
-  type PartyOrder,
-  type PartyParticipant,
-  type PartyRoomMessage,
-  type PartyServerMessage
-} from '#shared/types/party'
-import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from '~/utils/browser-storage'
+import { PARTY_CLOSE_LEAVE, PARTY_HISTORY_MAX_MESSAGES, PARTY_MAX_TEXT_LENGTH, getPartyTextLength, type PartyCharacterId, type PartyChatMessage, type PartyOrder, type PartyParticipant, type PartyRoomMessage, type PartyServerMessage } from '#shared/types/party'
+import { DISPLAY_MESSAGE_CAP, isLocalMessage, mergeSessionMessages, normalizeNicknameKey, type LocalPartyChatMessage, type PartyDisplayMessage } from '~/utils/party-message-merge'
+import { clearResumeRecord, getPartyResumeContext, persistResumeRecord, type PartyResumeContext } from '~/utils/party-resume-storage'
+import { createPartySocketLifecycle, createPartySocketState, type PartyCredentials } from '~/utils/party-socket-lifecycle'
+import { PARTY_FATAL_JOIN_ERROR_CODES, PARTY_RETRYABLE_JOIN_ERROR_CODES, encodePartyClientMessage, readPartyRetryAfterMs } from '~/utils/party-wire'
 
-interface PartyCredentials {
-  nickname: string
-  characterId: PartyCharacterId
-  order: PartyOrder | null
-}
-
-interface LocalPartyChatMessage extends PartyChatMessage {
-  delivery: 'sending' | 'failed' | 'unconfirmed'
-  failureReason?: string
-}
-
-type PartyDisplayMessage = PartyRoomMessage | LocalPartyChatMessage
-
-interface PartyResumeRecord {
-  version: 1
-  roomId: string
-  sessionId: string
-  nicknameKey: string
-  reconnectToken: string
-}
-
-export interface PartyResumeContext {
-  reconnectToken: string
-  sessionId: string
-}
-
-const MAX_EXPANDED_MESSAGES = PARTY_HISTORY_MAX_MESSAGES * 2
-// 한 탭은 한 번에 하나의 채팅 세션만 이어가므로 재개 기록도 탭 단위로 보관한다.
-const RESUME_STORAGE_KEY = 'party-chat-resume'
-const RESUME_STORAGE_VERSION = 1 as const
 const SESSION_CHANGED_REASON = '채팅방 세션이 바뀌어 전송 결과를 확인하지 못했습니다. 다시 보내면 중복될 수 있습니다.'
 const PARTICIPANT_CHANGED_REASON = '연결이 오래 끊겨 새 참여자로 다시 입장해 전송 결과를 확인하지 못했습니다. 다시 보내면 중복될 수 있습니다.'
-// 화면 복귀·온라인 전환 뒤 보낸 PING에 이 시간 안에 아무것도 오지 않으면 소켓을 포기하고 다시 연결한다.
-const LIVENESS_TIMEOUT_MS = 5_000
-const FATAL_JOIN_ERROR_CODES = new Set([
-  'INVALID_ROOM_ID',
-  'INVALID_NICKNAME',
-  'INVALID_CHARACTER',
-  'INVALID_ORDER',
-  'SPECTATOR_ORDER_DISABLED',
-  'ROOM_NOT_FOUND',
-  'NICKNAME_TAKEN'
-])
-// 서버가 재시도를 허용하는 오류는 입장 상태를 유지한 채 백오프로 다시 시도한다.
-const RETRYABLE_JOIN_ERROR_CODES = new Set([
-  'JOIN_RATE_LIMITED',
-  'STORAGE_UNAVAILABLE',
-  'CONNECTION_CLOSED'
-])
-
-function isPartyResumeRecord(value: unknown): value is PartyResumeRecord {
-  if (!value || typeof value !== 'object') return false
-  const record = value as Record<string, unknown>
-  return record.version === RESUME_STORAGE_VERSION
-    && typeof record.roomId === 'string'
-    && typeof record.sessionId === 'string'
-    && record.sessionId.length > 0
-    && typeof record.nicknameKey === 'string'
-    && record.nicknameKey.length > 0
-    && typeof record.reconnectToken === 'string'
-    && record.reconnectToken.length > 0
-}
-
-function readRetryAfterMs(message: PartyServerMessage): number | undefined {
-  const value = (message as { retryAfterMs?: unknown }).retryAfterMs
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
-}
-
-function isLocalMessage(message: PartyDisplayMessage): message is LocalPartyChatMessage {
-  return message.kind === 'chat' && 'delivery' in message
-}
-
-function normalizeNicknameKey(value: string): string {
-  return value.trim().normalize('NFKC').toLowerCase()
-}
-
-function mergeSessionMessages(
-  existing: PartyRoomMessage[],
-  incoming: PartyRoomMessage[]
-): PartyRoomMessage[] {
-  if (existing.length === 0) return [...incoming]
-  if (incoming.length === 0) return [...existing]
-
-  const incomingById = new Map(incoming.map(message => [message.id, message]))
-  const firstIncomingId = incoming[0]?.id
-  const firstOverlapIndex = firstIncomingId
-    ? existing.findIndex(message => message.id === firstIncomingId)
-    : -1
-
-  const prefix = firstOverlapIndex >= 0
-    ? existing.slice(0, firstOverlapIndex).filter(message => !incomingById.has(message.id))
-    : existing.filter(message => !incomingById.has(message.id))
-
-  const merged = [...prefix, ...incoming]
-  const seen = new Set<string>()
-  return merged.filter((message) => {
-    if (seen.has(message.id)) return false
-    seen.add(message.id)
-    return true
-  })
-}
 
 export function usePartyChat(roomId: string) {
   const status = ref<'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error'>('idle')
   const messages = ref<PartyDisplayMessage[]>([])
+  const appendedMessageVersion = ref(0)
   const participants = ref<PartyParticipant[]>([])
   const participantId = ref('')
   const activeCharacterId = ref<PartyCharacterId | null>(null)
   const activeOrder = ref<PartyOrder | null>(null)
   const error = ref('')
-  const errorCode = ref('')
   const joined = ref(false)
   const loadingOlder = ref(false)
   const hasOlder = ref(false)
   const historyError = ref('')
   let requestedBefore = ''
   let loadedHistory = false
-  let socket: WebSocket | undefined
   let activeSessionId: string | undefined
   let activeReconnectToken: string | undefined
-  let credentials: PartyCredentials | undefined
-  let reconnectTimer: ReturnType<typeof setTimeout> | undefined
-  let heartbeatTimer: ReturnType<typeof setInterval> | undefined
-  let connectionTimer: ReturnType<typeof setTimeout> | undefined
-  let livenessTimer: typeof connectionTimer
   const sendTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let historyTimer: ReturnType<typeof setTimeout> | undefined
-  let stopped = false
-  let disposed = false
-  let attempt = 0
-  let connectionAttempt = 0
-  let firstJoin = true
-  let lastClosedAt: number | undefined
-  let lastCloseDiagnostics: PartyConnectionDiagnostics = {}
-  let unansweredPings = 0
-  let lastReceivedAt = 0
   // 서버가 알려준 재시도 시각 이전에는 온라인/가시성 이벤트로도 앞당기지 않는다.
-  let retryNotBefore = 0
-  let pageHidden = false
-  let autoReconnectSuspended = false
   const recovering = ref(false)
   const admissionErrorCode = ref('')
-
-  function clearTimers() {
-    clearTimeout(reconnectTimer)
-    clearTimeout(connectionTimer)
-    clearInterval(heartbeatTimer)
-    clearTimeout(livenessTimer)
-    clearTimeout(historyTimer)
-    reconnectTimer = undefined
-    connectionTimer = undefined
-    heartbeatTimer = undefined
-    livenessTimer = undefined
-    historyTimer = undefined
-  }
+  const socketState = createPartySocketState()
+  const { connect, clearTimers, handleVisibilityOrOnline, handlePageHide, handlePageShow } = createPartySocketLifecycle(roomId, socketState, () => activeReconnectToken, {
+    status, error, joined, clearResumeContext, failPendingMessages, message: handleServerMessage,
+    clearHistoryTimer() {
+      clearTimeout(historyTimer)
+      historyTimer = undefined
+    },
+    disconnected() {
+      loadingOlder.value = false
+      requestedBefore = ''
+    }
+  })
 
   function clearSendTimer(clientMessageId: string) {
     clearTimeout(sendTimers.get(clientMessageId))
@@ -187,43 +58,14 @@ export function usePartyChat(roomId: string) {
     for (const clientMessageId of [...sendTimers.keys()]) failMessage(clientMessageId, reason, delivery)
   }
 
-  function readResumeRecord(): PartyResumeRecord | null {
-    const stored = readBrowserStorage(RESUME_STORAGE_KEY, 'session')
-    if (!stored) return null
-    try {
-      const parsed: unknown = JSON.parse(stored)
-      if (isPartyResumeRecord(parsed)) return parsed
-    } catch {
-      // 손상된 재개 기록은 버리고 새 입장으로 진행한다.
-    }
-    removeBrowserStorage(RESUME_STORAGE_KEY, 'session')
-    return null
-  }
-
-  function clearResumeRecord() {
-    removeBrowserStorage(RESUME_STORAGE_KEY, 'session')
-  }
-
   function clearResumeContext() {
     // 저장 기록과 함께 메모리에 남은 재개 토큰도 무효화한다.
     clearResumeRecord()
     activeReconnectToken = undefined
   }
 
-  function persistResumeRecord(sessionIdValue: string) {
-    if (!credentials || !activeReconnectToken) return
-    const record: PartyResumeRecord = {
-      version: RESUME_STORAGE_VERSION,
-      roomId,
-      sessionId: sessionIdValue,
-      nicknameKey: normalizeNicknameKey(credentials.nickname),
-      reconnectToken: activeReconnectToken
-    }
-    writeBrowserStorage(RESUME_STORAGE_KEY, JSON.stringify(record), 'session')
-  }
-
   function trimDisplayMessages(next: PartyDisplayMessage[]): PartyDisplayMessage[] {
-    const limit = loadedHistory ? MAX_EXPANDED_MESSAGES : PARTY_HISTORY_MAX_MESSAGES
+    const limit = loadedHistory ? DISPLAY_MESSAGE_CAP : PARTY_HISTORY_MAX_MESSAGES
     if (next.length <= limit) return next
 
     const removed = next.slice(0, next.length - limit)
@@ -234,9 +76,14 @@ export function usePartyChat(roomId: string) {
   }
 
   function appendMessage(message: PartyRoomMessage) {
-    const index = messages.value.findIndex(existing => existing.id === message.id || (message.kind === 'chat'
-      && isLocalMessage(existing)
-      && existing.clientMessageId === message.clientMessageId))
+    const messageKey = message.kind === 'chat' ? message.clientMessageId : message.id
+    let alreadyDisplayed = false
+    const index = messages.value.findIndex((existing) => {
+      if ((existing.kind === 'chat' ? existing.clientMessageId : existing.id) === messageKey) alreadyDisplayed = true
+      return existing.id === message.id || (message.kind === 'chat'
+        && isLocalMessage(existing)
+        && existing.clientMessageId === message.clientMessageId)
+    })
     if (index >= 0) {
       if (isLocalMessage(messages.value[index]!)) {
         messages.value = messages.value.map((existing, position) => position === index ? message : existing)
@@ -245,40 +92,30 @@ export function usePartyChat(roomId: string) {
       return
     }
     messages.value = trimDisplayMessages([...messages.value, message])
+    if (!alreadyDisplayed) appendedMessageVersion.value++
     if (message.kind === 'chat') clearSendTimer(message.clientMessageId)
   }
 
-  function scheduleReconnect() {
-    if (stopped || disposed || !credentials || autoReconnectSuspended) return
-    clearTimers()
-    const baseDelay = Math.min(1000 * 2 ** attempt++, 5000)
-    const jitter = Math.floor(Math.random() * 300)
-    // 서버가 알려준 재시도 시각은 지수 백오프보다 우선한다.
-    const cooldownDelay = Math.max(0, retryNotBefore - Date.now())
-    reconnectTimer = setTimeout(connect, Math.max(baseDelay + jitter, cooldownDelay))
-  }
-
   function handleAdmissionError(ws: WebSocket, message: PartyServerMessage & { type: 'ERROR' }) {
-    const retryAfterMs = readRetryAfterMs(message)
+    const retryAfterMs = readPartyRetryAfterMs(message)
     const code = message.code
     // 복구 중이거나 이미 입장한 세션이면 대화와 토큰을 지키는 쪽을 먼저 본다.
     const established = recovering.value || joined.value
     error.value = message.message
-    errorCode.value = message.code
 
     // 서버가 재시도 시각을 알려주면 그때까지 기다린 뒤 자동으로 다시 시도한다.
     if (retryAfterMs !== undefined) {
-      retryNotBefore = Date.now() + retryAfterMs
+      socketState.retryNotBefore = Date.now() + retryAfterMs
       ws.close()
       return
     }
 
-    if (RETRYABLE_JOIN_ERROR_CODES.has(code)) {
+    if (PARTY_RETRYABLE_JOIN_ERROR_CODES.has(code)) {
       ws.close()
       return
     }
 
-    if (established && !FATAL_JOIN_ERROR_CODES.has(code)) {
+    if (established && !PARTY_FATAL_JOIN_ERROR_CODES.has(code)) {
       // 원인을 알 수 없는 오류도 지수 백오프 범위 안에서만 다시 시도한다.
       ws.close()
       return
@@ -299,7 +136,7 @@ export function usePartyChat(roomId: string) {
   }
 
   function resetAdmissionFailure() {
-    stopped = true
+    socketState.stopped = true
     status.value = 'error'
     joined.value = false
     recovering.value = false
@@ -314,269 +151,162 @@ export function usePartyChat(roomId: string) {
 
   function stopForAdmissionConflict(code: string, message: string) {
     // 자동 재시도를 멈추지만 대화와 미확인 메시지는 그대로 남긴다.
-    autoReconnectSuspended = true
+    socketState.autoReconnectSuspended = true
     admissionErrorCode.value = code
     error.value = message
-    errorCode.value = code
     status.value = 'error'
     clearTimers()
   }
 
-  function connect() {
-    if (stopped || disposed || !credentials) return
-    clearTimers()
-    status.value = joined.value ? 'reconnecting' : 'connecting'
-    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/party`)
-    connectionAttempt++
-    socket = ws
-    connectionTimer = setTimeout(() => abandonSocket(ws, 'join-timeout'), 20_000)
-    ws.onopen = () => {
-      if (socket !== ws || stopped || disposed) return
-      unansweredPings = 0
-      lastReceivedAt = Date.now()
-      const navigation = firstJoin && typeof performance !== 'undefined'
-        ? performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
-        : undefined
-      const diagnostics: PartyConnectionDiagnostics = {
-        attempt: connectionAttempt,
-        ...lastCloseDiagnostics,
-        ...(lastClosedAt !== undefined ? { lastCloseAgoMs: Date.now() - lastClosedAt } : {}),
-        ...(navigation?.type ? { navigationType: navigation.type } : {})
+  function handleServerMessage(data: PartyServerMessage, ws: WebSocket) {
+    if (data.type === 'JOINED') {
+      clearTimeout(socketState.connectionTimer)
+      socketState.connectionTimer = undefined
+      socketState.attempt = 0
+      socketState.connectionAttempt = 0
+      socketState.retryNotBefore = 0
+      status.value = 'connected'
+      joined.value = true
+      error.value = ''
+      admissionErrorCode.value = ''
+      recovering.value = false
+      socketState.autoReconnectSuspended = false
+      const previousParticipantId = participantId.value
+      participantId.value = data.participantId
+      activeReconnectToken = data.reconnectToken
+      const sameSession = Boolean(activeSessionId && activeSessionId === data.sessionId)
+      const sessionChanged = Boolean(activeSessionId) && !sameSession
+      // 유예가 끝나 새 참여자로 들어오면 서버 중복 방지(참여자 단위)가 이전 전송을 알아보지 못한다.
+      const participantChanged = sameSession && Boolean(previousParticipantId) && previousParticipantId !== data.participantId
+      const identityChanged = sessionChanged || participantChanged
+      const identityChangedReason = sessionChanged ? SESSION_CHANGED_REASON : PARTICIPANT_CHANGED_REASON
+      const confirmedIds = new Set(data.messages.filter((message): message is PartyChatMessage => message.kind === 'chat')
+        .map(message => message.clientMessageId))
+      const existingConfirmed = sameSession
+        ? messages.value.filter((message): message is PartyRoomMessage => !isLocalMessage(message))
+        : []
+      const mergedHistory = sameSession
+        ? mergeSessionMessages(existingConfirmed, data.messages)
+        : [...data.messages]
+      const allConfirmedIds = new Set([
+        ...confirmedIds,
+        ...mergedHistory.filter((message): message is PartyChatMessage => message.kind === 'chat').map(message => message.clientMessageId)
+      ])
+      // 세션이나 참여자가 바뀌면 자동 재전송할 수 없으므로 지우지 않고 다시 입력할 수 있는 실패로 남긴다.
+      const unresolved = messages.value
+        .filter(isLocalMessage)
+        .filter(message => !allConfirmedIds.has(message.clientMessageId))
+        .map(message => identityChanged
+          ? { ...message, delivery: 'failed' as const, failureReason: identityChangedReason }
+          : message)
+      activeSessionId = data.sessionId
+      if (!sameSession) loadedHistory = false
+      hasOlder.value = sameSession
+        ? (hasOlder.value || data.messages.length > 0)
+        : data.messages.length > 0
+      const nextMessages = trimDisplayMessages([...mergedHistory, ...unresolved])
+      const latest = nextMessages.at(-1)
+      const latestKey = latest?.kind === 'chat' ? latest.clientMessageId : latest?.id
+      const alreadyDisplayed = messages.value.some(message => (message.kind === 'chat' ? message.clientMessageId : message.id) === latestKey)
+      messages.value = nextMessages
+      if (latest && !alreadyDisplayed) appendedMessageVersion.value++
+      for (const clientMessageId of allConfirmedIds) clearSendTimer(clientMessageId)
+      if (identityChanged) failPendingMessages(identityChangedReason, 'failed')
+      loadingOlder.value = false
+      clearTimeout(historyTimer)
+      historyTimer = undefined
+      historyError.value = ''
+      requestedBefore = ''
+      participants.value = data.participants
+      const self = data.participants.find(participant => participant.id === data.participantId)
+      activeCharacterId.value = self?.characterId ?? socketState.credentials?.characterId ?? null
+      activeOrder.value = self?.order ?? null
+      if (self && socketState.credentials) {
+        socketState.credentials.characterId = self.characterId
+        socketState.credentials.order = self.order
       }
-      firstJoin = false
-      ws.send(JSON.stringify({
-        type: 'JOIN',
-        roomId,
-        ...credentials,
-        ...(activeReconnectToken ? { reconnectToken: activeReconnectToken } : {}),
-        diagnostics
-      }))
-      heartbeatTimer = setInterval(() => {
-        if (ws.readyState !== WebSocket.OPEN) return
-        const now = Date.now()
-        if (unansweredPings >= 2 && now - lastReceivedAt >= 55_000) {
-          abandonSocket(ws, 'heartbeat-timeout')
-          return
+      // 입장이 확정된 뒤에만 재개 기록을 남겨 새로 고침 복구가 토큰을 재사용할 수 있게 한다.
+      persistResumeRecord(roomId, socketState.credentials?.nickname ?? '', activeReconnectToken, data.sessionId)
+      if (sameSession && !identityChanged) {
+        for (const message of messages.value.filter(isLocalMessage)) {
+          if (message.delivery === 'failed') continue
+          sendMessage(ws, message.clientMessageId, message.text)
         }
-        ws.send(JSON.stringify({ type: 'PING' }))
-        unansweredPings++
-      }, 20_000)
-    }
-    ws.onmessage = (event) => {
-      if (socket !== ws || stopped || disposed) return
-      unansweredPings = 0
-      lastReceivedAt = Date.now()
-      let data: PartyServerMessage
-      try {
-        data = JSON.parse(event.data) as PartyServerMessage
-      } catch {
+      }
+    } else if (data.type === 'CHAT') {
+      appendMessage(data.message)
+    } else if (data.type === 'JOIN_NOTICE') {
+      appendMessage(data.notice)
+    } else if (data.type === 'LEAVE_NOTICE') {
+      appendMessage(data.notice)
+    } else if (data.type === 'HISTORY') {
+      if (!loadingOlder.value || data.before !== requestedBefore) return
+      const known = new Set(messages.value.map(message => message.id))
+      const older = data.messages.filter(message => !known.has(message.id))
+      const confirmedIds = new Set(older.filter((message): message is PartyChatMessage => message.kind === 'chat').map(message => message.clientMessageId))
+      if (older.length > 0) {
+        loadedHistory = true
+      }
+      const combined = [...older, ...messages.value.filter(message => !isLocalMessage(message) || !confirmedIds.has(message.clientMessageId))]
+      messages.value = combined.length > DISPLAY_MESSAGE_CAP
+        ? combined.slice(0, DISPLAY_MESSAGE_CAP)
+        : combined
+      for (const clientMessageId of confirmedIds) clearSendTimer(clientMessageId)
+      hasOlder.value = data.hasMore
+      loadingOlder.value = false
+      clearTimeout(historyTimer)
+      historyTimer = undefined
+      requestedBefore = ''
+      historyError.value = ''
+    } else if (data.type === 'PARTICIPANTS') {
+      participants.value = data.participants
+      const currentParticipants = new Map(data.participants.map(participant => [participant.id, participant]))
+      messages.value = messages.value.map((message) => {
+        if (message.kind !== 'chat') return message
+        const current = currentParticipants.get(message.participant.id)
+        return current && (current.characterId !== message.participant.characterId || current.order !== message.participant.order)
+          ? { ...message, participant: { ...message.participant, characterId: current.characterId, order: current.order } }
+          : message
+      })
+      const self = currentParticipants.get(participantId.value)
+      if (self) {
+        activeCharacterId.value = self.characterId
+        activeOrder.value = self.order
+        if (socketState.credentials) {
+          socketState.credentials.characterId = self.characterId
+          socketState.credentials.order = self.order
+        }
+      }
+    } else if (data.type === 'ERROR') {
+      if (loadingOlder.value && (data.code === 'HISTORY_UNAVAILABLE' || data.code === 'INVALID_CURSOR')) {
+        loadingOlder.value = false
+        clearTimeout(historyTimer)
+        historyTimer = undefined
+        requestedBefore = ''
+        historyError.value = data.message
         return
       }
-      if (data.type === 'JOINED') {
-        clearTimeout(connectionTimer)
-        connectionTimer = undefined
-        attempt = 0
-        connectionAttempt = 0
-        retryNotBefore = 0
-        status.value = 'connected'
-        joined.value = true
-        error.value = ''
-        errorCode.value = ''
-        admissionErrorCode.value = ''
-        recovering.value = false
-        autoReconnectSuspended = false
-        const previousParticipantId = participantId.value
-        participantId.value = data.participantId
-        activeReconnectToken = data.reconnectToken
-        const sameSession = Boolean(activeSessionId && activeSessionId === data.sessionId)
-        const sessionChanged = Boolean(activeSessionId) && !sameSession
-        // 유예가 끝나 새 참여자로 들어오면 서버 중복 방지(참여자 단위)가 이전 전송을 알아보지 못한다.
-        const participantChanged = sameSession && Boolean(previousParticipantId) && previousParticipantId !== data.participantId
-        const identityChanged = sessionChanged || participantChanged
-        const identityChangedReason = sessionChanged ? SESSION_CHANGED_REASON : PARTICIPANT_CHANGED_REASON
-        const confirmedIds = new Set(data.messages.filter((message): message is PartyChatMessage => message.kind === 'chat')
-          .map(message => message.clientMessageId))
-        const existingConfirmed = sameSession
-          ? messages.value.filter((message): message is PartyRoomMessage => !isLocalMessage(message))
-          : []
-        const mergedHistory = sameSession
-          ? mergeSessionMessages(existingConfirmed, data.messages)
-          : [...data.messages]
-        const allConfirmedIds = new Set([
-          ...confirmedIds,
-          ...mergedHistory.filter((message): message is PartyChatMessage => message.kind === 'chat').map(message => message.clientMessageId)
-        ])
-        // 세션이나 참여자가 바뀌면 자동 재전송할 수 없으므로 지우지 않고 다시 입력할 수 있는 실패로 남긴다.
-        const unresolved = messages.value
-          .filter(isLocalMessage)
-          .filter(message => !allConfirmedIds.has(message.clientMessageId))
-          .map(message => identityChanged
-            ? { ...message, delivery: 'failed' as const, failureReason: identityChangedReason }
-            : message)
-        activeSessionId = data.sessionId
-        if (!sameSession) loadedHistory = false
-        hasOlder.value = sameSession
-          ? (hasOlder.value || data.messages.length > 0)
-          : data.messages.length > 0
-        messages.value = trimDisplayMessages([...mergedHistory, ...unresolved])
-        for (const clientMessageId of allConfirmedIds) clearSendTimer(clientMessageId)
-        if (identityChanged) failPendingMessages(identityChangedReason, 'failed')
-        loadingOlder.value = false
-        clearTimeout(historyTimer)
-        historyTimer = undefined
-        historyError.value = ''
-        requestedBefore = ''
-        participants.value = data.participants
-        const self = data.participants.find(participant => participant.id === data.participantId)
-        activeCharacterId.value = self?.characterId ?? credentials?.characterId ?? null
-        activeOrder.value = self?.order ?? null
-        if (self && credentials) {
-          credentials.characterId = self.characterId
-          credentials.order = self.order
-        }
-        // 입장이 확정된 뒤에만 재개 기록을 남겨 새로 고침 복구가 토큰을 재사용할 수 있게 한다.
-        persistResumeRecord(data.sessionId)
-        if (sameSession && !identityChanged) {
-          for (const message of messages.value.filter(isLocalMessage)) {
-            if (message.delivery === 'failed') continue
-            sendMessage(ws, message.clientMessageId, message.text)
-          }
-        }
-      } else if (data.type === 'CHAT') {
-        appendMessage(data.message)
-      } else if (data.type === 'JOIN_NOTICE') {
-        appendMessage(data.notice)
-      } else if (data.type === 'LEAVE_NOTICE') {
-        appendMessage(data.notice)
-      } else if (data.type === 'HISTORY') {
-        if (!loadingOlder.value || data.before !== requestedBefore) return
-        const known = new Set(messages.value.map(message => message.id))
-        const older = data.messages.filter(message => !known.has(message.id))
-        const confirmedIds = new Set(older.filter((message): message is PartyChatMessage => message.kind === 'chat').map(message => message.clientMessageId))
-        if (older.length > 0) {
-          loadedHistory = true
-        }
-        const combined = [...older, ...messages.value.filter(message => !isLocalMessage(message) || !confirmedIds.has(message.clientMessageId))]
-        messages.value = combined.length > MAX_EXPANDED_MESSAGES
-          ? combined.slice(0, MAX_EXPANDED_MESSAGES)
-          : combined
-        for (const clientMessageId of confirmedIds) clearSendTimer(clientMessageId)
-        hasOlder.value = data.hasMore
-        loadingOlder.value = false
-        clearTimeout(historyTimer)
-        historyTimer = undefined
-        requestedBefore = ''
-        historyError.value = ''
-      } else if (data.type === 'PARTICIPANTS') {
-        participants.value = data.participants
-        const currentParticipants = new Map(data.participants.map(participant => [participant.id, participant]))
-        messages.value = messages.value.map((message) => {
-          if (message.kind !== 'chat') return message
-          const current = currentParticipants.get(message.participant.id)
-          return current && (current.characterId !== message.participant.characterId || current.order !== message.participant.order)
-            ? { ...message, participant: { ...message.participant, characterId: current.characterId, order: current.order } }
-            : message
-        })
-        const self = currentParticipants.get(participantId.value)
-        if (self) {
-          activeCharacterId.value = self.characterId
-          activeOrder.value = self.order
-          if (credentials) {
-            credentials.characterId = self.characterId
-            credentials.order = self.order
-          }
-        }
-      } else if (data.type === 'ERROR') {
-        if (loadingOlder.value && (data.code === 'HISTORY_UNAVAILABLE' || data.code === 'INVALID_CURSOR')) {
-          loadingOlder.value = false
-          clearTimeout(historyTimer)
-          historyTimer = undefined
-          requestedBefore = ''
-          historyError.value = data.message
-          return
-        }
-        error.value = data.message
-        errorCode.value = data.code
-        if (data.clientMessageId) failMessage(data.clientMessageId, data.message, 'failed')
-        if (status.value !== 'connected') {
-          handleAdmissionError(ws, data)
-        }
+      error.value = data.message
+      if (data.clientMessageId) failMessage(data.clientMessageId, data.message, 'failed')
+      if (status.value !== 'connected') {
+        handleAdmissionError(ws, data)
       }
     }
-    ws.onerror = () => { /* The close handler retries failed connections. */ }
-    ws.onclose = event => handleSocketClosed(ws, event)
   }
 
-  function handleSocketClosed(ws: WebSocket, event: { code?: number, reason?: string } | undefined) {
-    lastClosedAt = Date.now()
-    lastCloseDiagnostics = {
-      ...(typeof event?.code === 'number' ? { lastCloseCode: event.code } : {}),
-      ...(typeof event?.reason === 'string' ? { lastCloseReason: event.reason } : {}),
-      ...(typeof document !== 'undefined' ? { hiddenAtClose: document.visibilityState === 'hidden' } : {}),
-      ...(typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean' ? { onlineAtClose: navigator.onLine } : {})
-    }
-    if (socket !== ws || stopped || disposed) return
-    if (event?.reason === 'replaced-by-reconnect') {
-      // 다른 탭이 같은 세션을 이어받았으므로 이 탭은 물러나고 재개 수단을 정리한다.
-      clearResumeContext()
-      autoReconnectSuspended = true
-      status.value = 'error'
-      error.value = '다른 탭에서 이 채팅방에 다시 연결했습니다. 이 탭에서 계속하려면 다시 입장해 주세요.'
-      clearTimers()
-      return
-    }
-    failPendingMessages('연결이 끊겨 전송 결과를 확인하지 못했습니다. 다시 연결되면 자동으로 재전송합니다.')
-    clearTimers()
-    loadingOlder.value = false
-    clearTimeout(historyTimer)
-    historyTimer = undefined
-    requestedBefore = ''
-    // 자동 재시도를 멈춘 상태라면 종료 원인이 된 입장 오류 화면을 덮어쓰지 않는다.
-    if (autoReconnectSuspended) return
-    status.value = 'reconnecting'
-    // 입장 오류로 이미 안내 문구가 있으면 그 원인을 유지한다.
-    if (!error.value) error.value = '연결이 끊어졌습니다. 자동으로 다시 연결하고 있습니다.'
-    scheduleReconnect()
-  }
-
-  // 응답 없는 소켓에 close()를 부르면 브라우저는 서버의 종료 확인을 기다린다(Chromium 최대 60초).
-  // 그동안 onclose가 오지 않아 재연결이 묶이므로, 핸들러를 떼고 바로 끊긴 것으로 처리한다.
-  function abandonSocket(ws: WebSocket, reason: string) {
-    ws.onopen = null
-    ws.onmessage = null
-    ws.onerror = null
-    ws.onclose = null
-    try {
-      ws.close(PARTY_CLOSE_UNRESPONSIVE_CODE, reason)
-    } catch {
-      // The socket may already be closed.
-    }
-    handleSocketClosed(ws, { code: PARTY_CLOSE_UNRESPONSIVE_CODE, reason })
-  }
-
-  function getResumeContext(nickname: string): PartyResumeContext | null {
-    const record = readResumeRecord()
-    if (!record) return null
-    // 다른 방이나 다른 닉네임의 기록은 재사용하지 않고 즉시 정리한다.
-    if (record.roomId !== roomId || record.nicknameKey !== normalizeNicknameKey(nickname)) {
-      clearResumeRecord()
-      return null
-    }
-    return { reconnectToken: record.reconnectToken, sessionId: record.sessionId }
-  }
   function join(value: PartyCredentials, resume?: PartyResumeContext) {
-    if (disposed) return
+    if (socketState.disposed) return
     failPendingMessages('전송 결과를 확인하지 못했습니다. 다시 연결되면 자동으로 재전송합니다.')
     clearTimers()
-    const previous = socket
-    socket = undefined
+    const previous = socketState.socket
+    socketState.socket = undefined
     previous?.close()
-    stopped = false
-    autoReconnectSuspended = false
-    retryNotBefore = 0
+    socketState.stopped = false
+    socketState.autoReconnectSuspended = false
+    socketState.retryNotBefore = 0
     recovering.value = Boolean(resume)
     admissionErrorCode.value = ''
-    if (!credentials || normalizeNicknameKey(credentials.nickname) !== normalizeNicknameKey(value.nickname)) {
+    if (!socketState.credentials || normalizeNicknameKey(socketState.credentials.nickname) !== normalizeNicknameKey(value.nickname)) {
       activeReconnectToken = undefined
       activeSessionId = undefined
       if (!resume) clearResumeRecord()
@@ -586,10 +316,9 @@ export function usePartyChat(roomId: string) {
       // 이전 세션 ID를 기억해 두면 조인 응답과 기록을 같은 세션으로 병합할 수 있다.
       activeSessionId = resume.sessionId
     }
-    credentials = { ...value }
+    socketState.credentials = { ...value }
     error.value = ''
-    errorCode.value = ''
-    attempt = 0
+    socketState.attempt = 0
     hasOlder.value = false
     historyError.value = ''
     loadedHistory = false
@@ -597,13 +326,13 @@ export function usePartyChat(roomId: string) {
   }
 
   function loadOlder(): boolean {
-    if (status.value !== 'connected' || socket?.readyState !== WebSocket.OPEN || loadingOlder.value || !hasOlder.value) return false
+    if (status.value !== 'connected' || socketState.socket?.readyState !== WebSocket.OPEN || loadingOlder.value || !hasOlder.value) return false
     const before = messages.value[0]?.id
     if (!before) return false
     requestedBefore = before
     loadingOlder.value = true
     historyError.value = ''
-    socket.send(JSON.stringify({ type: 'HISTORY', before }))
+    socketState.socket.send(encodePartyClientMessage({ type: 'HISTORY', before }))
     historyTimer = setTimeout(() => {
       if (requestedBefore !== before || !loadingOlder.value) return
       loadingOlder.value = false
@@ -619,7 +348,7 @@ export function usePartyChat(roomId: string) {
       ? { ...message, delivery: 'sending', failureReason: undefined }
       : message)
     try {
-      ws.send(JSON.stringify({ type: 'CHAT', text, clientMessageId }))
+      ws.send(encodePartyClientMessage({ type: 'CHAT', text, clientMessageId }))
     } catch {
       failMessage(clientMessageId, '메시지를 보내지 못했습니다. 다시 시도해 주세요.', 'failed')
       error.value = '메시지를 보내지 못했습니다. 다시 시도해 주세요.'
@@ -634,7 +363,7 @@ export function usePartyChat(roomId: string) {
   }
 
   function send(text: string): boolean {
-    const currentSocket = socket
+    const currentSocket = socketState.socket
     const trimmed = text.trim()
     if (
       status.value !== 'connected'
@@ -656,7 +385,9 @@ export function usePartyChat(roomId: string) {
       createdAt: new Date().toISOString(),
       delivery: 'sending'
     }
+    const alreadyDisplayed = messages.value.some(message => (message.kind === 'chat' ? message.clientMessageId : message.id) === clientMessageId)
     messages.value = trimDisplayMessages([...messages.value, optimisticMessage])
+    if (!alreadyDisplayed) appendedMessageVersion.value++
     error.value = ''
     sendMessage(currentSocket, clientMessageId, text)
     return true
@@ -670,9 +401,9 @@ export function usePartyChat(roomId: string) {
   }
 
   function changeCharacter(characterId: PartyCharacterId): boolean {
-    if (status.value !== 'connected' || socket?.readyState !== WebSocket.OPEN || !joined.value) return false
+    if (status.value !== 'connected' || socketState.socket?.readyState !== WebSocket.OPEN || !joined.value) return false
     try {
-      socket.send(JSON.stringify({ type: 'SET_CHARACTER', characterId }))
+      socketState.socket.send(encodePartyClientMessage({ type: 'SET_CHARACTER', characterId }))
       error.value = ''
       return true
     } catch {
@@ -682,9 +413,9 @@ export function usePartyChat(roomId: string) {
   }
 
   function changeOrder(order: PartyOrder): boolean {
-    if (status.value !== 'connected' || socket?.readyState !== WebSocket.OPEN || !joined.value) return false
+    if (status.value !== 'connected' || socketState.socket?.readyState !== WebSocket.OPEN || !joined.value) return false
     try {
-      socket.send(JSON.stringify({ type: 'SET_ORDER', order }))
+      socketState.socket.send(encodePartyClientMessage({ type: 'SET_ORDER', order }))
       error.value = ''
       return true
     } catch {
@@ -693,64 +424,14 @@ export function usePartyChat(roomId: string) {
     }
   }
 
-  function handleVisibilityOrOnline() {
-    if (disposed || stopped || !credentials || autoReconnectSuspended) return
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-
-    const current = socket
-    if (current?.readyState === WebSocket.OPEN) {
-      // 백그라운드에서 이미 죽은 소켓도 OPEN으로 남는다. heartbeat가 알아채기까지 1분 넘게 기다리지 않도록 바로 확인한다.
-      const probeStartedAt = Date.now()
-      try {
-        current.send(JSON.stringify({ type: 'PING' }))
-      } catch {
-        abandonSocket(current, 'liveness-timeout')
-        return
-      }
-      if (livenessTimer) return
-      livenessTimer = setTimeout(() => {
-        livenessTimer = undefined
-        if (socket !== current || lastReceivedAt >= probeStartedAt) return
-        abandonSocket(current, 'liveness-timeout')
-      }, LIVENESS_TIMEOUT_MS)
-      return
-    }
-
-    // 서버가 정한 재시도 시각 전에는 가시성/온라인 이벤트로도 앞당기지 않는다.
-    if (retryNotBefore > Date.now()) return
-
-    if (status.value === 'reconnecting' && reconnectTimer) {
-      connect()
-    }
-  }
-
-  function handlePageHide() {
-    pageHidden = true
-    if (!socket) return
-    stopped = true
-    clearTimers()
-    failPendingMessages('연결이 끊겨 전송 결과를 확인하지 못했습니다. 다시 연결되면 자동으로 재전송합니다.')
-    socket.close(PARTY_CLOSE_PAGE_HIDE.code, PARTY_CLOSE_PAGE_HIDE.reason)
-  }
-
-  function handlePageShow(event: PageTransitionEvent) {
-    if (!event.persisted) return
-    pageHidden = false
-    if (disposed || !credentials || autoReconnectSuspended) return
-    stopped = false
-    if (retryNotBefore > Date.now()) scheduleReconnect()
-    else connect()
-  }
-
   function handleReconnectAction() {
-    if (disposed || !credentials) return false
-    autoReconnectSuspended = false
-    stopped = false
-    attempt = 0
-    retryNotBefore = 0
+    if (socketState.disposed || !socketState.credentials) return false
+    socketState.autoReconnectSuspended = false
+    socketState.stopped = false
+    socketState.attempt = 0
+    socketState.retryNotBefore = 0
     status.value = 'reconnecting'
     error.value = ''
-    errorCode.value = ''
     admissionErrorCode.value = ''
     connect()
     return true
@@ -764,8 +445,8 @@ export function usePartyChat(roomId: string) {
   }
 
   onBeforeUnmount(() => {
-    disposed = true
-    stopped = true
+    socketState.disposed = true
+    socketState.stopped = true
     clearTimers()
     if (typeof window !== 'undefined') {
       window.removeEventListener('online', handleVisibilityOrOnline)
@@ -774,25 +455,25 @@ export function usePartyChat(roomId: string) {
       document.removeEventListener('visibilitychange', handleVisibilityOrOnline)
     }
     for (const clientMessageId of sendTimers.keys()) clearSendTimer(clientMessageId)
-    if (pageHidden) {
+    if (socketState.pageHidden) {
       // 문서가 사라지는 경우에는 서버 유예 시간이 만료를 판단하도록 토큰을 남긴다.
-      credentials = undefined
+      socketState.credentials = undefined
       return
     }
     clearResumeRecord()
-    socket?.close(PARTY_CLOSE_LEAVE.code, PARTY_CLOSE_LEAVE.reason)
-    credentials = undefined
+    socketState.socket?.close(PARTY_CLOSE_LEAVE.code, PARTY_CLOSE_LEAVE.reason)
+    socketState.credentials = undefined
   })
 
   return {
     status,
     messages,
+    appendedMessageVersion,
     participants,
     participantId,
     activeCharacterId,
     activeOrder,
     error,
-    errorCode,
     admissionErrorCode,
     recovering,
     joined,
@@ -805,7 +486,7 @@ export function usePartyChat(roomId: string) {
     loadOlder,
     changeCharacter,
     changeOrder,
-    getResumeContext,
+    getResumeContext: (nickname: string) => getPartyResumeContext(roomId, nickname),
     clearResumeContext,
     retryAdmission: handleReconnectAction
   }

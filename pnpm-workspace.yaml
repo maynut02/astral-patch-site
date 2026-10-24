@@ -11,9 +11,10 @@ overrides:
   'prosemirror-view@<1.42.3': 1.42.3
   'source-map-js@>=1.0.0 <1.2.2': 1.2.2
   'shell-quote@>=1.8.4 <1.11.0': 1.11.0
-  'undici@>=8.0.0 <8.10.2': 8.10.2
+  'undici@>=8.0.0 <8.12.2': 8.12.2
   'vite@>=8.2.0 <8.2.4': 8.2.4
   'launch-editor@<2.14.2': 2.14.2
+  'zod@>=4.0.0 <4.6.6': 4.6.6
   # DevTools 3 still imports the removed simple-git 3 default export.
   # Keep its import patch together with this security upgrade to simple-git 4.
   '@nuxt/devtools>simple-git': 4.0.2
@@ -26,7 +27,7 @@ patchedDependencies:
 # No fixed npm releases exist for these advisories as of 2026-10-06.
 # Local patches fix the affected code; CI requires test:security before audit.
 # Remove each exception and patch when a fixed release is available.
-# See docs/security-patches.md for sources and verification.
+# See docs/dependency-security.md for sources and verification.
 audit:
   ignore:
     - GHSA-86w9-cpqp-85rv

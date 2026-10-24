@@ -3,8 +3,16 @@
 .nuxt
 .output
 node_modules
+.pnpm-store
 .env
 .env.*
 !.env.example
 *.log
+logs
 .DS_Store
+.agents
+.mixdog
+.vscode
+docs
+deploy
+database

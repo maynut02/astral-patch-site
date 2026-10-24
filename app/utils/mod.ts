@@ -5,8 +5,8 @@ export const MOD_PLATFORM_ITEMS: Array<{ value: ModPlatform, label: string, icon
   { value: 'android', label: 'Android', icon: 'i-tabler-brand-android' }
 ]
 
-export function getModPlatformLabel(platform: ModPlatform): string {
-  return MOD_PLATFORM_ITEMS.find(item => item.value === platform)?.label ?? platform
+export function getModPlatformLabel(platform: ModPlatform, fallback: string = platform): string {
+  return MOD_PLATFORM_ITEMS.find(item => item.value === platform)?.label ?? fallback
 }
 
 export function getModPlatformIcon(platform: ModPlatform): string {

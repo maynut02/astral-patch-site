@@ -37,7 +37,7 @@ const segments = computed<Segment[]>(() => {
 
     result.push({
       type: 'astral',
-      linkType: match[1] as AstralLinkType,
+      linkType: match[1] === 'Buff' ? 'Buff' : 'Card',
       id: match[2] || '',
       content: match[0]
     })

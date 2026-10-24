@@ -11,6 +11,6 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'User id is required' })
   }
 
-  const body = await readJsonBody<{ role?: unknown }>(event)
+  const body = await readJsonBody(event)
   return updateAdminUserRole(userId, admin.id, body.role)
 })

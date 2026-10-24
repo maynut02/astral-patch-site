@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { ReleaseFeedResponse } from '#shared/types/releases'
+import { formatFileSize } from '~/utils/format'
+import { useReleaseFeed, useReleaseDistribution } from '~/composables/use-release-feed'
+import { EXTERNAL_LINKS } from '~/utils/links'
 
 useAstralPageSeo('Android 패치 앱 실행')
 
@@ -12,24 +14,11 @@ const {
   status,
   error,
   refresh
-} = await useFetch<ReleaseFeedResponse>('/api/releases')
+} = await useReleaseFeed('android-release-feed')
 
-const androidPatcher = computed(() => releaseFeed.value?.distribution.androidPatcher ?? null)
+const { androidPatcher } = useReleaseDistribution(releaseFeed)
 const isLoading = computed(() => status.value === 'idle' || status.value === 'pending')
-const androidIntentUrl = 'intent://astral.maynutlab.com/android#Intent;scheme=https;package=com.maynutlab.astralpatcher;end'
-
-function formatFileSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 B'
-  }
-
-  const units = ['B', 'KB', 'MB', 'GB']
-  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  const value = bytes / (1024 ** unitIndex)
-  const fractionDigits = unitIndex === 0 || value >= 100 ? 0 : value >= 10 ? 1 : 2
-
-  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
-}
+const androidIntentUrl = EXTERNAL_LINKS.androidIntent
 
 function reloadRelease(): void {
   void refresh()

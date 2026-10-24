@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ModDetailResponse } from '#shared/types/mod'
-import { MOD_PLATFORM_ITEMS, formatModDate } from '~/utils/mod'
+import { formatModDate, getModPlatformIcon, getModPlatformLabel } from '~/utils/mod'
 
 const props = withDefaults(defineProps<{ detail: ModDetailResponse, refreshing: boolean, managementEnabled?: boolean }>(), {
   managementEnabled: true
@@ -76,8 +76,8 @@ watch(() => mod.value.id, () => {
       </div>
       <div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted">
         <span v-for="platform in mod.platforms" :key="platform" class="inline-flex items-center gap-1 text-xs text-muted">
-          <UIcon :name="MOD_PLATFORM_ITEMS.find(item => item.value === platform)?.icon ?? 'i-tabler-device-desktop'" class="size-4" />
-          {{ MOD_PLATFORM_ITEMS.find(item => item.value === platform)?.label }}
+          <UIcon :name="getModPlatformIcon(platform)" class="size-4" />
+          {{ getModPlatformLabel(platform, '') }}
         </span>
         <span class="inline-flex items-center gap-1">
           <UTooltip text="등록자">

@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import type { EditorComment, EditorCommentsResponse } from '#shared/types/editor-comment'
+import {
+  EDITOR_COMMENT_MAX_LENGTH as COMMENT_MAX_LENGTH,
+  type EditorComment,
+  type EditorCommentsResponse
+} from '#shared/types/editor-comment'
 import type { AstralEditorCommentCreatedMessage } from '#shared/types/websocket'
+import { useEditorVisualViewportInset } from '~/composables/editor-visual-viewport'
 
 type CommentScope = 'item' | 'all'
 type CommentRequestStatus = 'idle' | 'pending' | 'success' | 'error'
@@ -14,9 +19,7 @@ const emit = defineEmits<{
   navigateItem: [comment: EditorComment]
 }>()
 
-const COMMENT_MAX_LENGTH = 2_000
 const COMMENT_BOTTOM_THRESHOLD = 72
-const KEYBOARD_INSET_THRESHOLD = 80
 const DAY_MS = 86_400_000
 
 const scope = ref<CommentScope>('item')
@@ -30,13 +33,17 @@ const unseenCount = ref(0)
 const listElement = ref<HTMLElement | null>(null)
 const clock = ref(Date.now())
 const requestId = ref(0)
-const keyboardInset = ref(0)
 const isComposerFocused = ref(false)
+const { keyboardInset, updateKeyboardInset } = useEditorVisualViewportInset(isComposerFocused, {
+  mediaQuery: '(max-width: 1023px)',
+  onUpdate: () => {
+    if (isNearBottom()) void nextTick(() => scrollToBottom())
+  }
+})
 const { loggedIn } = useUserSession()
 const { showToast, showLoginRequiredToast } = useAppToast()
 
 let clockTimer: ReturnType<typeof setInterval> | undefined
-let visualViewport: VisualViewport | null = null
 
 const scopeTabs = [
   { label: '현재 항목', value: 'item' },
@@ -169,28 +176,6 @@ function scrollToBottom(behavior: ScrollBehavior = 'auto'): void {
 function handleScroll(): void {
   if (isNearBottom()) {
     unseenCount.value = 0
-  }
-}
-
-function updateKeyboardInset(): void {
-  if (
-    !isComposerFocused.value
-    || !visualViewport
-    || visualViewport.scale !== 1
-    || !window.matchMedia('(max-width: 1023px)').matches
-  ) {
-    keyboardInset.value = 0
-    return
-  }
-
-  const visualViewportBottom = visualViewport.offsetTop + visualViewport.height
-  const nextInset = Math.max(0, window.innerHeight - visualViewportBottom)
-  const shouldStickToBottom = isNearBottom()
-
-  keyboardInset.value = nextInset >= KEYBOARD_INSET_THRESHOLD ? Math.round(nextInset) : 0
-
-  if (shouldStickToBottom) {
-    void nextTick(() => scrollToBottom())
   }
 }
 
@@ -393,22 +378,12 @@ watch(queryKey, () => {
 }, { immediate: true })
 
 onMounted(() => {
-  visualViewport = window.visualViewport
-
-  window.addEventListener('resize', updateKeyboardInset)
-  visualViewport?.addEventListener('resize', updateKeyboardInset)
-  visualViewport?.addEventListener('scroll', updateKeyboardInset)
-
   clockTimer = setInterval(() => {
     clock.value = Date.now()
   }, 60_000)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateKeyboardInset)
-  visualViewport?.removeEventListener('resize', updateKeyboardInset)
-  visualViewport?.removeEventListener('scroll', updateKeyboardInset)
-
   if (clockTimer) {
     clearInterval(clockTimer)
   }

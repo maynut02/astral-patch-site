@@ -13,12 +13,16 @@
     "typecheck": "nuxt typecheck",
     "test:party": "node scripts/test-party-chat.mjs",
     "test:party:rooms": "node --experimental-strip-types scripts/test-party-rooms.mjs",
+    "test:party:route": "node --experimental-strip-types scripts/test-party-route.mjs",
+    "test:party:client": "node --experimental-strip-types scripts/test-party-reconnect-client.mjs",
     "test:party:adapter": "node scripts/test-party-ws-adapter.mjs",
     "test:party:storage": "node scripts/test-party-storage.mjs",
     "test:security": "node scripts/test-security-forge.mjs && node scripts/test-security-braces.mjs",
     "test:mods": "node scripts/test-mod-github.mjs && node scripts/test-mod-hub.mjs && node --experimental-strip-types scripts/test-mod-markdown.mjs && node scripts/test-mod-commits.mjs && node scripts/test-mod-management.mjs",
+    "test:unit": "pnpm run test:security && pnpm run test:mods && pnpm run test:party:rooms && pnpm run test:party:route && pnpm run test:party:client && pnpm run test:party:adapter",
+    "audit:prod": "node scripts/audit-prod-deps.mjs",
     "lint:fix": "eslint . --fix",
-    "check": "pnpm run db:check && pnpm run test:security && pnpm run test:mods && pnpm run test:party:rooms && pnpm run lint && pnpm run typecheck && pnpm run build"
+    "check": "pnpm run db:check && pnpm run test:unit && pnpm run lint && pnpm run typecheck && pnpm run build"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.126",
@@ -43,6 +47,6 @@
   },
   "packageManager": "pnpm@11.20.0",
   "engines": {
-    "node": "^22.19.0 || ^24.11.0 || >=26.0.0"
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   }
 }

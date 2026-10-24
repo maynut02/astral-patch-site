@@ -5,9 +5,11 @@ import type {
 } from '#shared/types/editor-overview'
 import {
   EDITOR_STATUS_META,
-  EDITOR_VISIBLE_STATUSES
+  EDITOR_VISIBLE_STATUSES,
+  createEmptyEditorOverview
 } from '~/utils/editor-progress'
-import { formatEditorCount, formatEditorDate, formatEditorPercent } from '~/utils/editor-helpers'
+import { formatEditorCount, formatEditorDate, formatEditorPercent, formatEditorVersion as getVersionLabel, getEditorQueryString as getQueryString } from '~/utils/editor-helpers'
+import { getEditorCategoryPath as getCategoryPath, getEditorVersionPath as getVersionPath } from '~/utils/editor-links'
 
 interface EditorListRow {
   key: string
@@ -29,19 +31,12 @@ const items = [
 const route = useRoute()
 const router = useRouter()
 
-function getQueryString(value: unknown): string {
-  if (Array.isArray(value)) {
-    return typeof value[0] === 'string' ? value[0] : ''
-  }
-
-  return typeof value === 'string' ? value : ''
-}
-
 function getListMode(value: unknown): EditorListMode {
   return getQueryString(value) === 'version' ? 'version' : 'category'
 }
 
 const listMode = ref<EditorListMode>(getListMode(route.query.view))
+let routeViewInitialized = false
 
 watch(listMode, (value) => {
   if (!import.meta.client || getQueryString(route.query.view) === value) {
@@ -62,36 +57,13 @@ watch(() => route.query.view, (value) => {
   if (listMode.value !== nextMode) {
     listMode.value = nextMode
   }
+  if (!routeViewInitialized && import.meta.client && getQueryString(value) !== listMode.value) {
+    void router.replace({ query: { ...route.query, view: listMode.value } })
+  }
+  routeViewInitialized = true
 }, { immediate: true })
 
-onMounted(() => {
-  if (getQueryString(route.query.view) === listMode.value) {
-    return
-  }
-
-  void router.replace({
-    query: {
-      ...route.query,
-      view: listMode.value
-    }
-  })
-})
-
 const visibleStatuses = EDITOR_VISIBLE_STATUSES
-
-function createDefaultOverview(): EditorOverviewResponse {
-  return {
-    overall: {
-      total: 0,
-      success: 0,
-      info: 0,
-      warning: 0,
-      untranslated: 0
-    },
-    categories: [],
-    versions: []
-  }
-}
 
 const fileSearchValue = ref('')
 
@@ -103,20 +75,13 @@ const {
 } = useFetch<EditorOverviewResponse>('/api/editor/overview', {
   server: false,
   lazy: true,
-  default: createDefaultOverview
+  default: createEmptyEditorOverview
 })
 
-const overview = computed(() => overviewData.value ?? createDefaultOverview())
+const overview = computed(() => overviewData.value ?? createEmptyEditorOverview())
 const latestVersion = computed(() => overview.value.versions[0] ?? null)
 const isLoading = computed(() => overviewStatus.value === 'idle' || overviewStatus.value === 'pending')
 const hasError = computed(() => Boolean(overviewError.value))
-
-function getVersionLabel(version: string, revision: string): string {
-  const normalizedVersion = version.replace(/^v/i, '')
-  const normalizedRevision = revision.replace(/^r/i, '')
-
-  return `v${normalizedVersion} · r${normalizedRevision}`
-}
 
 const filteredCategories = computed(() => {
   const query = fileSearchValue.value.trim().toLowerCase()
@@ -163,17 +128,6 @@ const visibleRows = computed<EditorListRow[]>(() => {
 const hasRowsForMode = computed(() => listMode.value === 'category'
   ? overview.value.categories.length > 0
   : overview.value.versions.length > 0)
-
-function getCategoryPath(category: string): string {
-  return `/translate/editor?file=${encodeURIComponent(category)}`
-}
-
-function getVersionPath(version: string, revision: string): string {
-  const normalizedVersion = version.replace(/^v/i, '')
-  const normalizedRevision = revision.replace(/^r/i, '')
-
-  return `/translate/editor?version=${encodeURIComponent(normalizedVersion)}&revision=${encodeURIComponent(normalizedRevision)}`
-}
 </script>
 
 <template>

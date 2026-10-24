@@ -27,7 +27,3 @@ export function getUserRoleMeta(role: unknown): UserRoleMeta | null {
     ? USER_ROLE_META[role as UserRole] ?? null
     : null
 }
-
-export function hasUserRoleIcon(role: unknown): boolean {
-  return getUserRoleMeta(role) !== null
-}

@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import type { ModDeleteResponse, ModEntry } from '#shared/types/mod'
 
-const props = defineProps<{ open: boolean, mod?: ModEntry | null }>()
-const emit = defineEmits<{ 'update:open': [open: boolean], 'deleted': [id: string] }>()
+const props = defineProps<{ mod?: ModEntry | null }>()
+const open = defineModel<boolean>('open', { default: false })
+const emit = defineEmits<{ deleted: [id: string] }>()
 const { loggedIn, user } = useUserSession()
-const open = computed({
-  get: () => props.open,
-  set: (value: boolean) => emit('update:open', value)
-})
 const target = ref<{ id: string, name: string, userId: string } | null>(null)
 const submitting = ref(false)
 const error = ref('')
