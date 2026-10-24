@@ -29,7 +29,9 @@
 | 대상 | 고정 버전 | 근거 | 경로 |
 | --- | --- | --- | --- |
 | `'@nuxt/devtools>simple-git'` | `4.0.2` | 보안 수정 버전 (위 호환성 패치와 한 묶음) | `@nuxt/devtools → simple-git` |
-| `brace-expansion@>=2.0.0 <2.1.6`, `prosemirror-view@<1.42.3`, `source-map-js@>=1.0.0 <1.2.2`, `undici@>=8.0.0 <8.10.2` | `2.1.6`, `1.42.3`, `1.2.2`, `8.10.2` | 2026-10-06 의존성 취약점 정리·보안 CI 복구 commit `d9f7989`에서 추가 | 전이 의존성 |
+| `brace-expansion@>=2.0.0 <2.1.6`, `prosemirror-view@<1.42.3`, `source-map-js@>=1.0.0 <1.2.2` | `2.1.6`, `1.42.3`, `1.2.2` | 2026-10-06 의존성 취약점 정리·보안 CI 복구 commit `d9f7989`에서 추가 | 전이 의존성 |
+| `undici@>=8.0.0 <8.12.2` | `8.12.2` | [GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c) (High) | `nuxt`, `@nuxt/fonts → unifont`, `nuxt-og-image → unifont` |
+| `zod@>=4.0.0 <4.6.6` | `4.6.6` | [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) (High) | `@nuxt/ui`, `nuxt → @unhead/vue → … → @devframes/json-render` |
 | `shell-quote@>=1.8.4 <1.11.0` | `1.11.0` | [GHSA-pqg4-j6r4-53mv](https://github.com/advisories/GHSA-pqg4-j6r4-53mv) | `@nuxt/devtools → launch-editor → shell-quote` |
 | `launch-editor@<2.14.2` | `2.14.2` | [GHSA-587h-7wmj-h5pm](https://github.com/advisories/GHSA-587h-7wmj-h5pm) (High) | `nuxt → @nuxt/devtools → launch-editor` |
 | `vite@>=8.2.0 <8.2.4` | `8.2.4` | 같은 advisory (`vite@8.2.2`가 `launch-editor` 포함) | Nuxt 모듈 경로의 `vite` |
@@ -54,3 +56,4 @@ Docker 기본 이미지는 패치 버전까지 고정합니다. `docker compose 
 | 2026-10-07 | CI에서 `shell-quote@1.10.0`의 GHSA-pqg4-j6r4-53mv 감지 → `1.11.0` override |
 | 2026-10-22 | CI에서 `launch-editor@2.14.1`·`vite@8.2.2`의 GHSA-587h-7wmj-h5pm(High) 감지 → `2.14.2`·`8.2.4` override |
 | 2026-10-22 | Node.js [2026-10-21 보안 릴리스](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)(High: Brotli 디코더 범위 밖 쓰기, TLS 인증서 호스트 이름 검증 우회 등, 번들 Undici·OpenSSL·c-ares 갱신) 대응: 기본 이미지 `node:22-alpine` → `node:22.23.4-alpine`, `engines.node`를 `22.23.4`·`24.22.1`·`26.12.1` 이상으로 상향 |
+| 2026-10-24 | CI에서 `undici@8.10.2`의 GHSA-xjj6-f33q-929c, `zod@4.4.3`의 GHSA-mrhx-c7xc-m3w5(모두 High) 감지 → `8.12.2`·`4.6.6` override |
