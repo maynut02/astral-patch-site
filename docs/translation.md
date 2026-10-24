@@ -1,0 +1,77 @@
+# 번역
+
+## 데이터 흐름
+
+```mermaid
+flowchart TD
+  Sync["원문 동기화 (astral-party-korean-patch)"] --> Units["translation_units / source_versions"]
+  Units --> Propose["제안: translation_changes (pending)"]
+  Propose -->|verified·admin 승인| Approved["translations 갱신"]
+  Propose -->|반려| Rejected["rejected"]
+  Approved -->|같은 항목의 나머지 pending| Superseded["superseded"]
+  Approved --> Pack["번역 팩 배포 (R2)"]
+```
+
+- 승인된 최종 번역은 `translations`, 모든 제안과 검토 이력은 `translation_changes`에 있습니다. 상태는 `pending`, `approved`, `rejected`, `superseded`입니다.
+- 한 항목에 pending 제안이 여러 개 있을 수 있습니다. 하나를 승인하면 같은 항목·locale의 나머지 pending은 `superseded`가 됩니다.
+- 원문이 바뀌어도 마지막 승인 번역은 유지됩니다. 승인 당시 원문과 현재 원문이 다르면 화면에 `확인 필요`로 표시합니다.
+- 제안 종류(`change_kind`):
+  - `translation_edit`: 번역 문구 변경
+  - `retain_confirmation`: `유지` 버튼. 기존 번역을 현재 원문 버전에도 그대로 쓰겠다는 확인 요청
+- 승인·반려는 `verified`, `admin`만 할 수 있습니다.
+
+## 화면
+
+| 경로 | 내용 |
+| --- | --- |
+| `/translate` | 카테고리별 진행도, 최근 번역 |
+| `/translate/editor` | 목록·검색·필터, 번역 입력, 임시저장, 일괄 저장, 유지, AI 번역, 이력, 댓글, 용어집 |
+| `/translate/review` | pending 제안 검토, 단건·일괄 승인·반려 |
+| `/change` | 원문 변경·번역 변경 기록 |
+
+에디터(목록·댓글)와 변경 기록 화면은 `/ws` 토픽(`editor`, `editor:comment`, `change:translation`)으로 다른 사용자의 변경을 실시간 반영합니다. 검토 화면은 요청 시점 데이터를 사용합니다.
+
+## 에디터 구조
+
+`app/pages/translate/editor.vue`는 화면 조합만 하고 상태는 composable에 있습니다. 하위 컴포넌트는 `app/utils/editor-page-state.ts`의 `EditorPageState`로 같은 상태를 공유합니다.
+
+| composable | 책임 |
+| --- | --- |
+| `editor-items` | 목록과 진행도 조회 |
+| `editor-query` | 검색·필터·페이지를 URL 쿼리와 동기화 |
+| `editor-actions` | 저장, 유지, 되돌리기, 검토 |
+| `editor-drafts` | 미저장 번역의 브라우저 저장 (키: translation unit UUID) |
+| `editor-realtime` | 실시간 이벤트 반영 |
+| `editor-preferences` | 표시 언어, diff 방식 |
+| `editor-dictionaries`, `editor-dictionary-panel` | 용어집 조회·추가, 사전 패널 |
+| `editor-layout`, `editor-visual-viewport` | 사이드바, 모바일 키보드 대응 |
+
+임시저장은 여러 탭에서 공유됩니다. 한 탭이 빈 저장소를 읽어도 다른 탭의 임시저장을 지우지 않습니다.
+
+## 저장과 제한
+
+- 번역 저장은 단건도 `PATCH /api/editor/items/batch`를 사용합니다.
+- 사용자별로 저장·검토·AI 번역에 분·시간 단위 요청 제한이 있습니다(`server/utils/editor-rate-limit.ts`).
+- AI 번역(`POST /api/editor/items/:id/ai-translation`)은 서버가 `AI_BASE_URL`의 OpenAI 호환 게이트웨이를 호출해 제안 문구를 돌려줍니다. 자동 저장하지 않으며, 사용자가 확인 후 저장합니다.
+
+## 용어집
+
+- 로그인 사용자는 용어집을 만들 수 있고 공개(`public`)·비공개(`private`)를 고릅니다. 기본은 비공개입니다.
+- 공개 용어집은 모든 사용자, 비공개 용어집은 소유자와 관리자만 봅니다.
+- 항목 추가는 소유자와 관리자만 할 수 있습니다(`canEdit`).
+- 제공 API: 용어집 목록·생성, 항목 목록(검색, 50개씩)·추가. 용어집·항목의 수정·삭제 API는 화면에서 쓰지 않아 제공하지 않습니다.
+
+## 번역 팩
+
+관리자 페이지의 `번역 팩 배포`는 `translations`의 `ko` 번역 전체를 플러그인용 팩으로 만들어 Cloudflare R2에 올립니다.
+
+| 객체 키 | 내용 | Cache-Control |
+| --- | --- | --- |
+| `translation-pack/latest.json` | 최신 팩 포인터 (`number`, `version`, `revision`, `publishedAt`, `path`, `size`, `sha256`) | `no-cache` |
+| `translation-pack/packs/{number}.json.gz` | gzip 팩 | `public, max-age=31536000, immutable` |
+
+- 팩 번호는 `translation_pack_number_seq`에서 받아 재사용하지 않습니다. 플러그인(`astral-party-korean-plugin`)은 `latest.json`의 번호만 비교합니다.
+- 배포 기록은 `translation_pack_publications`에 남습니다.
+- 응답 후 백그라운드에서 최근 10개와 게임 버전·리비전별 마지막 팩을 제외한 오래된 팩을 삭제합니다. 실패한 삭제는 다음 배포 때 재시도합니다.
+- Cloudflare는 `.json`을 기본 캐시하지 않고 `.gz`는 캐시하므로 별도 Cache Rule이나 퍼지가 필요 없습니다.
+- 필요한 환경변수와 R2 권한은 [deployment.md](deployment.md#번역-팩-r2)를 참고하세요.

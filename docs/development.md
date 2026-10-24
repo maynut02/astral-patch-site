@@ -2,30 +2,33 @@
 
 ## 요구사항
 
-- Node.js 22.19 이상(22.x) 또는 Nuxt가 지원하는 상위 버전
+- Node.js `^22.23.4 || ^24.22.1 || >=26.12.1` (`package.json`의 `engines`, `.nvmrc`)
 - pnpm 11
-- SSH로 접근 가능한 개발 DB 또는 별도 호환 PostgreSQL
+- 개발 DB: SSH로 접근 가능한 서버의 PostgreSQL, 또는 migration을 적용한 별도 PostgreSQL
 
-버전은 `.nvmrc`와 `package.json`을 기준으로 합니다.
-
-## 초기 설정
+## 설정
 
 ```bash
 pnpm install
 cp .env.example .env
 ```
 
-로컬 `.env`에는 최소 다음 값이 필요합니다.
+`.env.example`은 세 구역으로 나뉩니다: **1. 로컬 개발**(`.env`), **2. GitHub Secrets**, **3. 서버 운영 환경**. 로컬에서는 1번 구역만 채웁니다.
 
-```text
-DATABASE_URL
-NUXT_SESSION_PASSWORD
-NUXT_OAUTH_GOOGLE_CLIENT_ID
-NUXT_OAUTH_GOOGLE_CLIENT_SECRET
-ASTRAL_SSH_HOST
-```
-
-AI 번역 개발 시 `AI_API_KEY`, `AI_BASE_URL`도 설정합니다.
+| 변수 | 필수 | 설명 |
+| --- | --- | --- |
+| `DATABASE_URL` | ✓ | `pnpm dev` 사용 시 `127.0.0.1`/`localhost`의 `ASTRAL_DEV_DB_LOCAL_PORT`를 가리켜야 함 |
+| `NUXT_SESSION_PASSWORD` | ✓ | 32자 이상 임의 값 |
+| `NUXT_OAUTH_GOOGLE_CLIENT_ID`, `NUXT_OAUTH_GOOGLE_CLIENT_SECRET` | ✓ | Google OAuth. redirect URI `http://localhost:3000/auth/google` 등록 |
+| `ASTRAL_SSH_HOST` | `pnpm dev` | 터널 대상 서버 |
+| `ASTRAL_SSH_USER`, `ASTRAL_SSH_PORT`, `ASTRAL_SSH_KEY_PATH` | | 기본 `ubuntu`, `22`, 기본 키/agent |
+| `ASTRAL_DEV_DB_LOCAL_PORT`, `ASTRAL_DEV_DB_REMOTE_HOST`, `ASTRAL_DEV_DB_REMOTE_PORT` | | 기본 `55433`, `127.0.0.1`, `5433` |
+| `NUXT_ANDROID_CERTIFICATE_SHA256` | | `/.well-known/assetlinks.json`의 서명 지문 |
+| `AI_API_KEY`, `AI_BASE_URL` | | AI 번역 |
+| `GITHUB_TOKEN` | | GitHub API rate limit 완화 (릴리즈 피드, 모드 허브) |
+| `ASTRAL_WS_ALLOWED_ORIGINS` | | `/ws`, `/ws/party`에 추가로 허용할 Origin (쉼표 구분) |
+| `ASTRAL_WS_MAX_*`, `ASTRAL_WS_*_MS`, `ASTRAL_WS_*_BYTES` | | 공용 `/ws` 허브 제한값. 미설정 시 기본값 (파티 채팅 제한은 코드 고정) |
+| `ASTRAL_TRUST_PROXY` | | `true`면 `X-Real-IP`를 클라이언트 IP로 신뢰 (Nginx 뒤에서만) |
 
 ## 실행
 
@@ -33,89 +36,48 @@ AI 번역 개발 시 `AI_API_KEY`, `AI_BASE_URL`도 설정합니다.
 pnpm dev
 ```
 
-`pnpm dev`는 `scripts/dev-with-tunnel.mjs`가 SSH tunnel을 열고 Nuxt를 시작합니다. `DATABASE_URL`은 `127.0.0.1` 또는 `localhost`의 지정된 local port만 허용합니다.
+`scripts/dev-with-tunnel.mjs`가 SSH local forwarding(`127.0.0.1:<local> → 서버 127.0.0.1:5433`)을 연 뒤 Nuxt를 시작합니다. 터널이 끊기면 Nuxt도 종료합니다.
 
-Nuxt만 실행:
+> [!WARNING]
+> 기본 터널 대상은 운영 서버의 PostgreSQL입니다. 로컬에서 실행한 쓰기 요청과 통합 테스트(`test:party`, `test:party:storage`)는 실제 데이터에 기록됩니다.
 
-```bash
-pnpm dev:nuxt
-```
+로컬 PostgreSQL을 쓰려면 `DATABASE_URL`을 그 DB로 바꾸고 `pnpm dev:nuxt`를 실행합니다. 새 DB는 먼저 migration을 적용합니다([database.md](database.md)).
 
-## 브랜치와 릴리스 흐름
+빌드 결과(`.output`)를 직접 실행할 때 DB 주소는 `NUXT_DATABASE_URL` → 빌드 시점 `DATABASE_URL` → 실행 시점 `DATABASE_URL` 순서로 정해집니다. 빌드 때와 다른 DB를 쓰려면 `NUXT_DATABASE_URL`을 지정합니다.
 
-브랜치는 다음 역할로 고정합니다.
+## 테스트
 
-```text
-develop  개발 작업과 일반 커밋
-release  production 배포 대상
-master   배포 검증이 끝난 안정 버전
-```
+| 명령 | 서버 필요 | 대상 |
+| --- | --- | --- |
+| `pnpm test:security` | | 로컬 패치한 `node-forge`, `braces` 회귀 |
+| `pnpm test:mods` | | 모드 GitHub 연동, 마크다운 렌더링, 권한·관리 |
+| `pnpm test:party:rooms` | | 방 생명주기, TTL, 메시지 순서 |
+| `pnpm test:party:route` | | 파티 WebSocket·HTTP 핸들러 (재접속 승계, 종료 사유, 오류 응답) |
+| `pnpm test:party:client` | | 재접속 클라이언트 상태 머신 |
+| `pnpm test:party:adapter` | | WebSocket 어댑터 통합 |
+| `pnpm test:party [url]` | ✓ | HTTP·WebSocket 통합 (기본 `http://localhost:3000`) |
+| `pnpm test:party:storage [url]` | ✓ | DB 저장과 과거 기록 조회 |
 
-기본 흐름:
+`pnpm test:unit`은 서버가 필요 없는 위 여섯 묶음을 실행하고, `pnpm check`는 여기에 `db:check`, `lint`, `typecheck`, `build`를 더합니다.
 
-```text
-develop
-  ↓ PR + CI
-release
-  ↓ production 자동 배포
-  ↓ 운영 확인 후 PR + CI
-master
-```
+## CI
 
-- GitHub 기본 브랜치는 `develop`로 사용합니다.
-- 평소 코드는 `develop`에서 수정합니다.
-- `develop → release` PR이 merge된 경우에만 production 자동 배포가 실행됩니다.
-- 배포 확인 후 `release → master` PR로 안정 버전을 반영합니다.
-- `release`, `master`에는 직접 push하지 않습니다.
-- `release`, `master`는 PR과 `ci` 통과를 필수로 하고 force push와 삭제를 차단합니다.
-- 수동 production 재배포는 GitHub Actions의 `Deploy production`에서 실행하며 항상 `release`의 최신 commit을 사용합니다.
+`.github/workflows/ci.yml`은 `develop` push, `release`/`master` 대상 PR, 수동 실행에서 실행됩니다.
 
-## 검증
+1. `pnpm run db:check`
+2. 실제 PostgreSQL 컨테이너에 migration 두 번 적용 (두 번째 실행은 적용 기록을 보고 모두 건너뛰어야 성공)
+3. `lint` → `test:unit` → `typecheck` → `build`
+4. `test:security` 후 `audit:prod`
 
-```bash
-pnpm check
-```
+## API 규칙
 
-수정 가능한 lint 오류 정리:
+- 변경 요청은 `readJsonBody`(same-origin + JSON + 크기 검사) 또는 본문 없는 요청이면 `assertMutationRequest`를 먼저 호출합니다.
+- 로그인이 필요하면 `requireCurrentSessionUser`, 관리자는 `requireAdminSession` 등 `server/utils/auth-user.ts`의 헬퍼를 사용합니다.
+- 사용자 입력 검증은 `server/utils/validation.ts`를 재사용합니다.
+- 쿼리는 `postgres` 태그드 템플릿으로만 작성합니다.
+- 새 엔드포인트는 실제 호출하는 화면이 있을 때만 추가합니다.
 
-```bash
-pnpm lint:fix
-```
+## 디버깅 팁
 
-PR 전 migration 검증, `lint`, `typecheck`, `build`가 모두 통과해야 합니다.
-
-## 코드 규칙
-
-- TypeScript 타입을 우선 사용하고 `any`를 추가하지 않습니다.
-- 공용 타입은 `shared/types`에 둡니다.
-- UI와 무관한 순수 로직은 `app/utils`로 분리합니다.
-- 브라우저 상태나 재사용 가능한 기능 로직은 `app/composables`로 분리합니다.
-- API handler는 입력 검증과 응답에 집중하고 DB 규칙은 `server/utils`로 분리합니다.
-- 역할 문자열은 `shared/types/user.ts`의 `UserRole`을 사용합니다.
-- 주석은 이유가 필요한 주요 로직에만 한국어 한 줄로 작성합니다.
-- 기능과 무관한 백업 파일이나 임시 파일은 저장소에 추가하지 않습니다.
-
-## DB 변경
-
-DB 변경이 필요한 경우:
-
-1. `database/migrations`에 다음 번호의 migration을 추가합니다.
-2. 기존 migration을 수정하지 않고 새 DB와 기존 DB 양쪽에서 검증합니다.
-3. 필요한 타입과 쿼리를 함께 반영합니다.
-4. `pnpm check`를 실행합니다. CI에서는 실제 PostgreSQL에 migration을 두 번 적용해 재실행 안전성도 확인합니다.
-
-## API 변경
-
-변경 요청은 `readJsonBody` 또는 `assertMutationRequest`를 사용해 same-origin과 body 크기 검사를 유지합니다. 권한이 필요한 API는 `getCurrentSessionUser` 계열 검사를 사용합니다.
-
-새 쿼리는 문자열 결합 대신 `postgres` 파라미터 바인딩을 사용합니다.
-
-## 환경변수
-
-`.env.example`의 세 구역을 기준으로 관리합니다.
-
-- 로컬: `.env`
-- GitHub: Repository secrets
-- 서버: 서버 `.env` 및 `/etc/default/astral-patch`
-
-실제 토큰, 비밀번호, 개인키는 커밋하지 않습니다.
+- 서버 오류는 `server/utils/server-log.ts`의 `logServerError(scope, message, error)`로 `[scope] message` 형식으로 남깁니다.
+- 파티 채팅 끊김은 `party_chat_connection_events` 테이블로 분석합니다([party-chat.md](party-chat.md#연결-로그)).
