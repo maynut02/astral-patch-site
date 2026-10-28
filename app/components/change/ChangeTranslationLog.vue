@@ -153,6 +153,19 @@ const emit = defineEmits<{ retry: [] }>()
               :datetime="entry.reviewedAt"
             >{{ formatEditorDate(entry.reviewedAt) }}</time>
           </div>
+
+          <div
+            v-if="entry.status === 'approved'"
+            class="flex min-w-0 items-center gap-1.5 text-muted"
+          >
+            <UIcon name="i-tabler-package" class="size-3.5 shrink-0" />
+            <span class="wrap-break-word">
+              <template v-if="entry.publication">
+                반영 배포 #{{ entry.publication.number }} · {{ entry.publication.gameVersion }} · {{ entry.publication.revision }}
+              </template>
+              <template v-else>미배포</template>
+            </span>
+          </div>
         </div>
       </article>
     </div>

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 import { createError } from 'h3'
+import type postgres from 'postgres'
 import type {
   AdminTranslationPackPublication,
   AdminTranslationPackStatus
@@ -9,6 +10,7 @@ import type { CurrentSessionUser } from './auth-user'
 import { getDatabase, type DatabaseClient } from './database'
 import { deleteR2Object, getTranslationPackBucketConfig, putR2Object, type R2BucketConfig } from './r2'
 import { logServerError } from './server-log'
+import { broadcastWsMessage } from './ws-hub'
 
 // Runtime translation pack consumed by the Korean plugin. Every route reads the INT_STEAM
 // translation units, so one pack serves all routes; the plugin picks the target lang asset
@@ -49,7 +51,7 @@ function toPublication(row: PublicationRow): AdminTranslationPackPublication {
   return { ...row, publishedAt: row.publishedAt.toISOString() }
 }
 
-async function getCurrentGameRevision(database: DatabaseClient): Promise<GameRevisionRow | null> {
+async function getCurrentGameRevision(database: DatabaseClient | postgres.TransactionSql): Promise<GameRevisionRow | null> {
   const [row] = await database<GameRevisionRow[]>`
     SELECT game_version AS "gameVersion", revision
     FROM game_revisions
@@ -162,16 +164,10 @@ async function deleteRetiredPacks(database: DatabaseClient, config: R2BucketConf
 export async function publishTranslationPack(publisher: CurrentSessionUser): Promise<AdminTranslationPackPublication> {
   const config = getTranslationPackBucketConfig()
   const database = getDatabase()
-  const game = await getCurrentGameRevision(database)
 
-  if (!game) {
-    throw createError({
-      statusCode: 409,
-      statusMessage: `No processed ${SOURCE_ROUTE} game revision exists`
-    })
-  }
-
-  const publication = await database.begin(async (transaction): Promise<AdminTranslationPackPublication> => {
+  // The pack, revision and complete approved history batch must use one MVCC snapshot.
+  // Approvals committed while R2 uploads are running belong to the next publication.
+  const publication = await database.begin('isolation level repeatable read', async (transaction): Promise<AdminTranslationPackPublication> => {
     const [lock] = await transaction<{ acquired: boolean }[]>`
       SELECT pg_try_advisory_xact_lock(${PUBLISH_LOCK_KEY}) AS acquired
     `
@@ -180,6 +176,14 @@ export async function publishTranslationPack(publisher: CurrentSessionUser): Pro
       throw createError({
         statusCode: 409,
         statusMessage: 'Another translation pack publish is in progress'
+      })
+    }
+
+    const game = await getCurrentGameRevision(transaction)
+    if (!game) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: `No processed ${SOURCE_ROUTE} game revision exists`
       })
     }
 
@@ -227,6 +231,17 @@ export async function publishTranslationPack(publisher: CurrentSessionUser): Pro
       )
     `
 
+    // Include intermediate approvals, not only each translation's current applied_change_id.
+    // Updating only unlinked rows leaves earlier publication assignments immutable; pending
+    // rows are untouched, so reviews can continue while this transaction uploads to R2.
+    await transaction`
+      UPDATE translation_changes
+      SET pack_number = ${number}
+      WHERE locale = ${PACK_LOCALE}
+        AND status = 'approved'
+        AND pack_number IS NULL
+    `
+
     // Pack objects are immutable (numbers are never reused), so the CDN may cache them forever.
     // A failure below rolls the row back and may leave an unreferenced pack object; it is not
     // deleted here because an ambiguous pointer PUT may already reference it.
@@ -267,6 +282,8 @@ export async function publishTranslationPack(publisher: CurrentSessionUser): Pro
       strCount
     }
   })
+
+  broadcastWsMessage({ type: 'TRANSLATION_PACK_PUBLISHED' }, ['editor', 'change:translation'])
 
   // Retention runs after the response so slow deletes cannot push the request past the proxy
   // timeout; a failed or interrupted cleanup is retried by the next publish.

@@ -51,6 +51,7 @@ pnpm dev
 | --- | --- | --- |
 | `pnpm test:security` | | 로컬 패치한 `node-forge`, `braces` 회귀 |
 | `pnpm test:mods` | | 모드 GitHub 연동, 마크다운 렌더링, 권한·관리 |
+| `pnpm test:translation-pack` | PostgreSQL 사례만 별도 DB 필요 | 번역 팩 배포·이력 연결·실패 롤백·동시 승인 경계 및 실시간 갱신 경합. `TEST_DATABASE_URL`이 없으면 PostgreSQL 사례만 건너뜀 |
 | `pnpm test:party:rooms` | | 방 생명주기, TTL, 메시지 순서 |
 | `pnpm test:party:route` | | 파티 WebSocket·HTTP 핸들러 (재접속 승계, 종료 사유, 오류 응답) |
 | `pnpm test:party:client` | | 재접속 클라이언트 상태 머신 |
@@ -58,7 +59,13 @@ pnpm dev
 | `pnpm test:party [url]` | ✓ | HTTP·WebSocket 통합 (기본 `http://localhost:3000`) |
 | `pnpm test:party:storage [url]` | ✓ | DB 저장과 과거 기록 조회 |
 
-`pnpm test:unit`은 서버가 필요 없는 위 여섯 묶음을 실행하고, `pnpm check`는 여기에 `db:check`, `lint`, `typecheck`, `build`를 더합니다.
+`pnpm test:unit`은 서버가 필요 없는 위 묶음과 번역 팩 회귀 스크립트를 실행하고, `pnpm check`는 여기에 `db:check`, `lint`, `typecheck`, `build`를 더합니다.
+
+번역 팩 DB 회귀는 기존 `postgres` 의존성으로 실제 PostgreSQL에서 실행합니다. `.env`나 `DATABASE_URL`을 사용하지 않으며, 명시적으로 `TEST_DATABASE_URL`을 지정해야 합니다. **운영 DB가 아닌 별도 테스트 DB**를 사용하세요. 각 테스트는 임의 이름의 schema를 만들고 필요한 migration을 적용한 뒤 삭제합니다. R2·WebSocket 경계만 대체하므로 실제 파일 업로드나 알림 전송은 없습니다. 실시간 갱신 회귀는 DB 없이도 실행되며, 배포 전체 갱신과 개별 변경 갱신이 겹쳐도 이력을 누락하지 않는지 확인합니다.
+
+```bash
+TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/astral_test pnpm test:translation-pack
+```
 
 ## CI
 

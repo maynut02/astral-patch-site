@@ -209,7 +209,8 @@ export function useChangeLogPage() {
   const translationTotalPages = computed(() => translationData.value?.totalPages ?? 1)
   const translationSummary = computed(() => translationSummaryData.value ?? defaultTranslationSummaryData)
   useChangeLogRealtime({
-    translationData, translationSummaryData, overviewData, translationStatus, translationQuery, translationSearch, translationStatusFilter, translationPage, defaultTranslationData
+    translationData, translationSummaryData, overviewData, translationStatus, translationQuery, translationSearch, translationStatusFilter, translationPage, defaultTranslationData,
+    refreshTranslations: () => refreshTranslations({ dedupe: 'cancel' })
   })
 
   const overview = computed(() => overviewData.value ?? createEmptyEditorOverview())

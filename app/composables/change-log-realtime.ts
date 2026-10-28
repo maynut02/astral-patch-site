@@ -14,14 +14,18 @@ interface ChangeLogRealtimeOptions {
   translationStatusFilter: Ref<string>
   translationPage: Ref<number>
   defaultTranslationData: EditorTranslationLogResponse
+  refreshTranslations: () => Promise<unknown>
 }
 
 export function useChangeLogRealtime(options: ChangeLogRealtimeOptions) {
-  const { translationData, translationSummaryData, overviewData, translationStatus, translationQuery, translationSearch, translationStatusFilter, translationPage, defaultTranslationData } = options
+  const { translationData, translationSummaryData, overviewData, translationStatus, translationQuery, translationSearch, translationStatusFilter, translationPage, defaultTranslationData, refreshTranslations } = options
   const LOG_PAGE_SIZE = 50
   let translationRealtimeSyncTimer: ReturnType<typeof setTimeout> | undefined
   const pendingNewTranslationChangeIds = new Set<string>()
   const pendingUpdatedTranslationChangeIds = new Set<string>()
+  let syncing = false
+  let fullRefreshRequired = false
+  let disposed = false
 
   const {
     onMessage: onWsMessage,
@@ -75,14 +79,9 @@ export function useChangeLogRealtime(options: ChangeLogRealtimeOptions) {
   }, { flush: 'sync' })
 
   async function syncTranslationPageSilently(): Promise<void> {
-    const version = ++syncVersion
-    const response = await $fetch<EditorTranslationLogResponse>('/api/editor/log/translations', {
-      query: translationQuery.value
-    })
-
-    if (version === syncVersion) {
-      translationData.value = response
-    }
+    syncVersion += 1
+    // useFetch owns this ref; its refresh cancels older initial/query/manual requests.
+    await refreshTranslations()
   }
 
   async function syncRealtimeTranslationChanges(
@@ -105,11 +104,16 @@ export function useChangeLogRealtime(options: ChangeLogRealtimeOptions) {
       return
     }
 
+    const version = ++syncVersion
     const allChangeIds = [...new Set([...newChangeIds, ...updatedChangeIds])]
     const [entries, summaryResult] = await Promise.all([
       fetchRealtimeTranslationEntries(allChangeIds),
       syncTranslationAggregatesSilently()
     ])
+
+    if (version !== syncVersion) {
+      return
+    }
 
     const current = translationData.value ?? defaultTranslationData
     const entriesById = new Map(entries.map(entry => [entry.id, entry]))
@@ -132,6 +136,39 @@ export function useChangeLogRealtime(options: ChangeLogRealtimeOptions) {
       total,
       totalPages: Math.max(1, Math.ceil(total / (current.pageSize || LOG_PAGE_SIZE)))
     }
+  }
+
+  async function drainTranslationSync(): Promise<void> {
+    if (syncing || disposed) return
+    syncing = true
+    try {
+      while (!disposed && (fullRefreshRequired || pendingNewTranslationChangeIds.size || pendingUpdatedTranslationChangeIds.size)) {
+        const fullRefresh = fullRefreshRequired
+        fullRefreshRequired = false
+        const newChangeIds = [...pendingNewTranslationChangeIds]
+        const updatedChangeIds = [...pendingUpdatedTranslationChangeIds]
+        pendingNewTranslationChangeIds.clear()
+        pendingUpdatedTranslationChangeIds.clear()
+        if (fullRefresh) {
+          await Promise.allSettled([
+            syncTranslationPageSilently(),
+            syncTranslationAggregatesSilently()
+          ])
+        } else {
+          await Promise.allSettled([syncRealtimeTranslationChanges(newChangeIds, updatedChangeIds)])
+        }
+      }
+    } finally {
+      syncing = false
+    }
+  }
+
+  function requestFullRefresh(): void {
+    syncVersion += 1
+    fullRefreshRequired = true
+    clearTimeout(translationRealtimeSyncTimer)
+    translationRealtimeSyncTimer = undefined
+    void drainTranslationSync()
   }
 
   function scheduleTranslationRealtimeSync(message: AstralWebSocketMessage): void {
@@ -162,34 +199,17 @@ export function useChangeLogRealtime(options: ChangeLogRealtimeOptions) {
 
     translationRealtimeSyncTimer = setTimeout(() => {
       translationRealtimeSyncTimer = undefined
-      const newChangeIds = [...pendingNewTranslationChangeIds]
-      const updatedChangeIds = [...pendingUpdatedTranslationChangeIds]
-      pendingNewTranslationChangeIds.clear()
-      pendingUpdatedTranslationChangeIds.clear()
-
-      void Promise.allSettled([
-        syncRealtimeTranslationChanges(newChangeIds, updatedChangeIds)
-      ])
+      void drainTranslationSync()
     }, 200)
   }
 
   onWsMessage('EDITOR_ITEM_CHANGED', scheduleTranslationRealtimeSync)
   onWsMessage('EDITOR_ITEM_REVIEWED', scheduleTranslationRealtimeSync)
-  onWsReconnect(() => {
-    if (translationRealtimeSyncTimer) {
-      clearTimeout(translationRealtimeSyncTimer)
-      translationRealtimeSyncTimer = undefined
-    }
-    pendingNewTranslationChangeIds.clear()
-    pendingUpdatedTranslationChangeIds.clear()
-
-    void Promise.allSettled([
-      syncTranslationPageSilently(),
-      syncTranslationAggregatesSilently()
-    ])
-  })
+  onWsMessage('TRANSLATION_PACK_PUBLISHED', requestFullRefresh)
+  onWsReconnect(requestFullRefresh)
 
   onBeforeUnmount(() => {
+    disposed = true
     syncVersion += 1
     clearTimeout(translationRealtimeSyncTimer)
     pendingNewTranslationChangeIds.clear()

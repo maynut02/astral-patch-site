@@ -166,12 +166,18 @@ export async function getEditorTranslationLogs(
           ),
           'status', tc.status,
           'createdAt', tc.created_at,
-          'reviewedAt', tc.reviewed_at
+          'reviewedAt', tc.reviewed_at,
+          'publication', CASE WHEN publication.number IS NOT NULL THEN json_build_object(
+            'number', publication.number,
+            'gameVersion', publication.game_version,
+            'revision', publication.revision
+          ) ELSE NULL END
         ) AS entry
       FROM translation_changes tc
       JOIN translation_units tu ON tu.id = tc.unit_id
       LEFT JOIN app_users au ON au.google_sub = tc.created_by
       LEFT JOIN app_users reviewer ON reviewer.google_sub = tc.reviewed_by
+      LEFT JOIN translation_pack_publications publication ON publication.number = tc.pack_number
       WHERE ${where}
       ORDER BY tc.created_at DESC, tc.id DESC
       LIMIT ${EDITOR_LOG_PAGE_SIZE}
@@ -214,11 +220,17 @@ export async function getEditorTranslationLogEntry(changeId: string): Promise<Ed
       tc.change_kind AS "changeKind",
       tc.status,
       tc.created_at AS "createdAt",
-      tc.reviewed_at AS "reviewedAt"
+      tc.reviewed_at AS "reviewedAt",
+      CASE WHEN publication.number IS NOT NULL THEN json_build_object(
+        'number', publication.number,
+        'gameVersion', publication.game_version,
+        'revision', publication.revision
+      ) ELSE NULL END AS publication
     FROM translation_changes tc
     JOIN translation_units tu ON tu.id = tc.unit_id
     LEFT JOIN app_users au ON au.google_sub = tc.created_by
     LEFT JOIN app_users reviewer ON reviewer.google_sub = tc.reviewed_by
+    LEFT JOIN translation_pack_publications publication ON publication.number = tc.pack_number
     WHERE tc.id = ${changeId}
       AND tc.locale = 'ko'
     LIMIT 1

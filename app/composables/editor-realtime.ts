@@ -136,6 +136,11 @@ export function useEditorRealtime(data: EditorPageData, query: ReturnType<typeof
 
   onWsMessage('EDITOR_ITEM_CHANGED', scheduleEditorRealtimeSync)
   onWsMessage('EDITOR_ITEM_REVIEWED', scheduleEditorRealtimeSync)
+  onWsMessage('TRANSLATION_PACK_PUBLISHED', () => {
+    if (selectedItemId.value) {
+      historyReloadKey.value += 1
+    }
+  })
   onWsReconnect(() => {
     if (editorRealtimeSyncTimer) {
       clearTimeout(editorRealtimeSyncTimer)
