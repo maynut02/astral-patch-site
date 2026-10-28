@@ -74,7 +74,7 @@ Google OAuth 클라이언트에 redirect URI `https://<도메인>/auth/google`�
 
 ## 자동 배포
 
-`develop → release` PR이 merge되면 `.github/workflows/deploy.yml`(`Deploy production`)이 SSH로 서버에 접속해 다음을 실행합니다.
+`develop → release` PR이 merge되면 `.github/workflows/deploy.yml`(`Deploy`)가 SSH로 서버에 접속해 다음을 실행합니다.
 
 ```mermaid
 flowchart LR
@@ -92,9 +92,26 @@ flowchart LR
 - 배포 대상은 merge commit이며, `origin/release`보다 오래된 commit이면 건너뛰고 `release`에 없는 commit이면 실패합니다.
 - 서버에 이미 더 새로운 commit이 있으면 건너뜁니다.
 - Nginx 설정은 매번 `deploy/render-nginx-config.sh`로 `deploy/nginx/astral-patch-site.conf.template`에서 다시 만들고 `nginx -t` 후 reload합니다(`/ws`, `/ws/party` Upgrade 포함).
-- health check는 `http://127.0.0.1:${ASTRAL_APP_PORT}/`를 2초 간격 30회 확인하고, 실패하면 앱 로그 150줄을 출력하고 실패합니다.
-- `release`·`master`에 직접 push해도 배포되지 않습니다. 수동 재배포는 Actions에서 `Deploy production`을 실행하며 항상 `origin/release` 최신 commit을 사용합니다.
+- health check는 `http://127.0.0.1:${ASTRAL_APP_PORT}/`를 2초 간격 30회 확인하고, 실패하면 서버의 배포 로그 파일에 앱 로그 150줄을 추가한 뒤 실패합니다.
+- `release`·`master`에 직접 push해도 배포되지 않습니다. 수동 재배포는 Actions에서 `Deploy`를 실행하며 항상 `origin/release` 최신 commit을 사용합니다.
 - migration은 새 앱 시작 전에 적용되므로, 이전 앱을 깨뜨리는 schema 변경은 두 번에 나눠 배포합니다([database.md](database.md#migration-규칙)).
+
+### 배포 실패 로그
+
+- Git·빌드·migration·Nginx·health check 등 배포 명령의 표준 출력과 오류는 서버의 `/var/log/astral-patch/deploy/`에만 기록합니다. Actions에는 완료·건너뜀 여부 또는 실패 코드와 서버 로그 경로만 출력하며, 파일 내용은 업로드하지 않습니다.
+- 배포 전 DB 백업 서비스 자체의 출력은 서버의 systemd journal에 남습니다. 배포 로그 파일에는 `systemctl` 호출 결과가 기록됩니다.
+- 성공하거나 오래된 배포를 건너뛰면 파일을 삭제하고, 실패한 경우에만 남깁니다. 파일 삭제가 실패하면 Actions도 실패로 표시하고 남은 서버 로그 경로를 알립니다. 파일명은 `deploy-<UTC 시각>-<Actions run ID>-<attempt>-<임의 값>.log`입니다.
+- 상위 `/var/log/astral-patch/`는 `root:root` 소유의 `0755`, `deploy/`는 배포 계정 소유의 `0700`, 파일은 `0600` 권한으로 생성합니다. 배포 계정에 해당 디렉터리를 생성하는 `sudo -n install` 권한이 필요합니다. 디렉터리나 파일을 준비하지 못하면 배포를 시작하지 않습니다.
+- 14일을 초과한 배포 로그는 다음 배포 시 삭제합니다. 실패 로그에는 민감한 진단 정보가 포함될 수 있으므로 공개 경로나 Actions 아티팩트로 복사하지 않습니다.
+- SSH 연결 자체가 실패하면 서버 로그를 만들 수 없습니다. 이 경우 연결 실패는 Actions에서 확인합니다.
+
+서버에 SSH로 접속한 뒤 확인합니다.
+
+```bash
+sudo ls -lt /var/log/astral-patch/deploy/
+sudo less /var/log/astral-patch/deploy/deploy-<확인할 파일>.log
+sudo journalctl -u astral-patch-db-backup.service -n 150 --no-pager
+```
 
 ### GitHub Secrets
 

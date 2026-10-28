@@ -309,6 +309,7 @@ export async function getEditorHistory(unitId: string): Promise<EditorHistoryRes
         NULL::text AS "reviewerRole",
         NULL::text AS "reviewerHandle",
         NULL AS "reviewedAt",
+        NULL::json AS publication,
         sc.change_type::text AS "changeType",
         src.game_version AS version,
         src.revision AS revision,
@@ -335,6 +336,11 @@ export async function getEditorHistory(unitId: string): Promise<EditorHistoryRes
         reviewer."role"::text AS "reviewerRole",
         NULLIF(BTRIM(reviewer.handle), '') AS "reviewerHandle",
         tc.reviewed_at AS "reviewedAt",
+        CASE WHEN publication.number IS NOT NULL THEN json_build_object(
+          'number', publication.number,
+          'gameVersion', publication.game_version,
+          'revision', publication.revision
+        ) ELSE NULL END AS publication,
         NULL::text AS "changeType",
         NULL::text AS version,
         NULL::text AS revision,
@@ -352,6 +358,7 @@ export async function getEditorHistory(unitId: string): Promise<EditorHistoryRes
       FROM translation_changes tc
       JOIN app_users creator ON creator.google_sub = tc.created_by
       LEFT JOIN app_users reviewer ON reviewer.google_sub = tc.reviewed_by
+      LEFT JOIN translation_pack_publications publication ON publication.number = tc.pack_number
       WHERE tc.unit_id = ${unitId}
         AND tc.locale = 'ko'
     ) AS history

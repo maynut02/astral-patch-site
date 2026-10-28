@@ -8,11 +8,11 @@ develop ──PR + ci──▶ release ──(merge 시 production 자동 배포
 
 | 브랜치 | 용도 |
 | --- | --- |
-| `develop` | 기본 브랜치. 일상 개발과 커밋 |
+| `develop` | 일상 개발과 커밋 |
 | `release` | production 배포 대상 |
-| `master` | 운영 확인을 마친 안정 버전 |
+| `master` | 기본 브랜치. 운영 확인을 마친 안정 버전 |
 
-- `release`, `master`에는 직접 push하지 않습니다. 두 브랜치는 PR과 `ci` 통과가 필수이고 force push·삭제가 막혀 있습니다.
+- `release`, `master`에는 직접 push하지 않습니다. PR과 `ci` 통과 후 병합하며 force push·삭제를 하지 않는 것이 브랜치 운영 원칙입니다.
 - 자동 배포는 같은 저장소의 `develop → release` PR이 merge될 때만 실행됩니다.
 
 ## 작업 순서

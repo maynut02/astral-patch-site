@@ -207,6 +207,18 @@ function getReviewId(entry: EditorHistoryEntry): string {
       </div>
 
       <div class="flex-1 pb-12 flex flex-col gap-4">
+        <div
+          v-if="entry.action === 'translation_changed' && entry.status === 'approved'"
+          class="flex min-w-0 items-center gap-1.5 text-xs text-muted"
+        >
+          <UIcon name="i-tabler-package" class="size-3.5 shrink-0" />
+          <span class="wrap-break-word">
+            <template v-if="entry.publication">
+              반영 배포 #{{ entry.publication.number }} · {{ entry.publication.gameVersion }} · {{ entry.publication.revision }}
+            </template>
+            <template v-else>미배포</template>
+          </span>
+        </div>
         <div class="flex items-center gap-2 text-xs text-muted">
           <time
             class="flex-1 shrink-0 text-xs text-muted"

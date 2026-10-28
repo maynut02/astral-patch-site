@@ -72,6 +72,7 @@ export async function getPendingEditorReviewCandidates(
       NULLIF(BTRIM(au.handle), '') AS handle,
       NULL::text AS "reviewerRole",
       NULL::text AS "reviewerHandle",
+      NULL::json AS publication,
       tc.previous_text AS "previousText",
       tc.proposed_text AS "proposedText",
       tc.change_kind AS "changeKind",

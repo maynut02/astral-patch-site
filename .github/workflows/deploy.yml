@@ -1,4 +1,4 @@
-name: Deploy production
+name: Deploy
 
 on:
   pull_request:
@@ -40,8 +40,60 @@ jobs:
 
             SITE_DIR='${{ secrets.SERVER_WORK_DIR }}'
             DEPLOY_SHA='${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || '' }}'
+            LOG_DIR=/var/log/astral-patch/deploy
+            DEPLOY_SKIPPED=false
+
+            if ! {
+              sudo -n install -d -m 0755 -o root -g root "${LOG_DIR%/*}" &&
+                sudo -n install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$LOG_DIR"
+            } >/dev/null 2>&1; then
+              echo "Cannot prepare the private server deployment log directory." >&2
+              exit 1
+            fi
+
+            if ! {
+              LOG_FILE="$(
+                umask 077
+                mktemp "$LOG_DIR/deploy-$(date -u +%Y%m%dT%H%M%SZ)-${{ github.run_id }}-${{ github.run_attempt }}-XXXXXX.log"
+              )"
+            } 2>/dev/null; then
+              echo "Cannot create a private server deployment log." >&2
+              exit 1
+            fi
+
+            if ! { exec 4>"$LOG_FILE"; } 2>/dev/null; then
+              echo "Cannot open a private server deployment log." >&2
+              exit 1
+            fi
+
+            exec 3>&1
+            exec 1>&4 2>&1 4>&-
+
+            finish_deployment() {
+              local status=$?
+              trap - EXIT
+              set +e
+
+              if [ "$status" -ne 0 ]; then
+                printf '\nContainer logs at deployment failure:\n'
+                docker compose -p astral-patch logs --no-color --tail=150 astral-patch-site
+                printf 'Deployment failed (exit %s). Server log: %s\n' "$status" "$LOG_FILE" >&3
+              elif ! rm -f -- "$LOG_FILE"; then
+                printf 'Private server log cleanup failed. Server log: %s\n' "$LOG_FILE" >&3
+                status=1
+              elif [ "$DEPLOY_SKIPPED" = true ]; then
+                printf 'Deployment skipped (target already superseded).\n' >&3
+              else
+                printf 'Deployment completed successfully.\n' >&3
+              fi
+
+              exit "$status"
+            }
+
+            trap finish_deployment EXIT
 
             cd "$SITE_DIR"
+            find "$LOG_DIR" -maxdepth 1 -type f -name 'deploy-*.log' -mmin +20160 -delete
             CURRENT_SHA="$(git rev-parse HEAD)"
             git fetch origin release
             RELEASE_SHA="$(git rev-parse origin/release)"
@@ -50,6 +102,7 @@ jobs:
             if [ "$DEPLOY_SHA" != "$RELEASE_SHA" ]; then
               if git merge-base --is-ancestor "$DEPLOY_SHA" "$RELEASE_SHA"; then
                 echo "Skipping outdated deployment $DEPLOY_SHA; release is already at $RELEASE_SHA"
+                DEPLOY_SKIPPED=true
                 exit 0
               fi
 
@@ -59,6 +112,7 @@ jobs:
 
             if [ "$CURRENT_SHA" != "$DEPLOY_SHA" ] && git merge-base --is-ancestor "$DEPLOY_SHA" "$CURRENT_SHA"; then
               echo "Skipping outdated deployment $DEPLOY_SHA; server already has newer $CURRENT_SHA"
+              DEPLOY_SKIPPED=true
               exit 0
             fi
 
@@ -115,7 +169,6 @@ jobs:
               fi
 
               if [ "$attempt" -eq 30 ]; then
-                docker compose -p astral-patch logs --tail=150 astral-patch-site
                 exit 1
               fi
               sleep 2

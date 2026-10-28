@@ -26,6 +26,12 @@ export type EditorHistoryAction = 'source_changed' | 'translation_changed'
 
 export type EditorHistoryActorType = 'automation' | 'user'
 
+export interface EditorTranslationPublication {
+  number: number
+  gameVersion: string
+  revision: string
+}
+
 export interface EditorItem {
   id: string
   kind: 'lang' | 'str'
@@ -53,6 +59,7 @@ export interface EditorHistoryEntry {
   reviewerRole: EditorRole | null
   reviewerHandle: string | null
   reviewedAt: string | null
+  publication: EditorTranslationPublication | null
   changeType: EditorSourceChangeType | null
   version: string | null
   revision: string | null
@@ -152,6 +159,7 @@ export interface EditorTranslationLogEntry {
   status: EditorChangeStatus
   createdAt: string
   reviewedAt: string | null
+  publication: EditorTranslationPublication | null
 }
 
 export interface EditorTranslationLogResponse {

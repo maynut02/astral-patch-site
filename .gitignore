@@ -19,6 +19,7 @@ logs
 .fleet
 .idea
 .mixdog/
+/scripts/verify-user-search.mjs
 
 # 로컬 환경변수
 .env
