@@ -214,7 +214,7 @@ function getReviewId(entry: EditorHistoryEntry): string {
           <UIcon name="i-tabler-package" class="size-3.5 shrink-0" />
           <span class="wrap-break-word">
             <template v-if="entry.publication">
-              반영 배포 #{{ entry.publication.number }} · {{ entry.publication.gameVersion }} · {{ entry.publication.revision }}
+              배포 #{{ entry.publication.number }} · {{ entry.publication.gameVersion }} · {{ entry.publication.revision }}
             </template>
             <template v-else>미배포</template>
           </span>
