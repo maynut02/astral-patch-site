@@ -1,49 +1,23 @@
 <script setup lang="ts">
 import type { EditorItem } from '#shared/types/editor'
-import type { EditorDictionaryEntry, GlossaryContextResponse } from '#shared/types/editor-dictionary'
+import type { EditorDictionaryEntry } from '#shared/types/editor-dictionary'
+import type { useEditorGlossaryContext } from '~/composables/editor-glossary-context'
 import { getEditorItemKey } from '~/utils/editor-links'
 
-const props = defineProps<{ item: EditorItem | null }>()
+const props = defineProps<{ item: EditorItem | null, context: ReturnType<typeof useEditorGlossaryContext> }>()
+const { glossaryEntries: entries, glossaryVoices: voices, glossaryLoading: loading, glossaryFailed: failed, refreshGlossary: load } = props.context
 const { loggedIn } = useUserSession()
 const { showLoginRequiredToast } = useAppToast()
 const { dictionaries, loadDictionaries } = useEditorDictionaryList()
 const teamDictionaries = computed(() => dictionaries.value.filter(dictionary => dictionary.isTeam))
 const dictionaryId = ref('')
-const entries = ref<EditorDictionaryEntry[]>([])
-const voices = ref<EditorDictionaryEntry[]>([])
 const voiceId = ref('general')
-const loading = ref(false)
-const failed = ref(false)
 const formOpen = ref(false)
 const selectedEntry = ref<EditorDictionaryEntry | null>(null)
 const expanded = ref<string | null>(null)
 const usageOpen = ref(false)
 const usageEntry = ref<EditorDictionaryEntry | null>(null)
-let request = 0
 const voice = computed(() => voices.value.find(entry => entry.id === voiceId.value))
-async function load() {
-  const id = ++request
-  const itemId = props.item?.id
-  entries.value = []
-  voices.value = []
-  failed.value = false
-  if (!itemId) {
-    loading.value = false
-    return
-  }
-  loading.value = true
-  try {
-    const result = await $fetch<GlossaryContextResponse>('/api/editor/glossary/related', { query: { itemId } })
-    if (id !== request) return
-    entries.value = result.entries
-    voices.value = result.voices
-    if (!voices.value.some(entry => entry.id === voiceId.value)) voiceId.value = 'general'
-  } catch {
-    if (id === request) failed.value = true
-  } finally {
-    if (id === request) loading.value = false
-  }
-}
 function propose(entry: EditorDictionaryEntry | null = null) {
   if (!loggedIn.value) {
     showLoginRequiredToast('glossary-editor-login')
@@ -62,15 +36,12 @@ function showUsage(entry: EditorDictionaryEntry) {
 watch(() => props.item?.id, () => {
   voiceId.value = 'general'
   expanded.value = null
-  void load()
 }, { immediate: true })
+watch([voices, loading], () => {
+  if (!loading.value && !voices.value.some(entry => entry.id === voiceId.value)) voiceId.value = 'general'
+})
 onMounted(() => {
   void loadDictionaries()
-  window.addEventListener('focus', load)
-})
-onUnmounted(() => {
-  request++
-  window.removeEventListener('focus', load)
 })
 </script>
 

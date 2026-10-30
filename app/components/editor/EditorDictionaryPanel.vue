@@ -31,7 +31,7 @@ const { dictionaryPanelTabs, dictionaryPanelView, dictionarySelection, selectedI
         <EditorDictionaryCollections :state="state" />
       </template>
 
-      <EditorGlossaryReference v-else :item="selectedItem" />
+      <EditorGlossaryReference v-else :item="selectedItem" :context="state" />
 
       <EditorDictionaryForms :state="state" />
     </div>

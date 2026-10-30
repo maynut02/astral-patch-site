@@ -9,6 +9,7 @@ import { useEditorItems } from '~/composables/editor-items'
 import { useEditorActions } from '~/composables/editor-actions'
 import { useEditorRealtime } from '~/composables/editor-realtime'
 import { useEditorDictionaryPanel } from '~/composables/editor-dictionary-panel'
+import { useEditorGlossaryContext } from '~/composables/editor-glossary-context'
 import { createEmptyEditorItems, createEmptyEditorOverview } from '~/utils/editor-progress'
 import { formatEditorCount, formatEditorPercent } from '~/utils/editor-helpers'
 import type { EditorPageState } from '~/utils/editor-page-state'
@@ -68,6 +69,7 @@ const {
 
 const data = { itemsData, itemsError, itemsStatus, refreshItems, overviewData, overviewStatus, overviewError, refreshOverview }
 const itemState = useEditorItems(data, query, layout, draftStorage)
+const glossary = useEditorGlossaryContext(itemState.selectedItem)
 const actions = useEditorActions(data, query, layout, itemState, draftStorage)
 useEditorRealtime(data, { ...query, requestQuery }, itemState, draftStorage)
 useAstralPageSeo(query.editorPageTitle)
@@ -80,7 +82,7 @@ function toggleDisplayLanguage(language: typeof displayLanguages.value[number]):
     : [...displayLanguages.value, language]
 }
 
-const state: EditorPageState = { ...data, ...query, ...layout, ...draftStorage, ...preferences, ...itemState, ...actions, ...dictionary, visibleSourceLanguageItems, toggleDisplayLanguage }
+const state: EditorPageState = { ...data, ...query, ...layout, ...draftStorage, ...preferences, ...itemState, ...actions, ...dictionary, ...glossary, visibleSourceLanguageItems, toggleDisplayLanguage }
 const { backPath, headerTitle } = query
 const { isSidebarOpen, isMobileSidebarOpen, activeSidebarMenu, activeSidebarMenuItem, sidebarMenuItems, editorToolbarHeight, selectSidebarMenu } = layout
 const { total, currentProgress, isLoading, selectedItemId, selectedItemKey, selectedItemStatusMeta, historyReloadKey, totalPages } = itemState

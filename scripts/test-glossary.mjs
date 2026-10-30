@@ -73,6 +73,48 @@ test('glossary: held proposals require resume and terminal proposals cannot be a
   assert.equal(pure.shared.glossaryNextStatus('pending', 'hold'), 'held')
 })
 
+const { getGlossarySourceSegments } = pure.load('app/utils/editor-glossary-segments.ts')
+const inlineEntry = (id, japanese, overrides = {}) => ({ id, metadata: metadata({ japanese, ...overrides }) })
+
+test('glossary inline: match only the displayed source language and preserve literal expressions', () => {
+  const entries = [inlineEntry('one', 'コイン.*')]
+  assert.equal(getGlossarySourceSegments('コイン.* + コイン', entries, 'jp').filter(part => part.type === 'term').length, 1)
+  assert.equal(getGlossarySourceSegments('コイン.*', entries, 'cnS').some(part => part.type === 'term'), false)
+  assert.equal(getGlossarySourceSegments('星币', entries, 'cnS')[0].type, 'term')
+  assert.equal(getGlossarySourceSegments('星币', entries, 'en')[0].type, 'text')
+})
+
+test('glossary inline: prefer the longest overlap and retain every rule for the same expression', () => {
+  const entries = [inlineEntry('short', '会心'), inlineEntry('long', '会心ダメージ'), inlineEntry('alternative', '会心ダメージ'), inlineEntry('damage', 'ダメージ')]
+  const source = '会心ダメージ + ダメージ + 会心ダメージ'
+  const parts = getGlossarySourceSegments(source, entries, 'jp')
+  const terms = parts.filter(part => part.type === 'term')
+  assert.equal(parts.map(part => part.content).join(''), source)
+  assert.deepEqual(Array.from(terms, part => part.content), ['会心ダメージ', 'ダメージ', '会心ダメージ'])
+  assert.deepEqual(Array.from(terms[0].entries, entry => entry.id), ['long', 'alternative'])
+})
+
+test('glossary inline: tags, variables and Astral reference payloads remain untouched', () => {
+  const source = '[color=コイン]コイン[/color] {コイン} <tag value="コイン">コイン [Astral=Card:123][/Astral]'
+  const parts = getGlossarySourceSegments(source, [inlineEntry('coin', 'コイン'), inlineEntry('id', '123')], 'jp')
+  assert.equal(parts.map(part => part.content).join(''), source)
+  assert.equal(parts.filter(part => part.type === 'term').length, 2)
+  assert.equal(getGlossarySourceSegments('コ[color=red]イ[/color]ン', [inlineEntry('coin', 'コイン')], 'jp').some(part => part.type === 'term'), false)
+})
+
+test('glossary inline: NFC matching preserves original combining characters and emoji offsets', () => {
+  const source = '👩‍💻 cafe\u0301 + café'
+  const parts = getGlossarySourceSegments(source, [inlineEntry('accent', 'café')], 'jp')
+  assert.equal(parts.map(part => part.content).join(''), source)
+  assert.deepEqual(Array.from(parts.filter(part => part.type === 'term'), part => part.content), ['cafe\u0301', 'café'])
+})
+
+test('glossary inline: archived terms and voice cards are excluded', () => {
+  const parts = getGlossarySourceSegments('コイン', [inlineEntry('archived', 'コイン', { archived: true }), inlineEntry('voice', 'コイン', { kind: 'voice' })], 'jp')
+  assert.equal(parts.some(part => part.type === 'term'), false)
+  assert.equal(parts.map(part => part.content).join(''), 'コイン')
+})
+
 function integration(name, operation) {
   test(name, {
     skip: databaseUrl ? false : 'Set TEST_DATABASE_URL for isolated PostgreSQL coverage', timeout: 30_000 }, operation)
