@@ -8,11 +8,15 @@ export function useEditorGlossaryContext(item: ComputedRef<EditorItem | null>) {
   const glossaryLoading = ref(false)
   const glossaryFailed = ref(false)
   let request = 0
+  let loadedSource = ''
   async function refreshGlossary() {
     const id = ++request
     const itemId = item.value?.id
-    glossaryEntries.value = []
-    glossaryVoices.value = []
+    const source = itemId ? `${itemId}:${item.value?.sourceVersionId}` : ''
+    if (!source || source !== loadedSource) {
+      glossaryEntries.value = []
+      glossaryVoices.value = []
+    }
     glossaryFailed.value = false
     glossaryLoading.value = false
     if (!itemId) return
@@ -20,10 +24,16 @@ export function useEditorGlossaryContext(item: ComputedRef<EditorItem | null>) {
     try {
       const result = await $fetch<GlossaryContextResponse>('/api/editor/glossary/related', { query: { itemId } })
       if (id !== request) return
+      loadedSource = source
       glossaryEntries.value = result.entries
       glossaryVoices.value = result.voices
     } catch {
-      if (id === request) glossaryFailed.value = true
+      if (id === request) {
+        loadedSource = ''
+        glossaryEntries.value = []
+        glossaryVoices.value = []
+        glossaryFailed.value = true
+      }
     } finally {
       if (id === request) glossaryLoading.value = false
     }

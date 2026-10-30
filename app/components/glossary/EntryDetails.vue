@@ -18,7 +18,7 @@ async function copy(text: string) {
     <header class="flex items-center justify-between gap-3">
       <h2 class="font-semibold">
         {{ entry.translation }}
-      </h2><UBadge :color="entry.metadata.archived ? 'neutral' : 'success'" variant="soft">
+      </h2><UBadge :color="proposed || entry.metadata.archived ? 'neutral' : 'success'" variant="soft">
         {{ proposed ? '변경 제안' : entry.metadata.archived ? '보관' : '확정' }} · v{{ entry.revision }}
       </UBadge>
     </header>
@@ -41,12 +41,12 @@ async function copy(text: string) {
     </dl>
     <template v-else>
       <p>{{ entry.metadata.speechStyle }}</p>
-      <p class="text-muted">
-        자신: {{ entry.metadata.selfAddress || '미기록' }} · 상대: {{ entry.metadata.otherAddress || '미기록' }}
+      <p v-if="entry.metadata.selfAddress || entry.metadata.otherAddress" class="text-muted">
+        <span v-if="entry.metadata.selfAddress">자신: {{ entry.metadata.selfAddress }}</span><span v-if="entry.metadata.selfAddress && entry.metadata.otherAddress"> · </span><span v-if="entry.metadata.otherAddress">상대: {{ entry.metadata.otherAddress }}</span>
       </p>
-      <p class="whitespace-pre-wrap">
+      <p v-if="entry.metadata.endings" class="whitespace-pre-wrap">
         {{ entry.metadata.endings }}
-      </p><p class="whitespace-pre-wrap text-muted">
+      </p><p v-if="entry.metadata.exceptions" class="whitespace-pre-wrap text-muted">
         {{ entry.metadata.exceptions }}
       </p>
       <blockquote class="border-l-2 border-info pl-3">
@@ -65,7 +65,7 @@ async function copy(text: string) {
     </div>
     <div v-if="entry.metadata.historical.length">
       <p class="mb-1 text-xs text-dimmed">
-        과거 표기 · 자동 오류 판정 없음
+        과거 표기
       </p><p>{{ entry.metadata.historical.join(', ') }}</p>
     </div>
     <div v-if="entry.metadata.discouraged.length">
@@ -73,11 +73,11 @@ async function copy(text: string) {
         비권장 표기
       </p><p>{{ entry.metadata.discouraged.join(', ') }}</p>
     </div>
-    <p class="text-xs text-muted">
-      적용 범위: {{ entry.metadata.scope === 'project' ? '전체' : entry.metadata.target }}{{ entry.metadata.scope === 'character' ? ' · 수동 문맥 확인 필요' : '' }}
+    <p v-if="entry.metadata.scope !== 'project'" class="break-all text-xs text-muted">
+      범위: {{ entry.metadata.target }}
     </p>
     <p class="text-xs text-muted">
-      {{ entry.metadata.semanticReview === 'recorded' ? '대조 기록 있음' : entry.metadata.semanticReview === 'unresolved' ? '언어 간 차이 검토 중' : '중국어 대조 미기록' }}<span v-if="entry.metadata.semanticNote"> · {{ entry.metadata.semanticNote }}</span>
+      {{ entry.metadata.semanticReview === 'recorded' ? '중국어 대조 기록' : entry.metadata.semanticReview === 'unresolved' ? '의미 차이 검토 중' : '중국어 대조 미기록' }}<span v-if="entry.metadata.semanticNote"> · {{ entry.metadata.semanticNote }}</span>
     </p>
     <UButton
       v-if="entry.metadata.evidenceKey"
@@ -90,9 +90,6 @@ async function copy(text: string) {
     >
       {{ entry.metadata.evidenceKey }}
     </UButton>
-    <p class="rounded bg-elevated p-2 text-xs text-muted">
-      신규·수정 항목에 우선 참고합니다. 기존 번역과 승인 상태는 바뀌지 않습니다.
-    </p>
     <div v-if="!hideActions" class="flex flex-wrap gap-2">
       <UButton
         size="xs"

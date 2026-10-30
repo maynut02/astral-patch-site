@@ -13,8 +13,9 @@ export function useGlossaryWorkspace() {
   const dictionaryId = ref(typeof route.query.dictionary === 'string' ? route.query.dictionary : '')
   const tab = ref(['term', 'voice', 'proposals'].includes(String(route.query.tab)) ? String(route.query.tab) : 'term')
   const search = ref(typeof route.query.q === 'string' ? route.query.q : '')
-  const page = ref(1)
-  const statusFilter = ref('pending')
+  const initialPage = Number(route.query.page ?? 1)
+  const page = ref(Number.isSafeInteger(initialPage) && initialPage > 0 ? initialPage : 1)
+  const statusFilter = ref(['pending', 'held', 'approved', 'rejected', 'withdrawn'].includes(String(route.query.status)) ? String(route.query.status) : 'pending')
   const archived = ref(route.query.archived === 'true')
   const entries = ref<EditorDictionaryEntriesResponse | null>(null)
   const proposals = ref<GlossaryProposalsResponse | null>(null)
@@ -30,9 +31,13 @@ export function useGlossaryWorkspace() {
   const formOpen = ref(false)
   const editingEntry = ref<EditorDictionaryEntry | null>(null)
   const isReviewer = computed(() => isReviewerRole(user.value?.role))
+  function listQuery() {
+    return { dictionary: dictionaryId.value || undefined, tab: tab.value, q: search.value || undefined, archived: archived.value ? 'true' : undefined, status: tab.value === 'proposals' ? statusFilter.value : undefined, page: page.value > 1 ? page.value : undefined }
+  }
   let request = 0
   async function load() {
     const id = ++request
+    const previousProposalId = selectedProposal.value?.id
     entries.value = null
     proposals.value = null
     selection.value = null
@@ -49,7 +54,7 @@ export function useGlossaryWorkspace() {
         const response = await $fetch<GlossaryProposalsResponse>(`/api/editor/dictionaries/${dictionaryId.value}/proposals`, { query: { page: page.value, status: statusFilter.value || undefined } })
         if (id !== request) return
         proposals.value = response
-        selectedProposal.value = response.proposals[0] ?? null
+        selectedProposal.value = response.proposals.find(proposal => proposal.id === previousProposalId) ?? response.proposals[0] ?? null
       } else {
         const response = await $fetch<EditorDictionaryEntriesResponse>(`/api/editor/dictionaries/${dictionaryId.value}/entries`, { query: { page: page.value, kind: tab.value, search: search.value, archived: archived.value ? 'true' : undefined } })
         if (id !== request) return
@@ -79,13 +84,13 @@ export function useGlossaryWorkspace() {
   }
   async function runSearch() {
     page.value = 1
-    await router.replace({ query: { dictionary: dictionaryId.value || undefined, tab: tab.value, q: search.value || undefined, archived: archived.value ? 'true' : undefined } })
+    await router.replace({ query: listQuery() })
     await load()
   }
   async function selectEntry(entry: EditorDictionaryEntry) {
     selection.value = entry
     detail.value = 'overview'
-    await router.replace({ query: { dictionary: dictionaryId.value, tab: tab.value, q: search.value || undefined, archived: archived.value ? 'true' : undefined, entry: entry.id } })
+    await router.replace({ query: { ...listQuery(), entry: entry.id } })
   }
   function propose(entry: EditorDictionaryEntry | null = null) {
     if (!loggedIn.value) {
@@ -107,19 +112,22 @@ export function useGlossaryWorkspace() {
     try {
       const response = await $fetch<GlossaryProposalsResponse>(`/api/editor/dictionaries/${entry.dictionaryId}/proposals`, { query: { entryId: entry.id } })
       if (selection.value?.id === entry.id) history.value = response.proposals
-    } catch (cause) { error.value = getRequestErrorMessage(cause, '이력을 불러오지 못했습니다.') }
+    } catch (cause) {
+      if (selection.value?.id === entry.id) error.value = getRequestErrorMessage(cause, '이력을 불러오지 못했습니다.')
+    }
   }
   const deciding = ref(false)
-  async function decide(action: GlossaryDecision, reason: string) {
-    const proposal = selectedProposal.value
-    if (!proposal || deciding.value) return
+  async function decide(action: GlossaryDecision, reason: string, proposal = selectedProposal.value) {
+    if (!proposal || deciding.value) return false
     deciding.value = true
     error.value = ''
     try {
       await $fetch(`/api/editor/dictionaries/${proposal.dictionaryId}/proposals/${proposal.id}`, { method: 'PATCH', body: { action, reason } })
       await load()
+      return true
     } catch (cause) {
       error.value = getRequestErrorMessage(cause, '처리하지 못했습니다. 최신 확정판과 제안 상태를 확인해 주세요.')
+      return false
     } finally {
       deciding.value = false
     }
@@ -133,11 +141,12 @@ export function useGlossaryWorkspace() {
   watch([dictionaryId, tab, statusFilter, archived], async () => {
     page.value = 1
     detail.value = 'overview'
-    await router.replace({ query: { dictionary: dictionaryId.value || undefined, tab: tab.value, q: search.value || undefined, archived: archived.value ? 'true' : undefined } })
+    await router.replace({ query: listQuery() })
     await load()
   })
-  watch(page, () => {
-    void load()
+  watch(page, async () => {
+    await router.replace({ query: listQuery() })
+    await load()
   })
   watch(loggedIn, () => {
     void init()
@@ -151,6 +160,10 @@ export function useGlossaryWorkspace() {
       const entry = await $fetch<EditorDictionaryEntry>(`/api/editor/dictionaries/${proposal.dictionaryId}/entries/${proposal.entryId}`)
       if (requestId === comparisonRequest) currentProposalEntry.value = entry
     } catch { if (requestId === comparisonRequest) comparisonError.value = true }
+  })
+  onUnmounted(() => {
+    request++
+    comparisonRequest++
   })
   return { loggedIn, user, dictionaries, dictionaryId, tab, search, page, statusFilter, archived, entries, proposals, loading, error, selection, selectedProposal, currentProposalEntry, comparisonError, detail, history, formOpen, editingEntry, isReviewer, deciding, init, load, runSearch, selectEntry, propose, showHistory, decide, createDictionary }
 }

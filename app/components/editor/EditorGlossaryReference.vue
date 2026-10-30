@@ -49,7 +49,7 @@ onMounted(() => {
   <div class="editor-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
     <div class="mb-4 flex items-center justify-between gap-2">
       <p class="text-sm font-medium">
-        현재 항목의 공통 기준
+        관련 용어
       </p><UButton
         to="/translate/glossary"
         target="_blank"
@@ -62,9 +62,6 @@ onMounted(() => {
     </div>
     <p class="mb-3 font-mono text-[10px] text-dimmed">
       {{ item ? getEditorItemKey(item) : '항목을 선택해 주세요.' }}
-    </p>
-    <p class="mb-4 text-xs text-muted">
-      관련 기준은 참고 안내입니다. 번역문·승인 상태를 자동 변경하지 않습니다.
     </p>
     <AppLoadingSpinner v-if="loading" />
     <UAlert
@@ -125,11 +122,11 @@ onMounted(() => {
         </template>
       </article>
       <p v-if="item && !entries.length" class="py-4 text-center text-sm text-muted">
-        관련된 확정 용어가 없습니다.
+        일치하는 용어가 없습니다.
       </p>
       <section class="mt-4 border-t border-default pt-4">
         <h3 class="text-sm font-medium">
-          캐릭터 문체 · 수동 참고
+          캐릭터 문체
         </h3><USelect
           v-model="voiceId"
           :items="[{ label: '일반 가이드', value: 'general' }, ...voices.map(entry => ({ label: entry.translation, value: entry.id }))]"
@@ -141,11 +138,7 @@ onMounted(() => {
           @propose="propose(voice)"
           @usage="showUsage(voice)"
           @history="navigateTo({ path: '/translate/glossary', query: { dictionary: voice.dictionaryId, entry: voice.id, tab: 'voice', detail: 'history' } }, { open: { target: '_blank' } })"
-        /><p v-else class="text-xs text-muted">
-          설명문은 일반 문체를, 실제 대사는 캐릭터의 성격과 관계를 참고합니다.
-        </p><p class="mt-3 text-[10px] text-dimmed">
-          선택은 참고용이며 화자 정보로 저장되지 않습니다. 항목이 바뀌면 초기화됩니다.
-        </p>
+        />
       </section>
     </template>
     <div class="mt-5 flex flex-col gap-2 border-t border-default pt-3">
@@ -161,7 +154,7 @@ onMounted(() => {
         :disabled="!item"
         @click="propose()"
       >
-        현재 항목에서 용어 제안
+        용어 제안
       </UButton>
     </div>
     <GlossaryEntryForm
@@ -172,7 +165,7 @@ onMounted(() => {
       :source="item"
       @submitted="load"
     />
-    <UModal v-model:open="usageOpen" title="용어 사용처" description="참고용 검색 결과입니다. 기존 번역은 변경되지 않습니다.">
+    <UModal v-model:open="usageOpen" title="용어 사용처" description="표현별 사용처 검색">
       <template #body>
         <GlossaryUsages v-if="usageEntry" :entry="usageEntry" />
       </template>

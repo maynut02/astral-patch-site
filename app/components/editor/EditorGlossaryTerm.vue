@@ -36,7 +36,7 @@ function showUsages(entry: EditorDictionaryEntry) {
           {{ text }} · 공통 용어
         </h2>
         <p v-if="entries.length > 1" class="mt-2 text-xs text-muted">
-          같은 표현의 기준이 여러 개입니다. 문맥과 적용 범위를 확인해 주세요.
+          문맥에 맞는 기준을 선택하세요.
         </p>
         <article v-for="entry in entries" :key="entry.id" class="mt-3 border-t border-default pt-3">
           <div class="flex items-center justify-between gap-3">
@@ -50,8 +50,8 @@ function showUsages(entry: EditorDictionaryEntry) {
           <p class="mt-2 whitespace-pre-wrap wrap-break-word">
             {{ entry.note }}
           </p>
-          <p class="mt-2 text-xs text-muted">
-            적용 범위: {{ entry.metadata.scope === 'project' ? '전체' : entry.metadata.target }}
+          <p v-if="entry.metadata.scope !== 'project'" class="mt-2 break-all text-xs text-muted">
+            범위: {{ entry.metadata.target }}
           </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <UButton
@@ -81,13 +81,10 @@ function showUsages(entry: EditorDictionaryEntry) {
             </UButton>
           </div>
         </article>
-        <p class="mt-3 text-xs text-dimmed">
-          참고용 기준입니다. 번역문은 자동 변경되지 않습니다.
-        </p>
       </section>
     </template>
   </UPopover>
-  <UModal v-model:open="usageOpen" title="용어 사용처" description="참고용 검색 결과입니다. 기존 번역은 변경되지 않습니다.">
+  <UModal v-model:open="usageOpen" title="용어 사용처" description="표현별 사용처 검색">
     <template #body>
       <GlossaryUsages v-if="usageEntry" :entry="usageEntry" />
     </template>

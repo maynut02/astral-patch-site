@@ -14,11 +14,13 @@ const require = createRequire(import.meta.url)
 const nuxtRequire = createRequire(require.resolve('nuxt/package.json'))
 const h3 = await import(pathToFileURL(nuxtRequire.resolve('h3')).href)
 const databaseUrl = process.env.TEST_DATABASE_URL
+const vue = nuxtRequire('vue')
 
-function modules(database) {
+function modules(database, globals = {}, overrides = new Map()) {
   const cache = new Map()
   function load(filename) {
     filename = path.resolve(root, filename)
+    if (overrides.has(filename)) return overrides.get(filename)
     if (filename === path.join(root, 'server/utils/database.ts')) return { getDatabase: () => database }
     if (filename === path.join(root, 'server/utils/auth-user.ts')) return { getCurrentSessionUser: async () => null }
     if (cache.has(filename)) return cache.get(filename).exports
@@ -26,11 +28,11 @@ function modules(database) {
     cache.set(filename, module)
     const code = ts.transpileModule(readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     runInNewContext(code, {
-      module, exports: module.exports, Date, console, defineEventHandler: h3.defineEventHandler,
+      module, exports: module.exports, Date, console, ...globals, defineEventHandler: h3.defineEventHandler,
       require(specifier) {
         if (specifier === 'h3') return h3
         if (specifier.startsWith('node:')) return require(specifier)
-        let target = specifier.startsWith('#shared/') ? path.join(root, 'shared', specifier.slice(8)) : path.resolve(path.dirname(filename), specifier)
+        let target = specifier.startsWith('#shared/') ? path.join(root, 'shared', specifier.slice(8)) : specifier.startsWith('~/') ? path.join(root, 'app', specifier.slice(2)) : path.resolve(path.dirname(filename), specifier)
         if (!existsSync(target) || !statSync(target).isFile()) target += '.ts'
         return load(target)
       }
@@ -113,6 +115,120 @@ test('glossary inline: archived terms and voice cards are excluded', () => {
   const parts = getGlossarySourceSegments('コイン', [inlineEntry('archived', 'コイン', { archived: true }), inlineEntry('voice', 'コイン', { kind: 'voice' })], 'jp')
   assert.equal(parts.some(part => part.type === 'term'), false)
   assert.equal(parts.map(part => part.content).join(''), 'コイン')
+})
+
+async function flushClient() {
+  await vue.nextTick()
+  await new Promise(resolve => setImmediate(resolve))
+}
+
+function clientHarness(context, fetch, query = {}) {
+  const route = { query }
+  const scope = vue.effectScope()
+  const unmount = []
+  context.after(() => {
+    for (const callback of unmount) callback()
+    scope.stop()
+  })
+  const list = { dictionaries: vue.ref([]), dictionariesStatus: vue.ref('success'), dictionariesError: vue.ref(''), loadDictionaries: async () => {} }
+  const globals = {
+    ref: vue.ref, computed: vue.computed, watch: vue.watch, onMounted: () => {}, onUnmounted: callback => unmount.push(callback),
+    window: { addEventListener: () => {}, removeEventListener: () => {} },
+    useRoute: () => route,
+    useRouter: () => ({ replace: async ({ query }) => { route.query = query } }),
+    useUserSession: () => ({ loggedIn: vue.ref(true), user: vue.ref({ role: 'verified' }) }),
+    useAppToast: () => ({ showLoginRequiredToast: () => {} }),
+    $fetch: fetch
+  }
+  const loader = modules(null, globals, new Map([[path.join(root, 'app/composables/editor-dictionaries.ts'), { useEditorDictionaryList: () => list }]]))
+  return { route, create: (file, method, ...args) => scope.run(() => loader.load(file)[method](...args)) }
+}
+
+test('glossary client: a review decision stays bound to its captured proposal after selection changes', async (context) => {
+  const calls = []
+  const h = clientHarness(context, async (url, options) => {
+    calls.push({ url, options })
+    return { proposals: [], entries: [], total: 0, page: 1, totalPages: 1 }
+  }, { dictionary: 'team', tab: 'proposals' })
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace')
+  const original = { id: 'original', dictionaryId: 'team', entryId: null }
+  workspace.selectedProposal.value = original
+  const target = workspace.selectedProposal.value
+  workspace.selectedProposal.value = { ...original, id: 'other' }
+  await workspace.decide('hold', '검토 필요', target)
+  assert.equal(calls.find(call => call.options?.method === 'PATCH').url, '/api/editor/dictionaries/team/proposals/original')
+})
+
+test('glossary client: pagination clears a previous entry link and selects a result on the new page', async (context) => {
+  const h = clientHarness(context, async () => ({ entries: [{ id: 'page-two' }], total: 60, page: 2, totalPages: 2 }), { dictionary: 'team', tab: 'term', entry: 'page-one' })
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace')
+  workspace.page.value = 2
+  await flushClient()
+  assert.equal(h.route.query.entry, undefined)
+  assert.equal(h.route.query.page, 2)
+  assert.equal(workspace.selection.value.id, 'page-two')
+})
+
+test('glossary client: a saved review remains successful when only the list refresh fails', async (context) => {
+  const h = clientHarness(context, async (url, options) => {
+    if (options?.method === 'PATCH') return { status: 'held' }
+    throw new Error('List refresh failed')
+  }, { dictionary: 'team', tab: 'proposals' })
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace')
+  workspace.selectedProposal.value = { id: 'proposal', dictionaryId: 'team', entryId: null }
+  assert.equal(await workspace.decide('hold', '검토 필요'), true)
+  assert.equal(workspace.error.value, 'List refresh failed')
+  assert.equal(workspace.deciding.value, false)
+})
+
+test('glossary client: proposal filter and page are restored from the URL', async (context) => {
+  const h = clientHarness(context, async () => ({ proposals: [], total: 0, page: 1, totalPages: 1 }), { dictionary: 'team', tab: 'proposals', status: 'held', page: '2' })
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace')
+  assert.equal(workspace.statusFilter.value, 'held')
+  assert.equal(workspace.page.value, 2)
+  workspace.statusFilter.value = 'approved'
+  await flushClient()
+  assert.equal(h.route.query.status, 'approved')
+  assert.equal(h.route.query.page, undefined)
+})
+
+test('glossary client: refreshing the same source retains references, while a new version clears them and ignores old replies', async (context) => {
+  const replies = []
+  const h = clientHarness(context, () => new Promise(resolve => replies.push(resolve)))
+  const item = vue.ref({ id: 'item', sourceVersionId: 'one' })
+  const state = h.create('app/composables/editor-glossary-context.ts', 'useEditorGlossaryContext', vue.computed(() => item.value))
+  replies[0]({ entries: [{ id: 'old' }], voices: [] })
+  await flushClient()
+  const refresh = state.refreshGlossary()
+  assert.equal(state.glossaryEntries.value[0].id, 'old')
+  item.value = { id: 'item', sourceVersionId: 'two' }
+  await flushClient()
+  assert.equal(state.glossaryEntries.value.length, 0)
+  replies[1]({ entries: [{ id: 'stale' }], voices: [] })
+  await refresh
+  assert.equal(state.glossaryEntries.value.length, 0)
+  replies[2]({ entries: [{ id: 'current' }], voices: [] })
+  await flushClient()
+  assert.equal(state.glossaryEntries.value[0].id, 'current')
+  assert.equal(state.glossaryLoading.value, false)
+})
+
+test('glossary client: a failed refresh clears retained guidance and allows retry', async (context) => {
+  let failed = false
+  const h = clientHarness(context, async () => {
+    if (failed) throw new Error('Network unavailable')
+    return { entries: [{ id: 'term' }], voices: [] }
+  })
+  const state = h.create('app/composables/editor-glossary-context.ts', 'useEditorGlossaryContext', vue.computed(() => ({ id: 'item', sourceVersionId: 'one' })))
+  await flushClient()
+  failed = true
+  await state.refreshGlossary()
+  assert.equal(state.glossaryEntries.value.length, 0)
+  assert.equal(state.glossaryFailed.value, true)
+  failed = false
+  await state.refreshGlossary()
+  assert.equal(state.glossaryEntries.value[0].id, 'term')
+  assert.equal(state.glossaryFailed.value, false)
 })
 
 function integration(name, operation) {
