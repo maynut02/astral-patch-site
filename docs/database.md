@@ -9,7 +9,7 @@ PostgreSQL 18을 사용하며 schema의 유일한 소유자는 이 저장소의 
 | 번역 | `translation_units`, `source_versions`, `translations`, `translation_changes`, `translation_change_groups`, `translation_pack_publications`, *`translation_workbench`*, *`translation_change_group_summary`*, *`current_source_texts`* |
 | 원문·빌드 | `source_changes`, `game_revisions`, `builds`, `build_files`, `asset_locations`, *`source_revision_change_summary`* |
 | 사용자 | `app_users`, `app_user_social_links` |
-| 에디터 | `editor_comments`, `editor_dictionaries`, `editor_dictionary_entries` |
+| 에디터 | `editor_comments`, `editor_dictionaries`, `editor_dictionary_entries`, `editor_dictionary_proposals` |
 | 공지 | `notices` |
 | 패치 감시 | `patch_watch_config`, `patch_watch_routes`, `patch_watch_runs`, `patch_watch_run_routes` |
 | 파티 채팅 | `party_chat_sessions`, `party_chat_participants`, `party_chat_messages`, `party_chat_connection_events` |
@@ -18,6 +18,8 @@ PostgreSQL 18을 사용하며 schema의 유일한 소유자는 이 저장소의 
 | migration 기록 | `astral_schema_migrations` (실행기가 생성) |
 
 정확한 정의는 해당 migration 파일을 기준으로 합니다.
+
+`0019_editor_glossary.sql`은 기존 용어집에 `is_team`(기본 false), 항목에 metadata·revision을 추가합니다. 기존 행은 개인·공개 범위와 원문·번역을 유지합니다. 공개 공통 용어집의 제안 스냅샷·처리 이력은 별도 테이블에 저장하고 번역 테이블이나 팩 구조는 바꾸지 않습니다. 새 migration이 먼저 적용돼도 이전 앱은 기존 컬럼으로 계속 동작할 수 있습니다.
 
 ## Migration 규칙
 

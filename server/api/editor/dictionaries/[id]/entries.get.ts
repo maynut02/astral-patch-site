@@ -13,6 +13,8 @@ export default defineEventHandler(async (event) => {
 
   return getEditorDictionaryEntries(getEditorDictionaryViewer(user), dictionaryId, {
     page: query.page,
-    search: query.search
+    search: query.search,
+    kind: query.kind,
+    archived: query.archived
   })
 })

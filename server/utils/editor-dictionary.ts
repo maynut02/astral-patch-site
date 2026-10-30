@@ -9,6 +9,7 @@ import type {
 } from '../../shared/types/editor-dictionary'
 import { resolveEditorRole } from '../../shared/types/editor'
 import type { UserRole } from '../../shared/types/user'
+import { isReviewerRole } from '../../shared/types/user'
 import {
   parseOptionalText,
   parseRequiredText,
@@ -28,6 +29,7 @@ export function getEditorDictionaryViewer(user: { id?: unknown, role?: unknown }
 }
 
 interface DictionaryRow {
+  isTeam: boolean
   id: string
   ownerId: string
   ownerRole: UserRole
@@ -64,13 +66,13 @@ function toDictionary(row: DictionaryRow, viewer: EditorDictionaryViewer): Edito
     ...row,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    canEdit: viewer.role === 'admin' || row.ownerId === viewer.id
+    canEdit: row.isTeam ? isReviewerRole(viewer.role) : viewer.role === 'admin' || row.ownerId === viewer.id
   }
 }
 
 function dictionaryFields(database: DatabaseClient) {
   return database`
-    d.id, d.owner_id AS "ownerId", owner."role" AS "ownerRole",
+    d.id, d.is_team AS "isTeam", d.owner_id AS "ownerId", owner."role" AS "ownerRole",
     NULLIF(BTRIM(owner.handle), '') AS "ownerHandle", d.name, d.description, d.visibility,
     count(entry.id)::int AS "entryCount", d.created_at AS "createdAt", d.updated_at AS "updatedAt"
   `
@@ -147,25 +149,32 @@ export async function getEditorDictionaries(viewer: EditorDictionaryViewer): Pro
 
 export async function createEditorDictionary(
   viewer: EditorDictionaryViewer,
-  input: { name?: unknown, description?: unknown, visibility?: unknown }
+  input: { name?: unknown, description?: unknown, visibility?: unknown, isTeam?: unknown }
 ): Promise<EditorDictionary> {
   const database = getDatabase()
   const name = parseRequiredText(input.name, 'Dictionary name', 100)
   const description = parseOptionalText(input.description, 'Dictionary description', 500)
   const visibility = parseVisibility(input.visibility)
+  if (input.isTeam !== undefined && typeof input.isTeam !== 'boolean') {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid team dictionary flag' })
+  }
+  const isTeam = input.isTeam === true
+  if (isTeam && (!isReviewerRole(viewer.role) || visibility !== 'public')) {
+    throw createError({ statusCode: 403, statusMessage: 'Reviewers can create public team dictionaries only' })
+  }
   const id = randomUUID()
 
   const [row] = await database<DictionaryRow[]>`
     WITH saved AS (
-      INSERT INTO editor_dictionaries (id, owner_id, name, description, visibility)
-      VALUES (${id}, ${viewer.id}, ${name}, ${description}, ${visibility})
+      INSERT INTO editor_dictionaries (id, owner_id, name, description, visibility, is_team)
+      VALUES (${id}, ${viewer.id}, ${name}, ${description}, ${visibility}, ${isTeam})
       RETURNING *
     )
     SELECT ${dictionaryFields(database)}
     FROM saved d
     JOIN app_users owner ON owner.google_sub = d.owner_id
     LEFT JOIN editor_dictionary_entries entry ON entry.dictionary_id = d.id
-    GROUP BY d.id, d.owner_id, d.name, d.description, d.visibility, d.created_at, d.updated_at, owner."role", owner.handle
+    GROUP BY d.id, d.is_team, d.owner_id, d.name, d.description, d.visibility, d.created_at, d.updated_at, owner."role", owner.handle
   `
   if (!row) throw createError({ statusCode: 404, statusMessage: 'Dictionary not found' })
   return toDictionary(row, viewer)
