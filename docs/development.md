@@ -49,7 +49,7 @@ pnpm dev
 
 | 명령 | 서버 필요 | 대상 |
 | --- | --- | --- |
-| `pnpm test:security` | | 로컬 패치한 `node-forge`, `braces` 회귀 |
+| `pnpm test:security` | | 공식 수정 버전 `node-forge`, 로컬 패치한 `braces` 회귀 |
 | `pnpm test:mods` | | 모드 GitHub 연동, 마크다운 렌더링, 권한·관리 |
 | `pnpm test:glossary` | PostgreSQL 사례만 별도 DB 필요 | 다국어 용어 검증·매칭, 개인 용어집 보존, 제안·검토 권한, 중복 제출, 리비전 경쟁 승인·이력 |
 | `pnpm test:translation-pack` | PostgreSQL 사례만 별도 DB 필요 | 번역 팩 배포·이력 연결·실패 롤백·동시 승인 경계 및 실시간 갱신 경합. `TEST_DATABASE_URL`이 없으면 PostgreSQL 사례만 건너뜀 |
