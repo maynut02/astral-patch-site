@@ -10,6 +10,7 @@ import postgres from 'postgres'
 import ts from 'typescript'
 import { fetchPublicSnapshot, importPublicSnapshot, validatePublicSnapshot, PUBLIC_TRANSLATION_ORIGIN } from './sync-public-translations.mjs'
 import { seedBaseGlossary, BASE_GLOSSARY_ID } from './seed-base-glossary.mjs'
+import { renderBaseGlossarySql } from './base-glossary-sql.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -465,8 +466,10 @@ integration('base glossary DB: create evidenced terms once, preserve edits and i
   await importPublicSnapshot(h.sql, publicSnapshot([item]))
   const term = { key: 'STRItem_1', sourceVersionId: item.sourceVersionId, translation: item.ko, japanese: item.jp, chineseSimplified: item.cnS, chineseTraditional: item.cnT, note: '기존 번역 표기 유지.' }
   const data = { origin: PUBLIC_TRANSLATION_ORIGIN, terms: [term] }
-  assert.equal((await seedBaseGlossary(h.sql, data)).added, 1)
-  const [entry] = await h.sql`SELECT id, metadata FROM editor_dictionary_entries WHERE dictionary_id = ${BASE_GLOSSARY_ID}`
+  const seeded = await seedBaseGlossary(h.sql, data)
+  assert.equal(seeded.added, 1)
+  assert.equal(seeded.dictionaryId, h.dictionary.id)
+  const [entry] = await h.sql`SELECT id, metadata FROM editor_dictionary_entries WHERE dictionary_id = ${seeded.dictionaryId}`
   assert.equal(entry.metadata.evidenceKey, term.key)
   assert.equal(entry.metadata.semanticReview, 'unrecorded')
   await h.sql`UPDATE editor_dictionary_entries SET translation = '유지할 수정', revision = 2 WHERE id = ${entry.id}`
@@ -476,4 +479,99 @@ integration('base glossary DB: create evidenced terms once, preserve edits and i
   assert.deepEqual(stale.skipped, ['STRItem_1'])
   const contextResult = await h.glossary.getGlossaryContext(item.id)
   assert.equal(contextResult.entries.length, 1)
+})
+
+const baseData = JSON.parse(readFileSync(path.join(root, 'data/glossary-base.json'), 'utf8'))
+const migration20 = readFileSync(path.join(root, 'database/migrations/0020_base_glossary.sql'), 'utf8')
+
+test('base glossary migration: generated deployment SQL matches the reviewed dataset', () => {
+  assert.equal(migration20, renderBaseGlossarySql(baseData))
+})
+
+test('glossary write routes: rate limits block proposals and review decisions before mutation', async () => {
+  for (const [route, limitName] of [
+    ['server/api/editor/dictionaries/[id]/proposals.post.ts', 'assertEditorMutationRateLimit'],
+    ['server/api/editor/dictionaries/[id]/proposals/[proposalId].patch.ts', 'assertEditorReviewRateLimit']
+  ]) {
+    let limitedUser = ''
+    const overrides = new Map([
+      [path.join(root, 'server/utils/auth-user.ts'), { requireCurrentSessionUser: async () => reviewer }],
+      [path.join(root, 'server/utils/request-security.ts'), { readJsonBody: async () => ({}) }],
+      [path.join(root, 'server/utils/editor-rate-limit.ts'), { [limitName]: async (userId) => {
+        limitedUser = userId
+        throw h3.createError({ statusCode: 429 })
+      } }]
+    ])
+    const handler = modules(null, {}, overrides).load(route).default
+    const event = h3.createEvent({ url: '/', headers: { host: 'localhost' }, method: 'POST' }, {})
+    await assert.rejects(handler(event), error => error.statusCode === 429)
+    assert.equal(limitedUser, reviewer.id)
+  }
+})
+
+integration('base glossary migration: empty DB remains empty and repeated application is harmless', async (context) => {
+  const h = await mirrorHarness(context)
+  await h.sql.unsafe(migration20)
+  await h.sql.unsafe(migration20)
+  assert.equal((await h.sql`SELECT count(*)::int AS total FROM editor_dictionary_entries`)[0].total, 0)
+  assert.equal((await h.sql`SELECT count(*)::int AS total FROM editor_dictionaries`)[0].total, 1)
+  assert.equal((await h.sql`SELECT count(*)::int AS total FROM translations`)[0].total, 0)
+})
+
+integration('base glossary migration: seed from production-shaped approvals without touching translations, comments or pending reviews', async (context) => {
+  const h = await mirrorHarness(context)
+  await h.sql.unsafe(readFileSync(path.join(root, 'database/migrations/0007_editor_comments.sql'), 'utf8'))
+  const [first, second] = baseData.terms
+  const makeItem = term => publicItem({ category: term.key.slice(0, term.key.lastIndexOf('_')), unitKey: term.key.slice(term.key.lastIndexOf('_') + 1),
+    sourceVersionId: term.sourceVersionId, jp: term.japanese, cnS: term.chineseSimplified, cnT: term.chineseTraditional, ko: term.translation })
+  const items = [makeItem(first), makeItem(second)]
+  await importPublicSnapshot(h.sql, publicSnapshot(items))
+  await h.sql`INSERT INTO editor_comments (id, unit_id, created_by, body) VALUES (${randomUUID()}, ${items[0].id}, 'author', '보존할 기존 코멘트')`
+  const pending = await h.glossary.proposeGlossaryEntry(author, h.dictionary.id, proposalInput({
+    translation: '진행 중인 검토', metadata: metadata({ japanese: second.japanese, chineseSimplified: second.chineseSimplified, chineseTraditional: second.chineseTraditional })
+  }))
+  const before = await h.sql`SELECT id, text, applied_change_id, approved_by, updated_at FROM translations ORDER BY id`
+  const beforeChanges = await h.sql`SELECT id, status, proposed_text FROM translation_changes ORDER BY id`
+  const beforeReview = await h.sql`SELECT * FROM editor_dictionary_proposals WHERE id = ${pending.id}`
+  const beforeComments = await h.sql`SELECT * FROM editor_comments ORDER BY id`
+  await h.sql.unsafe(migration20)
+  const entries = await h.sql`SELECT translation, metadata FROM editor_dictionary_entries`
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].translation, first.translation)
+  assert.equal(entries[0].metadata.evidenceKey, first.key)
+  assert.deepEqual(await h.sql`SELECT id, text, applied_change_id, approved_by, updated_at FROM translations ORDER BY id`, before)
+  assert.deepEqual(await h.sql`SELECT id, status, proposed_text FROM translation_changes ORDER BY id`, beforeChanges)
+  assert.deepEqual(await h.sql`SELECT * FROM editor_dictionary_proposals WHERE id = ${pending.id}`, beforeReview)
+  assert.deepEqual(await h.sql`SELECT * FROM editor_comments ORDER BY id`, beforeComments)
+  await h.sql.unsafe(migration20)
+  assert.equal((await h.sql`SELECT count(*)::int AS total FROM editor_dictionary_entries`)[0].total, 1)
+})
+
+integration('base glossary migration: preserved private dictionaries, archived rules and rules in other team dictionaries', async (context) => {
+  const h = await mirrorHarness(context)
+  const term = baseData.terms[0]
+  const item = publicItem({ category: 'STRCharacter', unitKey: '1010', sourceVersionId: term.sourceVersionId,
+    jp: term.japanese, cnS: term.chineseSimplified, cnT: term.chineseTraditional, ko: term.translation })
+  await importPublicSnapshot(h.sql, publicSnapshot([item]))
+  const personal = await h.dictionaries.createEditorDictionary(author, { name: '개인 용어', visibility: 'private' })
+  await h.entries.createEditorDictionaryEntry(author, personal.id, { sourceText: term.japanese, translation: '개인 표기', note: '보존' })
+  const team = await h.dictionaries.createEditorDictionary(reviewer, { name: '다른 공통 기준', visibility: 'public', isTeam: true })
+  const rule = await h.glossary.proposeGlossaryEntry(reviewer, team.id, proposalInput({ translation: '이미 정한 표기',
+    metadata: metadata({ archived: true, japanese: term.japanese, chineseSimplified: term.chineseSimplified, chineseTraditional: term.chineseTraditional }) }))
+  await h.glossary.decideGlossaryProposal(reviewer, team.id, rule.id, { action: 'approve' })
+  const before = await h.sql`SELECT id, dictionary_id, translation, metadata, revision FROM editor_dictionary_entries ORDER BY id`
+  await h.sql.unsafe(migration20)
+  assert.deepEqual(await h.sql`SELECT id, dictionary_id, translation, metadata, revision FROM editor_dictionary_entries ORDER BY id`, before)
+  assert.equal((await h.sql`SELECT visibility FROM editor_dictionaries WHERE id = ${personal.id}`)[0].visibility, 'private')
+})
+
+integration('base glossary migration: an unrelated dictionary ID collision rolls back without publishing private data', async (context) => {
+  const h = await mirrorHarness(context)
+  await h.sql`UPDATE editor_dictionaries SET id = ${BASE_GLOSSARY_ID}, is_team = false, visibility = 'private' WHERE id = ${h.dictionary.id}`
+  const term = baseData.terms[0]
+  await importPublicSnapshot(h.sql, publicSnapshot([publicItem({ category: 'STRCharacter', unitKey: '1010', sourceVersionId: term.sourceVersionId,
+    jp: term.japanese, cnS: term.chineseSimplified, cnT: term.chineseTraditional, ko: term.translation })]))
+  await assert.rejects(h.sql.unsafe(migration20), /belongs to another dictionary/)
+  assert.equal((await h.sql`SELECT visibility FROM editor_dictionaries WHERE id = ${BASE_GLOSSARY_ID}`)[0].visibility, 'private')
+  assert.equal((await h.sql`SELECT count(*)::int AS total FROM editor_dictionary_entries`)[0].total, 0)
 })

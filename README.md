@@ -63,7 +63,8 @@ pnpm dev               # SSH 터널을 열고 Nuxt 개발 서버 시작
 | `pnpm check` | `db:check` → `test:unit` → `lint` → `typecheck` → `build` (PR 전 필수) |
 | `pnpm db:check` | migration 파일 번호·형식 검증 |
 | `pnpm data:sync` / `pnpm data:sync --watch` | 운영 공개 번역을 별도 로컬 DB에 동기화 (watch: 15분 간격) |
-| `pnpm glossary:seed` | 기존 번역 기반 기초 용어집 최초 등록 |
+| `pnpm glossary:seed` | 데이터가 나중에 채워진 로컬 사본에서 기초 등록 재검증 (운영은 migration 자동 등록) |
+| `pnpm smoke:release` | 로컬 후보 서버의 운영 HTTP 동작 검사 |
 | `pnpm test:unit` | 서버 없이 실행하는 테스트 전체 (보안 패치, 모드, 파티 채팅) |
 | `pnpm test:party` / `pnpm test:party:storage` | 실행 중인 서버 대상 파티 채팅 통합 테스트 |
 | `pnpm lint` / `pnpm lint:fix` | ESLint |
