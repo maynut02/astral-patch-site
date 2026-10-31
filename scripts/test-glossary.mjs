@@ -122,7 +122,7 @@ async function flushClient() {
   await new Promise(resolve => setImmediate(resolve))
 }
 
-function clientHarness(context, fetch, query = {}) {
+function clientHarness(context, fetch, query = {}, extraGlobals = {}) {
   const route = { query }
   const scope = vue.effectScope()
   const unmount = []
@@ -138,7 +138,8 @@ function clientHarness(context, fetch, query = {}) {
     useRouter: () => ({ replace: async ({ query }) => { route.query = query } }),
     useUserSession: () => ({ loggedIn: vue.ref(true), user: vue.ref({ role: 'verified' }) }),
     useAppToast: () => ({ showLoginRequiredToast: () => {} }),
-    $fetch: fetch
+    $fetch: fetch,
+    ...extraGlobals
   }
   const loader = modules(null, globals, new Map([[path.join(root, 'app/composables/editor-dictionaries.ts'), { useEditorDictionaryList: () => list }]]))
   return { route, create: (file, method, ...args) => scope.run(() => loader.load(file)[method](...args)) }
@@ -374,4 +375,217 @@ integration('glossary HTTP handler: public listing forwards kind and archive fil
   const archived = await list('kind=term&archived=true')
   assert.equal(archived.total, 1)
   assert.equal(archived.entries[0].metadata.archived, true)
+})
+
+const harvestPure = pure.load('server/utils/editor-dictionary/harvest.ts')
+const harvestSource = () => ({ itemId: randomUUID(), sourceVersionId: randomUUID(), category: 'STRTest', unitKey: '1', jp: 'スターコインを獲得。<tag value="秘密">{隠し}', cnS: '获得星币', cnT: '', ko: '스타 코인을 얻습니다.', fingerprint: 'a'.repeat(64) })
+const harvestInput = source => ({ itemId: source.itemId, translation: '스타 코인', japanese: 'スターコイン', chineseSimplified: '星币', chineseTraditional: '', note: '게임 재화. 중국어 의미 대조 필요.' })
+
+test('glossary harvest: extraction rejects invented terms, wrong evidence and tag-only matches', () => {
+  const source = harvestSource()
+  const valid = harvestInput(source)
+  const output = harvestPure.parseHarvestOutput(JSON.stringify({ candidates: [valid, valid, { ...valid, translation: '허구 용어' }, { ...valid, itemId: randomUUID() }, { ...valid, japanese: '秘密' }, { ...valid, japanese: '隠し' }] }), [source])
+  assert.equal(output.candidates.length, 1)
+  assert.equal(output.excluded, 5)
+  assert.equal(output.candidates[0].scope, 'file')
+  assert.equal(output.candidates[0].source.itemId, source.itemId)
+  assert.equal(harvestPure.parseHarvestCandidate({ ...valid, scope: 'project', semanticReview: 'recorded' }, [source], true).scope, 'file')
+  assert.throws(() => harvestPure.parseHarvestOutput('{"candidates":{}}', [source]), error => error.statusCode === 400)
+  assert.throws(() => harvestPure.parseHarvestOutput(JSON.stringify({ candidates: Array(21).fill(valid) }), [source]), error => error.statusCode === 400)
+})
+
+test('glossary harvest: conflicting Korean spellings stay available for comparison', () => {
+  const source = { ...harvestSource(), ko: '스타 코인과 스타코인' }
+  const result = harvestPure.parseHarvestOutput(JSON.stringify({ candidates: [harvestInput(source), { ...harvestInput(source), translation: '스타코인' }] }), [source])
+  assert.equal(result.candidates.length, 2)
+  const corrected = harvestPure.parseHarvestCandidate({ ...result.candidates[0], translation: '수정한 표기', scope: 'project' }, [source])
+  assert.equal(corrected.translation, '수정한 표기')
+  assert.equal(corrected.scope, 'project')
+})
+
+test('glossary harvest: all domain operations reject ordinary users before querying or calling AI', async () => {
+  for (const name of ['getHarvestSources', 'exportHarvestSources', 'extractHarvest', 'previewHarvest', 'submitHarvest']) {
+    await assert.rejects(harvestPure[name](author, randomUUID(), {}), error => error.statusCode === 403)
+  }
+})
+
+async function seedHarvest(h, count = 1) {
+  const revisionId = randomUUID()
+  const groupId = randomUUID()
+  await h.sql`INSERT INTO game_revisions (id, route, game_version, revision, source_url, catalog_url, catalog_sha256)
+    VALUES (${revisionId}, 'INT_STEAM', 'test', '1', 'https://example.invalid', 'https://example.invalid', ${'0'.repeat(64)})`
+  await h.sql`INSERT INTO translation_change_groups (id, title, created_by) VALUES (${groupId}, 'harvest fixture', 'reviewer')`
+  const ids = []
+  for (let index = 0; index < count; index++) {
+    const itemId = randomUUID()
+    const sourceId = randomUUID()
+    const changeId = randomUUID()
+    const ko = '스타 코인을 얻습니다.'
+    await h.sql`INSERT INTO translation_units (id, kind, namespace, unit_key) VALUES (${itemId}, 'str', 'STRTest', ${String(index).padStart(3, '0')})`
+    await h.sql`INSERT INTO source_versions (id, unit_id, cn_s, jp, source_fingerprint, first_seen_revision_id)
+      VALUES (${sourceId}, ${itemId}, '获得星币', 'スターコインを獲得', ${String(index).padStart(64, '0')}, ${revisionId})`
+    await h.sql`UPDATE translation_units SET current_source_version_id = ${sourceId} WHERE id = ${itemId}`
+    await h.sql`INSERT INTO translation_changes (id, group_id, unit_id, locale, source_version_id, proposed_text, status, created_by, reviewed_by, reviewed_at)
+      VALUES (${changeId}, ${groupId}, ${itemId}, 'ko', ${sourceId}, ${ko}, 'approved', 'reviewer', 'reviewer', now())`
+    await h.sql`INSERT INTO translations (id, unit_id, locale, text, approved_source_version_id, applied_change_id, approved_by)
+      VALUES (${randomUUID()}, ${itemId}, 'ko', ${ko}, ${sourceId}, ${changeId}, 'reviewer')`
+    ids.push(itemId)
+  }
+  return ids
+}
+
+function harvestModule(sql, config = {}, fetch = async () => {
+  throw new Error('Unexpected AI call')
+}) {
+  return modules(sql, { process: { env: {} }, useRuntimeConfig: () => config, $fetch: fetch }).load('server/utils/editor-dictionary/harvest.ts')
+}
+
+integration('glossary harvest DB: stable pages collect only current approved translations and detect changed evidence', async (context) => {
+  const h = await harness(context)
+  const ids = await seedHarvest(h, 22)
+  const harvest = harvestModule(h.sql)
+  const first = await harvest.getHarvestSources(reviewer, h.dictionary.id, {})
+  const second = await harvest.getHarvestSources(reviewer, h.dictionary.id, { page: '2' })
+  assert.equal(first.sources.length, 20)
+  assert.equal(second.sources.length, 2)
+  assert.equal(first.total, 22)
+  assert.equal(first.aiConfigured, false)
+  assert.equal(first.sources.some(source => second.sources.some(row => row.itemId === source.itemId)), false)
+  const exported = await harvest.exportHarvestSources(reviewer, h.dictionary.id, { category: 'STRTest' })
+  assert.equal(exported.sources.length, 22)
+  assert.equal(exported.sources[20].fingerprint, second.sources[0].fingerprint)
+  assert.match(exported.instructions, /fingerprint/)
+  const source = first.sources[0]
+  await assert.rejects(harvest.resolveHarvestSources([{ ...source, fingerprint: '0'.repeat(64) }]), error => error.statusCode === 409)
+  await h.sql`DELETE FROM translations WHERE unit_id = ${ids[0]}`
+  await assert.rejects(harvest.resolveHarvestSources([source]), error => error.statusCode === 409)
+  assert.equal((await harvest.getHarvestSources(reviewer, h.dictionary.id, {})).total, 21)
+  await assert.rejects(harvest.extractHarvest(reviewer, h.dictionary.id, { sources: second.sources }), error => error.statusCode === 503)
+})
+
+integration('glossary harvest DB: AI gateway output becomes unapproved candidates and errors do not write entries', async (context) => {
+  const h = await harness(context)
+  await seedHarvest(h)
+  let calls = 0
+  let source
+  const harvest = harvestModule(h.sql, { aiApiKey: 'test-key', aiBaseUrl: 'https://ai.invalid/v1' }, async (url, options) => {
+    calls++
+    assert.equal(url, 'https://ai.invalid/v1/chat/completions/')
+    assert.equal(options.retry, 0)
+    assert.match(options.body.messages[1].content, /확정 한국어 번역/)
+    return { choices: [{ message: { content: JSON.stringify({ candidates: [harvestInput(source)] }) } }] }
+  })
+  source = (await harvest.getHarvestSources(reviewer, h.dictionary.id, {})).sources[0]
+  const result = await harvest.extractHarvest(reviewer, h.dictionary.id, { sources: [source] })
+  assert.equal(result.candidates.length, 1)
+  assert.equal(calls, 1)
+  const broken = harvestModule(h.sql, { aiApiKey: 'test-key' }, async () => ({ choices: [{ message: { content: 'invalid json' } }] }))
+  await assert.rejects(broken.extractHarvest(reviewer, h.dictionary.id, { sources: [source] }), error => error.statusCode === 502)
+  const [counts] = await h.sql`SELECT (SELECT count(*) FROM editor_dictionary_entries)::int AS entries, (SELECT count(*) FROM editor_dictionary_proposals)::int AS proposals`
+  assert.deepEqual(counts, { entries: 0, proposals: 0 })
+})
+
+integration('glossary harvest DB: bulk registration retries are idempotent, duplicates are skipped and translations stay intact', async (context) => {
+  const h = await harness(context)
+  await seedHarvest(h)
+  const harvest = harvestModule(h.sql)
+  const source = (await harvest.getHarvestSources(reviewer, h.dictionary.id, {})).sources[0]
+  const candidate = harvestPure.parseHarvestOutput(JSON.stringify({ candidates: [harvestInput(source)] }), [source]).candidates[0]
+  const before = await h.sql`SELECT text, applied_change_id FROM translations`
+  const [first, retry] = await Promise.all([harvest.submitHarvest(reviewer, h.dictionary.id, { candidates: [candidate] }), harvest.submitHarvest(reviewer, h.dictionary.id, { candidates: [candidate] })])
+  assert.equal(first.results[0].status, 'submitted')
+  assert.equal(first.results[0].proposalId, retry.results[0].proposalId)
+  const more = await harvest.submitHarvest(reviewer, h.dictionary.id, { candidates: [{ ...candidate, requestId: randomUUID() }, { ...candidate, requestId: randomUUID(), japanese: '없는 원문' }] })
+  assert.equal(more.results[0].status, 'duplicate')
+  assert.equal(more.results[1].status, 'error')
+  assert.equal((await h.glossary.getGlossaryProposals(reviewer, h.dictionary.id, { status: 'pending' })).total, 1)
+  assert.equal((await h.entries.getEditorDictionaryEntries(reviewer, h.dictionary.id, {})).total, 0)
+  assert.deepEqual(await h.sql`SELECT text, applied_change_id FROM translations`, before)
+  await h.glossary.decideGlossaryProposal(reviewer, h.dictionary.id, first.results[0].proposalId, { action: 'approve' })
+  assert.equal((await h.glossary.getGlossaryContext(source.itemId)).entries.length, 1)
+  const unresolved = await harvest.submitHarvest(reviewer, h.dictionary.id, { candidates: [{ ...candidate, requestId: randomUUID(), japanese: '獲得', chineseSimplified: '获得', semanticReview: 'unresolved', semanticNote: '게임 내 의미 확인 필요' }] })
+  assert.equal(unresolved.results[0].status, 'submitted')
+  await assert.rejects(h.glossary.decideGlossaryProposal(reviewer, h.dictionary.id, unresolved.results[0].proposalId, { action: 'approve' }), error => error.statusCode === 409)
+})
+
+integration('glossary harvest DB: importing a reviewed backup preserves request identity and corrected spelling', async (context) => {
+  const h = await harness(context)
+  await seedHarvest(h)
+  const harvest = harvestModule(h.sql)
+  const source = (await harvest.getHarvestSources(reviewer, h.dictionary.id, {})).sources[0]
+  const candidate = { ...harvestPure.parseHarvestOutput(JSON.stringify({ candidates: [harvestInput(source)] }), [source]).candidates[0], translation: '검토한 새 표기', scope: 'project' }
+  const result = await harvest.previewHarvest(reviewer, h.dictionary.id, { sources: [source], json: JSON.stringify({ format: 'astral-glossary-candidates-v1', candidates: [candidate] }) })
+  assert.equal(result.candidates[0].requestId, candidate.requestId)
+  assert.equal(result.candidates[0].translation, candidate.translation)
+  assert.equal(result.candidates[0].scope, 'project')
+  const stale = { ...candidate, source: { ...source, fingerprint: '0'.repeat(64) } }
+  const submitted = await harvest.submitHarvest(reviewer, h.dictionary.id, { candidates: [stale] })
+  assert.equal(submitted.results[0].status, 'error')
+  assert.match(submitted.results[0].message, /바뀌었습니다/)
+})
+
+test('glossary harvest client: drafts restore and partial submission retains failures for retry', async (context) => {
+  const source = harvestSource()
+  const candidate = { ...harvestPure.parseHarvestOutput(JSON.stringify({ candidates: [harvestInput(source)] }), [source]).candidates[0], selected: true }
+  const other = { ...candidate, requestId: randomUUID(), translation: '다른 표기' }
+  const store = new Map([['astral-glossary-harvest-v1:reviewer:team', JSON.stringify({ page: 2, category: 'STRTest', activeId: candidate.requestId, drafts: [candidate, other] })]])
+  const bodies = []
+  const harness = clientHarness(context, async (url, options) => {
+    if (url === '/api/editor/dictionaries') return { dictionaries: [{ id: 'team', isTeam: true }] }
+    if (url.endsWith('/harvest')) return { sources: [source], categories: [], page: 2, total: 21, totalPages: 2 }
+    if (url.endsWith('/submit')) {
+      bodies.push(options.body)
+      return { results: [{ requestId: candidate.requestId, status: 'submitted', message: '검토 대기' }, { requestId: other.requestId, status: 'error', message: '실패' }] }
+    }
+    throw new Error('Unexpected request')
+  }, { dictionary: 'team' }, {
+    localStorage: { getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, value) },
+    useUserSession: () => ({ loggedIn: vue.ref(true), user: vue.ref({ id: 'reviewer', role: 'verified' }) })
+  })
+  const state = harness.create('app/composables/glossary-harvest.ts', 'useGlossaryHarvest')
+  await state.init()
+  assert.equal(state.page.value, 2)
+  assert.equal(state.drafts.value.length, 2)
+  await state.submit()
+  assert.equal(state.drafts.value[0].selected, false)
+  assert.equal(state.drafts.value[1].selected, true)
+  assert.equal(state.selected.value.length, 1)
+  await state.submit()
+  assert.equal(bodies[1].candidates.length, 1)
+  assert.equal(bodies[1].candidates[0].requestId, other.requestId)
+  await flushClient()
+  const saved = JSON.parse(store.get('astral-glossary-harvest-v1:reviewer:team'))
+  assert.equal(saved.drafts[0].result.status, 'submitted')
+})
+
+test('glossary harvest client: malformed JSON preserves the import dialog and input', async (context) => {
+  const h = clientHarness(context, async () => {
+    throw new Error('Unexpected request')
+  }, { dictionary: 'team' })
+  const state = h.create('app/composables/glossary-harvest.ts', 'useGlossaryHarvest')
+  state.importOpen.value = true
+  state.importJson.value = '{invalid json'
+  await state.previewImport()
+  assert.equal(state.importOpen.value, true)
+  assert.equal(state.importJson.value, '{invalid json')
+  assert.equal(state.error.value, 'JSON 형식이 올바르지 않습니다.')
+})
+
+test('glossary harvest client: switching between a file and all files resets the page but preserves candidates', async (context) => {
+  const calls = []
+  const source = harvestSource()
+  const h = clientHarness(context, async (_url, options) => {
+    calls.push(options.query)
+    return { sources: [source], categories: [{ category: 'STRTest', total: 1 }], total: 1, page: 1, totalPages: 1 }
+  }, { dictionary: 'team' })
+  const state = h.create('app/composables/glossary-harvest.ts', 'useGlossaryHarvest')
+  state.drafts.value = [{ ...harvestPure.parseHarvestOutput(JSON.stringify({ candidates: [harvestInput(source)] }), [source]).candidates[0], selected: true }]
+  state.page.value = 3
+  await state.changeCategory('STRTest')
+  assert.equal(state.page.value, 1)
+  assert.equal(calls[0].category, 'STRTest')
+  await state.changeCategory('')
+  assert.equal(calls[1].category, undefined)
+  assert.equal(state.drafts.value.length, 1)
+  assert.equal(state.selected.value.length, 1)
 })
