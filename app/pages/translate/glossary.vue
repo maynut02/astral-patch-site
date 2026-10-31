@@ -64,14 +64,6 @@ async function submitReason() {
         </h1>
       </div>
       <div class="flex flex-wrap gap-2">
-        <UButton
-          v-if="isReviewer && dictionaryId"
-          :to="{ path: '/translate/glossary-harvest', query: { dictionary: dictionaryId } }"
-          color="neutral"
-          variant="soft"
-        >
-          용어 일괄 정리
-        </UButton>
         <UButton to="/translate/editor" color="neutral" variant="soft">
           번역 에디터
         </UButton><UButton

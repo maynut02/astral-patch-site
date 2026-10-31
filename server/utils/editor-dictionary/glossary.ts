@@ -67,7 +67,8 @@ export async function getGlossaryProposals(viewer: EditorDictionaryViewer, dicti
   return { proposals: rows.map(toProposal), page, total, totalPages: Math.max(1, Math.ceil(total / 50)) }
 }
 
-export async function proposeGlossaryEntry(viewer: EditorDictionaryViewer, dictionaryId: string, input: Record<string, unknown>, sql = getDatabase()): Promise<GlossaryProposal> {
+export async function proposeGlossaryEntry(viewer: EditorDictionaryViewer, dictionaryId: string, input: Record<string, unknown>): Promise<GlossaryProposal> {
+  const sql = getDatabase()
   await requireTeam(sql, dictionaryId, viewer)
   const requestId = input.requestId ? parseUuid(input.requestId, 'Invalid request id') : randomUUID()
   const [previous] = await sql<ProposalRow[]>`SELECT ${proposalFields(sql)} FROM editor_dictionary_proposals p JOIN app_users creator ON creator.google_sub = p.created_by

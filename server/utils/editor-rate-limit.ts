@@ -70,10 +70,3 @@ export async function assertEditorAiTranslationRateLimit(user: { id: string, rol
     })
   }
 }
-
-export async function assertGlossaryAiRateLimit(userId: string): Promise<void> {
-  if (await isRateLimited(getDatabase(), `glossary-ai:${userId}`, [
-    { name: 'minute', limit: 3, windowMs: 60_000 },
-    { name: 'hour', limit: 30, windowMs: 3_600_000 }
-  ])) throw createError({ statusCode: 429, statusMessage: '용어 추출 요청이 많습니다. 잠시 후 다시 시도해 주세요.' })
-}

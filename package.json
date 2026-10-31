@@ -9,6 +9,8 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "db:check": "node scripts/check-migrations.mjs",
+    "data:sync": "node scripts/sync-public-translations.mjs",
+    "glossary:seed": "node scripts/seed-base-glossary.mjs",
     "lint": "eslint .",
     "typecheck": "nuxt typecheck",
     "test:party": "node scripts/test-party-chat.mjs",
