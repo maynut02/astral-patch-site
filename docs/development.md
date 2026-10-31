@@ -49,8 +49,9 @@ pnpm dev
 
 | 명령 | 서버 필요 | 대상 |
 | --- | --- | --- |
-| `pnpm test:security` | | 로컬 패치한 `node-forge`, `braces` 회귀 |
+| `pnpm test:security` | | 공식 수정 버전 `node-forge`, 로컬 패치한 `braces` 회귀 |
 | `pnpm test:mods` | | 모드 GitHub 연동, 마크다운 렌더링, 권한·관리 |
+| `pnpm test:glossary` | PostgreSQL 사례만 별도 DB 필요 | 다국어 용어 검증·매칭, 개인 용어집 보존, 제안·검토 권한, 중복 제출, 리비전 경쟁 승인·이력 |
 | `pnpm test:translation-pack` | PostgreSQL 사례만 별도 DB 필요 | 번역 팩 배포·이력 연결·실패 롤백·동시 승인 경계 및 실시간 갱신 경합. `TEST_DATABASE_URL`이 없으면 PostgreSQL 사례만 건너뜀 |
 | `pnpm test:party:rooms` | | 방 생명주기, TTL, 메시지 순서 |
 | `pnpm test:party:route` | | 파티 WebSocket·HTTP 핸들러 (재접속 승계, 종료 사유, 오류 응답) |
@@ -75,6 +76,8 @@ TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/astral_test pnpm test:trans
 2. 실제 PostgreSQL 컨테이너에 migration 두 번 적용 (두 번째 실행은 적용 기록을 보고 모두 건너뛰어야 성공)
 3. `lint` → `test:unit` → `typecheck` → `build`
 4. `test:security` 후 `audit:prod`
+
+CI의 단위 테스트 단계는 전용 컨테이너의 호스트 포트로 `TEST_DATABASE_URL`을 지정하므로 용어집·번역 팩 PostgreSQL 사례도 실제 실행합니다. 로컬 실행에서는 테스트 DB 주소를 명시하지 않으면 해당 DB 사례가 skip으로 표시됩니다.
 
 ## API 규칙
 

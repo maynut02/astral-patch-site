@@ -1,0 +1,771 @@
+{
+  "origin": "https://astral.maynutlab.com",
+  "observedAt": "2026-10-31T04:06:49.064Z",
+  "terms": [
+    {
+      "key": "STRCharacter_1010",
+      "sourceVersionId": "031c5f7c-77d0-4376-895a-acbb0e54236f",
+      "translation": "파루난",
+      "japanese": "パルナン",
+      "chineseSimplified": "帕露南",
+      "chineseTraditional": "帕露南",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1020",
+      "sourceVersionId": "e4a137df-8b0f-4365-a1b5-1120d68e2a1e",
+      "translation": "패니",
+      "japanese": "ファニィ",
+      "chineseSimplified": "芬妮",
+      "chineseTraditional": "芬妮",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1030",
+      "sourceVersionId": "41ebe02a-0064-4431-999b-4662b17fa660",
+      "translation": "알라나",
+      "japanese": "アランナ",
+      "chineseSimplified": "阿兰娜",
+      "chineseTraditional": "阿蘭娜",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1040",
+      "sourceVersionId": "b124969e-a2ac-46f4-a8cd-b2470882f4a5",
+      "translation": "코마치",
+      "japanese": "コマチ",
+      "chineseSimplified": "小町",
+      "chineseTraditional": "小町",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1050",
+      "sourceVersionId": "7760a9c2-9389-4ca6-b166-b86b626625e2",
+      "translation": "패드맨",
+      "japanese": "パッドマン",
+      "chineseSimplified": "派德曼",
+      "chineseTraditional": "派德曼",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1060",
+      "sourceVersionId": "cf2dafd0-103d-48fe-b0de-9bcfa15d8b86",
+      "translation": "파파라",
+      "japanese": "パパラ",
+      "chineseSimplified": "帕帕拉",
+      "chineseTraditional": "帕帕拉",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1070",
+      "sourceVersionId": "745c6e58-bafa-47f9-a885-384ab41f1b54",
+      "translation": "렌",
+      "japanese": "レン",
+      "chineseSimplified": "恋",
+      "chineseTraditional": "戀",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1080",
+      "sourceVersionId": "37228449-c48a-4032-a50b-8eae420d4d4f",
+      "translation": "미미",
+      "japanese": "ミミ",
+      "chineseSimplified": "米米",
+      "chineseTraditional": "米米",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1090",
+      "sourceVersionId": "06a4f0b2-942a-4ff2-a97b-15cdaf51efcc",
+      "translation": "Z3000",
+      "japanese": "ゼット3000",
+      "chineseSimplified": "Z3000",
+      "chineseTraditional": "Z3000",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1100",
+      "sourceVersionId": "80c9d2dc-54c5-42db-9801-6ca79f4cb868",
+      "translation": "판다맨",
+      "japanese": "パンダマン",
+      "chineseSimplified": "潘大猛",
+      "chineseTraditional": "潘大猛",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1110",
+      "sourceVersionId": "d295ab2a-4b8c-4998-afa6-b2e1f5fc9cf5",
+      "translation": "잉크 섀도우",
+      "japanese": "スミカゲ",
+      "chineseSimplified": "墨影",
+      "chineseTraditional": "墨影",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1120",
+      "sourceVersionId": "0c89f802-877b-4325-8709-91bd3f7489aa",
+      "translation": "루루",
+      "japanese": "ルル",
+      "chineseSimplified": "璐璐",
+      "chineseTraditional": "璐璐",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1130",
+      "sourceVersionId": "bdcc30b4-007c-4517-bdeb-334ea025b89e",
+      "translation": "펭",
+      "japanese": "ヒメ",
+      "chineseSimplified": "姬梦枫",
+      "chineseTraditional": "姬夢楓",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1140",
+      "sourceVersionId": "54d12053-2c7d-4248-8b78-cadbc60be1ce",
+      "translation": "카이세이",
+      "japanese": "カイセイ",
+      "chineseSimplified": "蓝海晴",
+      "chineseTraditional": "藍海晴",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1150",
+      "sourceVersionId": "1491b11b-daa0-4ed3-8e92-858e10d8ca0d",
+      "translation": "미사키",
+      "japanese": "ミサキ",
+      "chineseSimplified": "美咲",
+      "chineseTraditional": "美咲",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1160",
+      "sourceVersionId": "4f193d1a-5df0-4004-a208-6ae19dff16bf",
+      "translation": "나르디스",
+      "japanese": "ナーディス",
+      "chineseSimplified": "娜蒂斯",
+      "chineseTraditional": "娜蒂斯",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1170",
+      "sourceVersionId": "26321596-599d-4ad1-8620-59f357c5a238",
+      "translation": "자스민",
+      "japanese": "ジャスミン",
+      "chineseSimplified": "茉莉",
+      "chineseTraditional": "茉莉",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1180",
+      "sourceVersionId": "aed24022-4a54-494d-ace7-6cf6f692052c",
+      "translation": "AL",
+      "japanese": "アル",
+      "chineseSimplified": "阿尔",
+      "chineseTraditional": "阿爾",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1190",
+      "sourceVersionId": "08a27c19-583e-44ff-a6a3-fbd8d1e5d1c4",
+      "translation": "루카",
+      "japanese": "ルカ",
+      "chineseSimplified": "星魅琉华",
+      "chineseTraditional": "星魅琉華",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1200",
+      "sourceVersionId": "aafc589c-7594-4abc-b3f4-ca4e7f15beff",
+      "translation": "낸시 루",
+      "japanese": "ナンシーロー",
+      "chineseSimplified": "南希露",
+      "chineseTraditional": "南希露",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1210",
+      "sourceVersionId": "464ec6f7-6053-4fde-b23b-64b7a6a7cdf5",
+      "translation": "린",
+      "japanese": "リン",
+      "chineseSimplified": "凛",
+      "chineseTraditional": "凜",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1220",
+      "sourceVersionId": "6d93dac0-794d-4cb2-8381-64c4d024b7c5",
+      "translation": "메가스",
+      "japanese": "メガス",
+      "chineseSimplified": "梅加斯",
+      "chineseTraditional": "梅加斯",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1230",
+      "sourceVersionId": "5704b8c0-8158-4970-a897-842032062d72",
+      "translation": "유메",
+      "japanese": "ユメ",
+      "chineseSimplified": "姬梦朝",
+      "chineseTraditional": "姬夢朝",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1240",
+      "sourceVersionId": "a84858ca-3ae7-4aac-8b82-6a933607d3ca",
+      "translation": "테루",
+      "japanese": "テル",
+      "chineseSimplified": "照",
+      "chineseTraditional": "照",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1250",
+      "sourceVersionId": "5ef671d7-6acb-4420-a8ed-956893c7e7d5",
+      "translation": "모제스",
+      "japanese": "モーゼス",
+      "chineseSimplified": "摩西",
+      "chineseTraditional": "摩西",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1260",
+      "sourceVersionId": "6b76c425-538e-4cbb-a167-c60845c529e9",
+      "translation": "마무시",
+      "japanese": "真夢梓",
+      "chineseSimplified": "真梦梓",
+      "chineseTraditional": "真夢梓",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1270",
+      "sourceVersionId": "2a89e31b-ed43-41fc-a7db-33d801e5f2f4",
+      "translation": "보니",
+      "japanese": "ボニー",
+      "chineseSimplified": "邦妮",
+      "chineseTraditional": "邦妮",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1280",
+      "sourceVersionId": "91f5bec7-d6f4-41cc-8c3c-463cdaae064b",
+      "translation": "링링",
+      "japanese": "リンリン",
+      "chineseSimplified": "玲玲",
+      "chineseTraditional": "玲玲",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_1290",
+      "sourceVersionId": "f923a99c-4074-4a08-ac7a-c44b2273611e",
+      "translation": "사이크스",
+      "japanese": "サイクス",
+      "chineseSimplified": "赛克斯",
+      "chineseTraditional": "賽克斯",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_3010",
+      "sourceVersionId": "1f427805-febd-449c-8ab8-0474a23af1ab",
+      "translation": "최고귀염뽀짝천사",
+      "japanese": "超絶最かわてんしちゃん",
+      "chineseSimplified": "超绝最可爱天使酱",
+      "chineseTraditional": "超絕最可愛天使醬",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_3020",
+      "sourceVersionId": "e317636e-5d05-4d78-b40e-8eccce514d31",
+      "translation": "니디 걸",
+      "japanese": "ニーディーガール",
+      "chineseSimplified": "主播女孩",
+      "chineseTraditional": "主播女孩",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_3030",
+      "sourceVersionId": "b16a1afa-7788-4e69-b86e-bbd6448762cc",
+      "translation": "질 스팅레이",
+      "japanese": "ジル・スティングレイ",
+      "chineseSimplified": "吉尔·斯汀雷",
+      "chineseTraditional": "吉爾·斯汀雷",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_3040",
+      "sourceVersionId": "f0156237-adcf-480d-ac26-c18aca9421be",
+      "translation": "도로시 헤이즈",
+      "japanese": "ドロシー・ヘイズ",
+      "chineseSimplified": "多萝西·海兹",
+      "chineseTraditional": "多蘿西·海茲",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_3050",
+      "sourceVersionId": "fadbc6ad-8a65-4344-a57d-3da5acb4c2a4",
+      "translation": "토노 한나",
+      "japanese": "遠野ハンナ",
+      "chineseSimplified": "远野汉娜",
+      "chineseTraditional": "遠野漢娜",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCharacter_3060",
+      "sourceVersionId": "72009b78-bcb9-4475-bdeb-b6293db082c4",
+      "translation": "타치바나 셰리",
+      "japanese": "橘シェリー",
+      "chineseSimplified": "橘雪莉",
+      "chineseTraditional": "橘雪莉",
+      "note": "캐릭터 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRItem_1",
+      "sourceVersionId": "6fdbfa5c-778b-456e-b0c5-a1f7beea6fe3",
+      "translation": "스타 코인",
+      "japanese": "スターコイン",
+      "chineseSimplified": "星币",
+      "chineseTraditional": "星幣",
+      "note": "재화·아이템 명칭. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRItem_2",
+      "sourceVersionId": "5118eeb8-8e31-42df-97b0-90a2bf062f5b",
+      "translation": "스타 디스크",
+      "japanese": "星盤",
+      "chineseSimplified": "星盘",
+      "chineseTraditional": "星盤",
+      "note": "재화·아이템 명칭. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRItem_3",
+      "sourceVersionId": "b6b7c521-4237-4f07-82c1-3fdb73a2babb",
+      "translation": "스타 퍼즐",
+      "japanese": "スターパズル",
+      "chineseSimplified": "星之拼图",
+      "chineseTraditional": "星之拼圖",
+      "note": "재화·아이템 명칭. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRItem_4",
+      "sourceVersionId": "3d249e3b-9e77-49ba-94ba-5952ed795a01",
+      "translation": "슈슈 가챠",
+      "japanese": "ジュジュガチャ",
+      "chineseSimplified": "鼠鼠扭蛋",
+      "chineseTraditional": "鼠鼠扭蛋",
+      "note": "재화·아이템 명칭. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRItem_5",
+      "sourceVersionId": "e01c6621-6347-40cd-8818-6e28491e093e",
+      "translation": "코스튬 티켓",
+      "japanese": "ファッションチケット",
+      "chineseSimplified": "配货票",
+      "chineseTraditional": "配貨票",
+      "note": "재화·아이템 명칭. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRItem_6",
+      "sourceVersionId": "d78f94b3-4ba4-406c-8ace-02f25e4e13fd",
+      "translation": "슈슈 칩",
+      "japanese": "ジュジュチップ",
+      "chineseSimplified": "鼠鼠筹码",
+      "chineseTraditional": "鼠鼠籌碼",
+      "note": "재화·아이템 명칭. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRItem_8",
+      "sourceVersionId": "7c2ff3c1-3362-4e71-a9c8-c801bdbe7457",
+      "translation": "골드 스타 디스크",
+      "japanese": "星盤（有償）",
+      "chineseSimplified": "黄金星盘",
+      "chineseTraditional": "黃金星盤",
+      "note": "재화·아이템 명칭. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRItem_21",
+      "sourceVersionId": "05e4128b-6695-418d-8880-3af7c6534128",
+      "translation": "무료 스타 디스크",
+      "japanese": "無償星盤",
+      "chineseSimplified": "日服-描述：免费星盘",
+      "chineseTraditional": "日服-描述：免费星盘",
+      "note": "재화·아이템 명칭. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRItem_80",
+      "sourceVersionId": "bafd86c0-79cb-4587-8dfd-d747d1796fce",
+      "translation": "유료 스타 디스크",
+      "japanese": "有償星盤",
+      "chineseSimplified": "付费星盘",
+      "chineseTraditional": "付费星盘",
+      "note": "재화·아이템 명칭. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_100021",
+      "sourceVersionId": "6b2ca1ab-2324-400b-8cae-7daab4911bcf",
+      "translation": "행운의 왕관",
+      "japanese": "ステラクラウン",
+      "chineseSimplified": "辉冠",
+      "chineseTraditional": "輝冠",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_100041",
+      "sourceVersionId": "2f036a26-2605-414f-bf10-4a56b3698121",
+      "translation": "치유",
+      "japanese": "ヒール",
+      "chineseSimplified": "治愈",
+      "chineseTraditional": "治愈",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_100051",
+      "sourceVersionId": "4922b290-16cf-4372-8177-33f5775755c3",
+      "translation": "스타라이트",
+      "japanese": "スターライト",
+      "chineseSimplified": "星光",
+      "chineseTraditional": "星光",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_10008",
+      "sourceVersionId": "5e278688-47eb-4d65-a137-b1cd96173ef0",
+      "translation": "반격",
+      "japanese": "反撃",
+      "chineseSimplified": "反击",
+      "chineseTraditional": "反擊",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_100091",
+      "sourceVersionId": "30425c0a-6f6c-4c1f-833a-a61f183f177c",
+      "translation": "개조",
+      "japanese": "改造",
+      "chineseSimplified": "改造",
+      "chineseTraditional": "改造",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_100111",
+      "sourceVersionId": "19f13567-5c89-4440-836b-e010ea5a6237",
+      "translation": "도발",
+      "japanese": "挑発",
+      "chineseSimplified": "嘲讽",
+      "chineseTraditional": "嘲諷",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_100121",
+      "sourceVersionId": "dd7c0940-fa52-42b2-aeec-1457a8bef798",
+      "translation": "정신",
+      "japanese": "マインド",
+      "chineseSimplified": "心智",
+      "chineseTraditional": "心智",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_100131",
+      "sourceVersionId": "71e6ca7d-32a1-4048-8029-f655c3d3e604",
+      "translation": "증거",
+      "japanese": "罪証",
+      "chineseSimplified": "罪证",
+      "chineseTraditional": "罪證",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_100141",
+      "sourceVersionId": "c858c1f9-f018-4caa-a98e-a83c149152b5",
+      "translation": "에너지",
+      "japanese": "エナジー",
+      "chineseSimplified": "充能",
+      "chineseTraditional": "充能",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_101311011",
+      "sourceVersionId": "666eba01-4b37-42ab-8b00-9932f8d649eb",
+      "translation": "파죽지세",
+      "japanese": "勇往邁進",
+      "chineseSimplified": "越战越勇",
+      "chineseTraditional": "越戰越勇",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_101311021",
+      "sourceVersionId": "5f827e18-d82a-44fe-9653-4b6a0e5ed526",
+      "translation": "생명 공유",
+      "japanese": "ライフリンク",
+      "chineseSimplified": "生命共享",
+      "chineseTraditional": "生命共享",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_101711011",
+      "sourceVersionId": "f8890ab9-10cc-4c8e-9716-738ccf32506d",
+      "translation": "활공",
+      "japanese": "ソーリング",
+      "chineseSimplified": "腾飞",
+      "chineseTraditional": "騰飛",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_10301011",
+      "sourceVersionId": "1296320d-fceb-4c96-9794-3e79065d07e2",
+      "translation": "철벽",
+      "japanese": "鉄壁",
+      "chineseSimplified": "铁壁",
+      "chineseTraditional": "鐵壁",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_10302011",
+      "sourceVersionId": "997dd4b6-e477-454c-bc07-464ff5de2467",
+      "translation": "기척 은폐",
+      "japanese": "気配隠蔽",
+      "chineseSimplified": "遮蔽气息",
+      "chineseTraditional": "遮蔽氣息",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_1051201",
+      "sourceVersionId": "0a6938ad-73a7-424e-8d41-677560d7657c",
+      "translation": "주사위 충전",
+      "japanese": "ダイスチャージ",
+      "chineseSimplified": "骰点充能",
+      "chineseTraditional": "股點充能",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_10711011",
+      "sourceVersionId": "eac48b88-8a90-4e34-8a88-fa1f5d2c0250",
+      "translation": "쉴드",
+      "japanese": "ジュジュシールド",
+      "chineseSimplified": "护盾",
+      "chineseTraditional": "護盾",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_11501011",
+      "sourceVersionId": "635be03a-96cf-4479-aa62-50d8ca161040",
+      "translation": "검기",
+      "japanese": "剣気",
+      "chineseSimplified": "剑气",
+      "chineseTraditional": "劍氣",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_12501011",
+      "sourceVersionId": "5d6a19fc-4210-4932-bfff-636dbb98f908",
+      "translation": "약점",
+      "japanese": "弱点",
+      "chineseSimplified": "破绽",
+      "chineseTraditional": "破綻",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_12612011",
+      "sourceVersionId": "c7a70d3b-516e-4831-9584-de3529781f83",
+      "translation": "각성",
+      "japanese": "覚醒",
+      "chineseSimplified": "觉醒",
+      "chineseTraditional": "覺醒",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_12702021",
+      "sourceVersionId": "0e75a538-6608-4acd-98d5-f22172177aa9",
+      "translation": "은신",
+      "japanese": "潜伏",
+      "chineseSimplified": "隐匿",
+      "chineseTraditional": "隱匿",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_40003011",
+      "sourceVersionId": "ec1705a1-7afc-47bd-9571-341ba70590ac",
+      "translation": "행운",
+      "japanese": "好運",
+      "chineseSimplified": "好运",
+      "chineseTraditional": "好運",
+      "note": "상태 효과 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCard_10001",
+      "sourceVersionId": "9d9c9e5c-ffac-41fe-8636-52e95509aafa",
+      "translation": "공격(중)",
+      "japanese": "攻撃（中）",
+      "chineseSimplified": "攻击(中)",
+      "chineseTraditional": "攻擊(中)",
+      "note": "카드 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCard_10002",
+      "sourceVersionId": "5f91c72c-20fb-4252-aebc-dee8e118e674",
+      "translation": "방어(중)",
+      "japanese": "ガード（中）",
+      "chineseSimplified": "防御(中)",
+      "chineseTraditional": "防禦(中)",
+      "note": "카드 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCard_10003",
+      "sourceVersionId": "2840bffe-ff58-4f91-b494-5b4206e40366",
+      "translation": "공격(대)",
+      "japanese": "攻撃（大）",
+      "chineseSimplified": "攻击(大)",
+      "chineseTraditional": "攻擊(大)",
+      "note": "카드 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCard_10004",
+      "sourceVersionId": "549edb09-56cc-4dff-8de7-c93a9abbced2",
+      "translation": "방어(대)",
+      "japanese": "ガード（大）",
+      "chineseSimplified": "防御(大)",
+      "chineseTraditional": "防禦(大)",
+      "note": "카드 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCard_10005",
+      "sourceVersionId": "3958ce7d-c0b0-470e-bb08-e92bc4ff9a69",
+      "translation": "공격(특대)",
+      "japanese": "攻撃（特大）",
+      "chineseSimplified": "攻击(特大)",
+      "chineseTraditional": "攻擊(特大)",
+      "note": "카드 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCard_10006",
+      "sourceVersionId": "4116459a-7a10-4073-bbc5-d47d84c8b7e3",
+      "translation": "방어(특대)",
+      "japanese": "ガード（特大）",
+      "chineseSimplified": "防御(特大)",
+      "chineseTraditional": "防禦(特大)",
+      "note": "카드 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCard_10007",
+      "sourceVersionId": "ca852c65-84e1-4f1e-9ecc-f666ab20bbae",
+      "translation": "명검 : 가우 베기",
+      "japanese": "名刀：ガオー切り",
+      "chineseSimplified": "名刀：嘎呜切",
+      "chineseTraditional": "名刀：嘎呜切",
+      "note": "카드 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCard_10008",
+      "sourceVersionId": "a1b856f8-3602-46a6-b890-2cde195526c6",
+      "translation": "섀도우 어택",
+      "japanese": "シャドウアタック",
+      "chineseSimplified": "暗影突袭",
+      "chineseTraditional": "暗影突襲",
+      "note": "카드 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRCard_10009",
+      "sourceVersionId": "848ad6d0-9ba1-48d5-ba33-2a41fc0b434b",
+      "translation": "차지",
+      "japanese": "チャージ",
+      "chineseSimplified": "蓄力",
+      "chineseTraditional": "蓄力",
+      "note": "카드 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRMap_81003",
+      "sourceVersionId": "5fcc0619-024f-4a98-a47e-417c7b5996b2",
+      "translation": "유원지",
+      "japanese": "遊園地",
+      "chineseSimplified": "游乐园",
+      "chineseTraditional": "遊樂園",
+      "note": "맵 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRMap_81004",
+      "sourceVersionId": "a662e4ff-1b91-4c8b-87f2-18b9b7d7fb68",
+      "translation": "교차로 역",
+      "japanese": "四つ辻",
+      "chineseSimplified": "十字路口站",
+      "chineseTraditional": "十字路口站",
+      "note": "맵 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRMap_81005",
+      "sourceVersionId": "c54cbcc8-a4f5-469c-a4c4-2993a6ebee30",
+      "translation": "사쿠라 타운",
+      "japanese": "桜の町",
+      "chineseSimplified": "樱花小镇",
+      "chineseTraditional": "櫻花小鎮",
+      "note": "맵 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRMap_81006",
+      "sourceVersionId": "9b73ae7a-d141-4eeb-958e-a12b5ab177e5",
+      "translation": "팬텀 시티",
+      "japanese": "ファントム・シティ",
+      "chineseSimplified": "魅影都市",
+      "chineseTraditional": "魅影都市",
+      "note": "맵 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRMap_81007",
+      "sourceVersionId": "66143b6c-e4df-4585-9b68-6ec758e06bbe",
+      "translation": "드림호 - 위층",
+      "japanese": "夢想号-アッパーデッキ",
+      "chineseSimplified": "梦想号-上层甲板",
+      "chineseTraditional": "夢想號-上層甲板",
+      "note": "맵 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRMap_81008",
+      "sourceVersionId": "478bee1c-047b-45b2-8d6a-b3ab39c3c5a7",
+      "translation": "영혼 축제",
+      "japanese": "御魂の祭",
+      "chineseSimplified": "御魂庆典",
+      "chineseTraditional": "禦魂慶典",
+      "note": "맵 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRMap_81009",
+      "sourceVersionId": "4acaf12b-0f28-47d8-b9d7-94114281f22e",
+      "translation": "선물 광장",
+      "japanese": "ギフト広場",
+      "chineseSimplified": "礼物广场",
+      "chineseTraditional": "禮物廣場",
+      "note": "맵 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRMap_81010",
+      "sourceVersionId": "70cac975-ac0e-4134-9908-19949ef4f1f7",
+      "translation": "워터 타운",
+      "japanese": "水郷古鎮",
+      "chineseSimplified": "水乡古镇",
+      "chineseTraditional": "水鄉古鎮",
+      "note": "맵 이름. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_10007",
+      "sourceVersionId": "ee2b7363-bafd-4621-ac96-52aa9c588466",
+      "translation": "공격력",
+      "japanese": "攻撃力",
+      "chineseSimplified": "攻击力",
+      "chineseTraditional": "",
+      "note": "전투 기본 용어. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRBuff_10007",
+      "sourceVersionId": "ee2b7363-bafd-4621-ac96-52aa9c588466",
+      "translation": "방어력",
+      "japanese": "防御力",
+      "chineseSimplified": "防御力",
+      "chineseTraditional": "",
+      "note": "전투 기본 용어. 기존 번역 표기 유지."
+    },
+    {
+      "key": "STRAchieve_1002",
+      "sourceVersionId": "c29101e4-a667-4e3a-9cac-d324b070d6c4",
+      "translation": "피해",
+      "japanese": "ダメージ",
+      "chineseSimplified": "伤害",
+      "chineseTraditional": "",
+      "note": "전투 기본 용어. 기존 번역 표기 유지."
+    }
+  ]
+}

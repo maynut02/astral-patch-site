@@ -40,7 +40,7 @@ const {
         </div>
       </div>
       <UButton
-        v-if="selectedDictionary.canEdit"
+        v-if="selectedDictionary.canEdit && !selectedDictionary.isTeam"
         icon="i-tabler-plus"
         color="neutral"
         variant="soft"
@@ -49,6 +49,17 @@ const {
         @click="openCreateDictionaryEntry"
       />
     </div>
+
+    <UButton
+      v-if="selectedDictionary.isTeam"
+      :to="{ path: '/translate/glossary', query: { dictionary: selectedDictionary.id } }"
+      target="_blank"
+      color="info"
+      variant="soft"
+      class="m-3"
+    >
+      공통 기준 조회·제안 ↗
+    </UButton>
 
     <div class="flex shrink-0 gap-2 border-b border-default p-3">
       <UInput

@@ -2,7 +2,7 @@
 import type { EditorPageState } from '~/utils/editor-page-state'
 
 const props = defineProps<{ state: EditorPageState }>()
-const { dictionaryPanelTabs, dictionaryPanelView, dictionarySelection } = props.state
+const { dictionaryPanelTabs, dictionaryPanelView, dictionarySelection, selectedItem } = props.state
 </script>
 
 <template>
@@ -27,9 +27,11 @@ const { dictionaryPanelTabs, dictionaryPanelView, dictionarySelection } = props.
         <EditorDictionarySearch :state="state" />
       </template>
 
-      <template v-else>
+      <template v-else-if="dictionaryPanelView === 'collections'">
         <EditorDictionaryCollections :state="state" />
       </template>
+
+      <EditorGlossaryReference v-else :item="selectedItem" :context="state" />
 
       <EditorDictionaryForms :state="state" />
     </div>

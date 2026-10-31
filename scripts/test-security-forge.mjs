@@ -6,15 +6,13 @@ import { dirname, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-// Backport: https://github.com/digitalbazaar/forge/pull/1152
-// Pinned head: ceba34402e329f0365134f23fe19898756527d65
+// Official release: https://www.npmjs.com/package/node-forge/v/1.4.1
+// Historical backport: https://github.com/digitalbazaar/forge/pull/1152
 // Advisory: https://github.com/advisories/GHSA-86w9-cpqp-85rv
-// The patch is exactly the upstream lib/rsa.js difference, under BSD-3-Clause.
 // See fixtures/security-forge/LICENSE.node-forge for its retained license.
 // Malformed signatures below are generated locally; no production key is used.
 // This tests ASN.1 acceptance, not a private-key-free exploit implementation.
-// Before installing the patch: node scripts/test-security-forge.mjs --expect-vulnerable
-// After installing the patch:  node scripts/test-security-forge.mjs
+// Historical 1.4.0 reproduction: use --expect-vulnerable --forge-root <directory>.
 // A temporary package copy may be selected with --forge-root <absolute-directory>.
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -33,7 +31,7 @@ for (let index = 0; index < args.length; index++) {
 
 function resolveForge() {
   if (forgeRoot) return createRequire(resolve(forgeRoot, 'package.json'))
-  // Follow the real installed dependency links, including pnpm's patched copy.
+  // Follow the real installed dependency links.
   // node-forge is deliberately not added as a direct application dependency.
   const projectRequire = createRequire(resolve(projectRoot, 'package.json'))
   const nuxtRequire = createRequire(projectRequire.resolve('nuxt/package.json'))
@@ -55,15 +53,15 @@ const sourceHash = createHash('sha256')
   .update(readFileSync(rsaFile, 'utf8').replaceAll('\r\n', '\n'))
   .digest('hex')
 const originalHash = 'fd4740238145ec26470eb3f06a627c72039538ce1307dbdce40521f94dfd0a50'
-const upstreamHash = 'acc22e5d36e27832c34e02dd3933aad7977d45b047eead5016520735efedc9c5'
+const releaseHash = '6632e195295ce76f6bb9131ee770dcd6cc1ee4ffac7906302208b00faf95a87f'
 
-console.log(`node-forge ${packageInfo.version}; ${expectVulnerable ? 'original vulnerability reproduction' : 'patched regression verification'}`)
+console.log(`node-forge ${packageInfo.version}; ${expectVulnerable ? 'original vulnerability reproduction' : 'official release regression verification'}`)
 console.log(`RSA source: ${rsaFile}`)
 
-test('RSA source matches the pinned release or exact upstream PR head', () => {
-  assert.equal(packageInfo.version, '1.4.0', 'Review this temporary backport when node-forge changes version')
-  assert.equal(sourceHash, expectVulnerable ? originalHash : upstreamHash,
-    'Unexpected RSA source: the default check requires the exact PR #1152 post-image')
+test('RSA source matches the pinned official release', () => {
+  assert.equal(packageInfo.version, expectVulnerable ? '1.4.0' : '1.4.1', 'Review the security regression check when node-forge changes version')
+  assert.equal(sourceHash, expectVulnerable ? originalHash : releaseHash,
+    'Unexpected RSA source: the default check requires the official node-forge 1.4.1 release')
 })
 
 const nativeKeys = generateKeyPairSync('rsa', { modulusLength: 2048, publicExponent: 65537 })

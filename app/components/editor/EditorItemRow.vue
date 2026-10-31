@@ -8,7 +8,7 @@ const props = defineProps<{
   state: EditorPageState
   item: EditorItem
 }>()
-const { getItemStatus, handleItemTranslationInput, hasItemDraft, isSaving, loggedIn, retainItemTranslation, retainingItemId, selectDictionaryReference, selectItem, selectedItemId, showLoginRequiredToast, visibleSourceLanguageItems } = props.state
+const { getItemStatus, glossaryEntries, glossaryFailed, glossaryLoading, refreshGlossary, handleItemTranslationInput, hasItemDraft, isSaving, loggedIn, retainItemTranslation, retainingItemId, selectDictionaryReference, selectItem, selectedItemId, showLoginRequiredToast, visibleSourceLanguageItems } = props.state
 const item = computed(() => props.item)
 const status = computed(() => getItemStatus(item.value))
 const statusMeta = computed(() => EDITOR_STATUS_META[status.value])
@@ -41,6 +41,8 @@ const syntaxWarning = computed(() => getTranslationSyntaxWarning(item.value))
             <EditorSourceText
               :text="item[source.key] || null"
               :lang="source.lang"
+              :language="source.key"
+              :glossary-entries="selectedItemId === item.id ? glossaryEntries : []"
               @select="selectDictionaryReference"
             >
               <template #empty>
@@ -53,6 +55,15 @@ const syntaxWarning = computed(() => getTranslationSyntaxWarning(item.value))
         <span class="break-all text-xs font-medium text-dimmed">
           {{ item.category }}_{{ item.unitKey }}
         </span>
+        <p v-if="selectedItemId === item.id && glossaryLoading" class="text-xs text-dimmed">
+          용어집 확인 중
+        </p>
+        <p v-else-if="selectedItemId === item.id && glossaryFailed" class="text-xs text-muted">
+          용어 기준을 불러오지 못했습니다.
+          <button type="button" class="text-info underline underline-offset-2" @click.stop="refreshGlossary">
+            다시 불러오기
+          </button>
+        </p>
       </div>
     </div>
 

@@ -1,5 +1,5 @@
 // 운영 의존성의 high/critical 취약점을 검사한다.
-// 두 advisory 예외는 `pnpm run test:security`가 로컬 패치를 먼저 검증한다(CI에서 이 스크립트보다 앞서 실행).
+// braces advisory 예외는 `pnpm run test:security`가 로컬 패치를 먼저 검증한다(CI에서 이 스크립트보다 앞서 실행).
 // npm advisory API 네트워크 타임아웃은 한 번 재시도하고, 그래도 실패하면 경고만 남기고 통과한다.
 import { spawnSync } from 'node:child_process'
 import { setTimeout as sleep } from 'node:timers/promises'

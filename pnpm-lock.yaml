@@ -15,12 +15,13 @@ overrides:
   vite@>=8.2.0 <8.2.4: 8.2.4
   launch-editor@<2.14.2: 2.14.2
   zod@>=4.0.0 <4.6.6: 4.6.6
+  node-forge@>=1.0.0 <1.4.1: 1.4.1
+  seroval@>=1.0.0 <1.6.8: 1.6.8
   '@nuxt/devtools>simple-git': 4.0.2
 
 patchedDependencies:
   '@nuxt/devtools@3.4.2': 6056ec4c04b94d9a348a07e5f4b99d67dba43c4cc0ce9ebcf39e64554095e0d2
   braces@3.0.3: fc35d212125df8da27cf6be7a289ed81d4e94c66fcf81e56c2d334e29fb36184
-  node-forge@1.4.0: 50d8e3f38443736858c2c81dc2b569c18083e687f81acc5f9c17a568a7e4f6f6
 
 importers:
 
@@ -4001,8 +4002,8 @@ packages:
       encoding:
         optional: true
 
-  node-forge@1.4.0:
-    resolution: {integrity: sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==}
+  node-forge@1.4.1:
+    resolution: {integrity: sha512-w5/MfWaeMrpR/5ba6fZyAUTLSuE6aYz7H/3cYrqwZEmf5eQS3IaaLgJt4MBv7HglGFWmV22K8h4U18RJQmw/ow==}
     engines: {node: '>= 6.13.0'}
 
   node-gyp-build@4.8.4:
@@ -4751,8 +4752,8 @@ packages:
     resolution: {integrity: sha512-RNEqWOyhhUQYN9V1GfHwu9AR/g+NTciH6Z5u3/no6X3/w+04J2lVDL+svFQVXgXrEGBMG2puMVN3gq2SNGuTGw==}
     engines: {node: '>=20.0.0'}
 
-  seroval@1.6.3:
-    resolution: {integrity: sha512-5PwLbVPpT4DEki1hYVSSsoxWY6xCNMVucAVLK/CH0mXSDfp/I4KaAex72q80GNt5hpn7CCMGdSpIg4YGqH/wXQ==}
+  seroval@1.6.8:
+    resolution: {integrity: sha512-HlSgSAkTk4EqHcje1ptJjfZi1YDv5KbhVJ/d3P7T/nAXua2VmDu+AKDX5VTdFfZf48nDkWB2TKYt0DrCSa+3wg==}
     engines: {node: '>=10'}
 
   serve-placeholder@2.0.2:
@@ -6902,7 +6903,7 @@ snapshots:
       pkg-types: 2.3.1
       postcss: 8.5.26
       rolldown-string: 0.3.1(rolldown@1.2.5)
-      seroval: 1.6.3
+      seroval: 1.6.8
       std-env: 4.2.0
       ufo: 1.6.4
       unenv: 2.0.0-rc.24
@@ -9656,7 +9657,7 @@ snapshots:
       h3: 1.15.11
       http-shutdown: 1.2.2
       jiti: 2.7.0
-      node-forge: 1.4.0(patch_hash=50d8e3f38443736858c2c81dc2b569c18083e687f81acc5f9c17a568a7e4f6f6)
+      node-forge: 1.4.1
       pathe: 2.0.3
       std-env: 4.2.0
       tinyclip: 0.1.15
@@ -9970,7 +9971,7 @@ snapshots:
     dependencies:
       whatwg-url: 5.0.0
 
-  node-forge@1.4.0(patch_hash=50d8e3f38443736858c2c81dc2b569c18083e687f81acc5f9c17a568a7e4f6f6): {}
+  node-forge@1.4.1: {}
 
   node-gyp-build@4.8.4: {}
 
@@ -11054,7 +11055,7 @@ snapshots:
 
   serialize-javascript@7.1.0: {}
 
-  seroval@1.6.3: {}
+  seroval@1.6.8: {}
 
   serve-placeholder@2.0.2:
     dependencies:
