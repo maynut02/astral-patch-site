@@ -2,6 +2,7 @@
 import type { EditorItem } from '#shared/types/editor'
 import type { EditorDictionaryEntry } from '#shared/types/editor-dictionary'
 import type { useEditorGlossaryContext } from '~/composables/editor-glossary-context'
+import { useEditorGlossaryWindow } from '~/composables/editor-glossary-window'
 import { getEditorItemKey } from '~/utils/editor-links'
 
 const props = defineProps<{ item: EditorItem | null, context: ReturnType<typeof useEditorGlossaryContext> }>()
@@ -9,6 +10,7 @@ const { glossaryEntries: entries, glossaryVoices: voices, glossaryLoading: loadi
 const { loggedIn } = useUserSession()
 const { showLoginRequiredToast } = useAppToast()
 const { dictionaries, loadDictionaries } = useEditorDictionaryList()
+const glossaryWindow = useEditorGlossaryWindow()
 const teamDictionaries = computed(() => dictionaries.value.filter(dictionary => dictionary.isTeam))
 const dictionaryId = ref('')
 const voiceId = ref('general')
@@ -51,13 +53,12 @@ onMounted(() => {
       <p class="text-sm font-medium">
         관련 용어
       </p><UButton
-        to="/translate/glossary"
-        target="_blank"
         color="neutral"
         variant="link"
         size="xs"
+        @click="glossaryWindow.show()"
       >
-        전체 보기 ↗
+        전체 보기
       </UButton>
     </div>
     <p class="mb-3 font-mono text-[10px] text-dimmed">
@@ -117,7 +118,7 @@ onMounted(() => {
             :entry="entry"
             @propose="propose(entry)"
             @usage="showUsage(entry)"
-            @history="navigateTo({ path: '/translate/glossary', query: { dictionary: entry.dictionaryId, entry: entry.id, tab: entry.metadata.kind, detail: 'history' } }, { open: { target: '_blank' } })"
+            @history="glossaryWindow.show({ dictionary: entry.dictionaryId, entry: entry.id, tab: entry.metadata.kind, detail: 'history' })"
           />
         </template>
       </article>
@@ -137,7 +138,7 @@ onMounted(() => {
           :entry="voice"
           @propose="propose(voice)"
           @usage="showUsage(voice)"
-          @history="navigateTo({ path: '/translate/glossary', query: { dictionary: voice.dictionaryId, entry: voice.id, tab: 'voice', detail: 'history' } }, { open: { target: '_blank' } })"
+          @history="glossaryWindow.show({ dictionary: voice.dictionaryId, entry: voice.id, tab: 'voice', detail: 'history' })"
         />
       </section>
     </template>

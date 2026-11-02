@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { EditorDictionaryEntry } from '#shared/types/editor-dictionary'
+import { useEditorGlossaryWindow } from '~/composables/editor-glossary-window'
 
 defineProps<{ text: string, entries: EditorDictionaryEntry[] }>()
 const open = ref(false)
 const usageOpen = ref(false)
 const usageEntry = ref<EditorDictionaryEntry | null>(null)
 const { showToast } = useAppToast()
+const glossaryWindow = useEditorGlossaryWindow()
 async function copy(entry: EditorDictionaryEntry) {
   try {
     await navigator.clipboard.writeText(entry.translation)
@@ -71,13 +73,12 @@ function showUsages(entry: EditorDictionaryEntry) {
               사용처
             </UButton>
             <UButton
-              :to="{ path: '/translate/glossary', query: { dictionary: entry.dictionaryId, entry: entry.id, tab: 'term' } }"
-              target="_blank"
               size="xs"
               color="neutral"
               variant="link"
+              @click="open = false; glossaryWindow.show({ dictionary: entry.dictionaryId, entry: entry.id, tab: 'term' })"
             >
-              기준 상세 ↗
+              기준 상세
             </UButton>
           </div>
         </article>

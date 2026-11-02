@@ -1,22 +1,52 @@
+import type { LocationQueryRaw } from 'vue-router'
 import type { EditorDictionary, EditorDictionaryEntry, EditorDictionaryEntriesResponse, GlossaryProposal, GlossaryProposalsResponse, GlossaryDecision } from '#shared/types/editor-dictionary'
 import { isReviewerRole } from '#shared/types/user'
 import { useEditorDictionaryList } from '~/composables/editor-dictionaries'
 import { getRequestErrorMessage } from '~/utils/request-error'
 
-export function useGlossaryWorkspace() {
+export interface GlossaryWorkspaceTarget {
+  dictionary: string
+  tab?: 'term' | 'voice'
+  entry?: string
+  detail?: 'usage' | 'history'
+}
+
+type GlossaryQuery = LocationQueryRaw
+
+function parseGlossaryQuery(query: GlossaryQuery) {
+  const page = Number(query.page ?? 1)
+  return {
+    dictionary: typeof query.dictionary === 'string' ? query.dictionary : '',
+    tab: ['term', 'voice', 'proposals'].includes(String(query.tab)) ? String(query.tab) : 'term',
+    search: typeof query.q === 'string' ? query.q : '',
+    page: Number.isSafeInteger(page) && page > 0 ? page : 1,
+    status: ['pending', 'held', 'approved', 'rejected', 'withdrawn'].includes(String(query.status)) ? String(query.status) : 'pending',
+    archived: query.archived === 'true'
+  }
+}
+
+/**
+ * `syncRoute: false` keeps the workspace location in memory so an embedded
+ * workspace never rewrites the host page URL (the editor owns its own query).
+ */
+export function useGlossaryWorkspace(options: { syncRoute?: boolean } = {}) {
+  const syncRoute = options.syncRoute ?? true
   const route = useRoute()
   const router = useRouter()
+  const localQuery = shallowRef<GlossaryQuery>({})
+  const currentQuery = (): GlossaryQuery => syncRoute ? route.query : localQuery.value
+  const locationQuery = computed(currentQuery)
   const { loggedIn, user } = useUserSession()
   const { showLoginRequiredToast } = useAppToast()
   const list = useEditorDictionaryList()
   const dictionaries = computed(() => list.dictionaries.value.filter(dictionary => dictionary.isTeam))
-  const dictionaryId = ref(typeof route.query.dictionary === 'string' ? route.query.dictionary : '')
-  const tab = ref(['term', 'voice', 'proposals'].includes(String(route.query.tab)) ? String(route.query.tab) : 'term')
-  const search = ref(typeof route.query.q === 'string' ? route.query.q : '')
-  const initialPage = Number(route.query.page ?? 1)
-  const page = ref(Number.isSafeInteger(initialPage) && initialPage > 0 ? initialPage : 1)
-  const statusFilter = ref(['pending', 'held', 'approved', 'rejected', 'withdrawn'].includes(String(route.query.status)) ? String(route.query.status) : 'pending')
-  const archived = ref(route.query.archived === 'true')
+  const initial = parseGlossaryQuery(currentQuery())
+  const dictionaryId = ref(initial.dictionary)
+  const tab = ref(initial.tab)
+  const search = ref(initial.search)
+  const page = ref(initial.page)
+  const statusFilter = ref(initial.status)
+  const archived = ref(initial.archived)
   const entries = ref<EditorDictionaryEntriesResponse | null>(null)
   const proposals = ref<GlossaryProposalsResponse | null>(null)
   const loading = ref(false)
@@ -45,7 +75,11 @@ export function useGlossaryWorkspace() {
   }
   async function replaceQuery(query: Record<string, string | number | undefined>) {
     const key = queryKey(query)
-    if (key === queryKey(route.query)) return
+    if (key === queryKey(currentQuery())) return
+    if (!syncRoute) {
+      localQuery.value = query
+      return
+    }
     pendingQueries.add(key)
     try {
       await router.replace({ query })
@@ -69,8 +103,9 @@ export function useGlossaryWorkspace() {
     const dictionary = dictionaryId.value
     const kind = tab.value
     const query = { page: page.value, kind, search: search.value, archived: archived.value ? 'true' : undefined }
-    const linkedEntryId = route.query.dictionary === dictionary && typeof route.query.entry === 'string' ? route.query.entry : ''
-    const linkedDetail = linkedEntryId && (route.query.detail === 'history' || route.query.detail === 'usage') ? route.query.detail : 'overview'
+    const linked = currentQuery()
+    const linkedEntryId = linked.dictionary === dictionary && typeof linked.entry === 'string' ? linked.entry : ''
+    const linkedDetail = linkedEntryId && (linked.detail === 'history' || linked.detail === 'usage') ? linked.detail : 'overview'
     entries.value = null
     proposals.value = null
     clearSelection()
@@ -116,6 +151,7 @@ export function useGlossaryWorkspace() {
     if (id !== initializationRequest) return
     if (list.dictionariesStatus.value === 'error') {
       error.value = list.dictionariesError.value
+      loading.value = false
       return
     }
     if (!dictionaries.value.some(dictionary => dictionary.id === dictionaryId.value)) {
@@ -148,6 +184,12 @@ export function useGlossaryWorkspace() {
     detail.value = 'overview'
     history.value = []
     await replaceQuery({ ...listQuery(), entry: entry.id })
+  }
+  async function closeEntry() {
+    historyRequest++
+    detail.value = 'overview'
+    history.value = []
+    await replaceQuery(listQuery())
   }
   function propose(entry: EditorDictionaryEntry | null = null) {
     if (!loggedIn.value) {
@@ -204,27 +246,46 @@ export function useGlossaryWorkspace() {
     await list.loadDictionaries()
     dictionaryId.value = dictionary.id
   }
+  function applyQuery(query: GlossaryQuery) {
+    navigationRequest++
+    request++
+    applyingState = true
+    const next = parseGlossaryQuery(query)
+    dictionaryId.value = next.dictionary
+    tab.value = next.tab
+    search.value = next.search
+    page.value = next.page
+    statusFilter.value = next.status
+    archived.value = next.archived
+    applyingState = false
+  }
+  async function open(target: GlossaryWorkspaceTarget) {
+    const query = { dictionary: target.dictionary, tab: target.tab, entry: target.entry, detail: target.detail }
+    if (syncRoute) {
+      await router.replace({ query })
+      return
+    }
+    localQuery.value = query
+    applyQuery(query)
+    // applyQuery invalidated any in-flight load; drop its rows so they never show under the new target.
+    entries.value = null
+    proposals.value = null
+    clearSelection()
+    await init()
+  }
   watch([dictionaryId, tab, statusFilter, archived], () => {
     if (!applyingState) void resetList(true)
   }, { flush: 'sync' })
   watch(page, () => {
     if (!applyingState) void resetList(false)
   }, { flush: 'sync' })
-  watch(() => route.query, () => {
-    if (pendingQueries.has(queryKey(route.query))) return
-    navigationRequest++
-    request++
-    applyingState = true
-    dictionaryId.value = typeof route.query.dictionary === 'string' ? route.query.dictionary : ''
-    tab.value = ['term', 'voice', 'proposals'].includes(String(route.query.tab)) ? String(route.query.tab) : 'term'
-    search.value = typeof route.query.q === 'string' ? route.query.q : ''
-    const nextPage = Number(route.query.page ?? 1)
-    page.value = Number.isSafeInteger(nextPage) && nextPage > 0 ? nextPage : 1
-    statusFilter.value = ['pending', 'held', 'approved', 'rejected', 'withdrawn'].includes(String(route.query.status)) ? String(route.query.status) : 'pending'
-    archived.value = route.query.archived === 'true'
-    applyingState = false
-    void load()
-  }, { flush: 'sync' })
+  if (syncRoute) {
+    watch(() => route.query, () => {
+      if (pendingQueries.has(queryKey(route.query))) return
+      applyQuery(route.query)
+      void load()
+    }, { flush: 'sync' })
+  }
   watch(loggedIn, () => {
     void init()
   })
@@ -245,5 +306,7 @@ export function useGlossaryWorkspace() {
     navigationRequest++
     initializationRequest++
   })
-  return { loggedIn, user, dictionaries, dictionaryId, tab, search, page, statusFilter, archived, entries, proposals, loading, error, selection, selectedProposal, currentProposalEntry, comparisonError, detail, history, formOpen, editingEntry, isReviewer, deciding, init, load, runSearch, selectEntry, propose, showDetail, showHistory, decide, createDictionary }
+  return { loggedIn, user, dictionaries, dictionaryId, tab, search, page, statusFilter, archived, entries, proposals, loading, error, selection, selectedProposal, currentProposalEntry, comparisonError, detail, history, formOpen, editingEntry, isReviewer, deciding, locationQuery, init, load, open, runSearch, selectEntry, closeEntry, propose, showDetail, showHistory, decide, createDictionary }
 }
+
+export type GlossaryWorkspace = ReturnType<typeof useGlossaryWorkspace>

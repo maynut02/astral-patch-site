@@ -145,6 +145,7 @@ async function flushClient() {
 
 function clientHarness(context, fetch, query = {}) {
   const route = vue.reactive({ query })
+  const routerReplacements = []
   const scope = vue.effectScope()
   const unmount = []
   context.after(() => {
@@ -153,16 +154,21 @@ function clientHarness(context, fetch, query = {}) {
   })
   const list = { dictionaries: vue.ref([]), dictionariesStatus: vue.ref('success'), dictionariesError: vue.ref(''), loadDictionaries: async () => {} }
   const globals = {
-    ref: vue.ref, computed: vue.computed, watch: vue.watch, onMounted: () => {}, onUnmounted: callback => unmount.push(callback),
+    ref: vue.ref, shallowRef: vue.shallowRef, computed: vue.computed, watch: vue.watch, onMounted: () => {}, onUnmounted: callback => unmount.push(callback),
     window: { addEventListener: () => {}, removeEventListener: () => {} },
     useRoute: () => route,
-    useRouter: () => ({ replace: async ({ query }) => { route.query = query } }),
+    useRouter: () => ({
+      replace: async ({ query }) => {
+        routerReplacements.push(query)
+        route.query = query
+      }
+    }),
     useUserSession: () => ({ loggedIn: vue.ref(true), user: vue.ref({ role: 'verified' }) }),
     useAppToast: () => ({ showLoginRequiredToast: () => {} }),
     $fetch: fetch
   }
   const loader = modules(null, globals, new Map([[path.join(root, 'app/composables/editor-dictionaries.ts'), { useEditorDictionaryList: () => list }]]))
-  return { route, list, create: (file, method, ...args) => scope.run(() => loader.load(file)[method](...args)) }
+  return { route, routerReplacements, list, create: (file, method, ...args) => scope.run(() => loader.load(file)[method](...args)) }
 }
 
 test('glossary client: a review decision stays bound to its captured proposal after selection changes', async (context) => {
@@ -307,6 +313,49 @@ test('glossary client: external URL changes restore the linked entry and history
   assert.equal(workspace.selection.value.id, second.id)
   assert.equal(workspace.detail.value, 'history')
   assert.equal(workspace.history.value[0].entryId, second.id)
+})
+
+test('glossary client: an embedded workspace opens linked history without touching the host URL', async (context) => {
+  const first = { id: 'first', dictionaryId: 'team', metadata: metadata() }
+  const second = { ...first, id: 'second' }
+  const hostQuery = { item: 'STRItem_1', page: '3' }
+  const h = clientHarness(context, async (url, options) => {
+    if (url.endsWith('/proposals')) return { proposals: [{ id: 'history', entryId: options.query.entryId }], total: 1, page: 1, totalPages: 1 }
+    return { entries: [first, second], total: 2, page: 1, totalPages: 1 }
+  }, { ...hostQuery })
+  h.list.dictionaries.value = [{ id: 'team', isTeam: true }]
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace', { syncRoute: false })
+  await workspace.open({ dictionary: 'team', tab: 'term', entry: 'second', detail: 'history' })
+  assert.equal(workspace.selection.value.id, second.id)
+  assert.equal(workspace.detail.value, 'history')
+  assert.equal(workspace.history.value[0].entryId, second.id)
+  await workspace.selectEntry(first)
+  workspace.page.value = 2
+  await flushClient()
+  assert.deepEqual(h.routerReplacements, [])
+  assert.deepEqual({ ...h.route.query }, hostQuery)
+  assert.equal(workspace.locationQuery.value.page, 2)
+  assert.equal(workspace.locationQuery.value.dictionary, 'team')
+})
+
+test('glossary client: opening a target while the dictionary list fails drops old rows and an interrupted spinner', async (context) => {
+  let calls = 0
+  const h = clientHarness(context, () => calls++ === 0
+    ? Promise.resolve({ entries: [{ id: 'old', dictionaryId: 'team', metadata: metadata() }], total: 1, page: 1, totalPages: 1 })
+    : new Promise(() => {}), { dictionary: 'team', tab: 'term' })
+  h.list.dictionaries.value = [{ id: 'team', isTeam: true }]
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace', { syncRoute: false })
+  await workspace.load()
+  h.list.dictionariesStatus.value = 'error'
+  h.list.dictionariesError.value = '용어집 목록을 불러오지 못했습니다.'
+  await workspace.open({ dictionary: 'team', tab: 'voice', entry: 'target' })
+  assert.equal(workspace.entries.value, null)
+  assert.equal(workspace.selection.value, null)
+  void workspace.load()
+  assert.equal(workspace.loading.value, true)
+  await workspace.open({ dictionary: 'team', tab: 'term', entry: 'target' })
+  assert.equal(workspace.loading.value, false)
+  assert.equal(workspace.error.value, '용어집 목록을 불러오지 못했습니다.')
 })
 
 test('glossary client: refreshing the same source retains references, while a new version clears them and ignores old replies', async (context) => {
