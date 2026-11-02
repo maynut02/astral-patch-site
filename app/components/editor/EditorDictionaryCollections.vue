@@ -8,9 +8,20 @@ const {
   dictionaries, dictionariesError, dictionariesStatus, dictionaryEntries, dictionaryEntriesError,
   dictionaryEntriesSearch, dictionaryEntriesSearchInput, dictionaryEntriesStatus, dictionaryEntryItems,
   getDictionaryCreatorHandle, getDictionaryOwnerHandle, openCreateDictionary, openCreateDictionaryEntry,
+  openDeleteDictionary, openDeleteDictionaryEntry, openEditDictionary, openEditDictionaryEntry,
   runDictionaryEntrySearch, selectDictionary, selectedDictionary, selectedDictionaryId
 } = props.state
 const glossaryWindow = useEditorGlossaryWindow()
+// Shared dictionaries change only through reviewed proposals.
+const canManageSelected = computed(() => Boolean(selectedDictionary.value?.canEdit && !selectedDictionary.value.isTeam))
+const dictionaryMenuItems = computed(() => {
+  const dictionary = selectedDictionary.value
+  if (!dictionary) return []
+  return [[
+    { label: '용어집 수정', icon: 'i-tabler-pencil', onSelect: () => openEditDictionary(dictionary) },
+    { label: '용어집 삭제', icon: 'i-tabler-trash', color: 'error' as const, onSelect: () => openDeleteDictionary(dictionary) }
+  ]]
+})
 </script>
 
 <template>
@@ -43,7 +54,7 @@ const glossaryWindow = useEditorGlossaryWindow()
         </div>
       </div>
       <UButton
-        v-if="selectedDictionary.canEdit && !selectedDictionary.isTeam"
+        v-if="canManageSelected"
         icon="i-tabler-plus"
         color="neutral"
         variant="soft"
@@ -51,6 +62,19 @@ const glossaryWindow = useEditorGlossaryWindow()
         aria-label="용어 추가"
         @click="openCreateDictionaryEntry"
       />
+      <UDropdownMenu
+        v-if="canManageSelected"
+        :items="dictionaryMenuItems"
+        :content="{ align: 'end' }"
+      >
+        <UButton
+          icon="i-tabler-dots-vertical"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          aria-label="용어집 관리"
+        />
+      </UDropdownMenu>
     </div>
 
     <UButton
@@ -123,7 +147,7 @@ const glossaryWindow = useEditorGlossaryWindow()
           아직 등록된 용어가 없습니다.
         </p>
         <UButton
-          v-if="selectedDictionary.canEdit && !selectedDictionary.isTeam"
+          v-if="canManageSelected"
           color="neutral"
           variant="soft"
           size="sm"
@@ -171,6 +195,37 @@ const glossaryWindow = useEditorGlossaryWindow()
               icon-class="size-3"
               stop-propagation
             />
+            <div
+              v-if="canManageSelected"
+              class="ms-auto flex shrink-0 items-center"
+            >
+              <UTooltip
+                text="용어 수정"
+                :delay-duration="0"
+              >
+                <UButton
+                  icon="i-tabler-pencil"
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  aria-label="용어 수정"
+                  @click="openEditDictionaryEntry(entry)"
+                />
+              </UTooltip>
+              <UTooltip
+                text="용어 삭제"
+                :delay-duration="0"
+              >
+                <UButton
+                  icon="i-tabler-trash"
+                  color="error"
+                  variant="ghost"
+                  size="xs"
+                  aria-label="용어 삭제"
+                  @click="openDeleteDictionaryEntry(entry)"
+                />
+              </UTooltip>
+            </div>
           </div>
         </article>
       </div>

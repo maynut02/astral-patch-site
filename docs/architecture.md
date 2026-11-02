@@ -99,7 +99,7 @@ Google OAuth(`nuxt-auth-utils`)로 로그인합니다. 첫 로그인 시 `app_us
 | 검토 | `GET /api/editor/review`, `POST /api/editor/review/candidates`, `PATCH /api/editor/changes/:id`, `PATCH /api/editor/changes/batch` |
 | 이력 | `GET /api/editor/items/:id/history`, `GET /api/editor/log/*` |
 | 댓글 | `GET`/`POST /api/editor/comments` |
-| 용어집 | `GET`/`POST /api/editor/dictionaries`, `GET`/`POST /api/editor/dictionaries/:id/entries` |
+| 용어집 | `GET`/`POST /api/editor/dictionaries`, `PATCH`/`DELETE /api/editor/dictionaries/:id`, `GET`/`POST /api/editor/dictionaries/:id/entries`, `PATCH`/`DELETE /api/editor/dictionaries/:id/entries/:entryId` |
 | 모드 | `/api/mods`, `/api/mods/:id` ([mod-hub.md](mod-hub.md)) |
 | 파티 | `POST /api/party/rooms`, `GET /api/party/characters` |
 | 공개 정보 | `/api/releases`, `/api/status`, `/api/notices`, `/api/contributors`, `/api/astral-server`, `GET /api/users/:handle` |

@@ -440,6 +440,54 @@ integration('glossary DB: preserve private dictionaries and reject direct team e
   await assert.rejects(h.glossary.decideGlossaryProposal(author, h.dictionary.id, p.id, { action: 'approve' }), error => error.statusCode === 403)
 })
 
+integration('glossary DB: owners edit and delete personal dictionaries while team dictionaries stay review-only', async (context) => {
+  const h = await harness(context)
+  const personal = await h.dictionaries.createEditorDictionary(author, { name: '개인 기준', visibility: 'public' })
+  const entry = await h.entries.createEditorDictionaryEntry(author, personal.id, { sourceText: '星币', translation: '별전', note: '' })
+  const rejected = statusCode => error => error.statusCode === statusCode
+
+  // A public dictionary is readable by others but not editable.
+  await assert.rejects(h.entries.updateEditorDictionaryEntry(outsider, personal.id, entry.id, { sourceText: '星币', translation: '탈취' }), rejected(403))
+  await assert.rejects(h.entries.deleteEditorDictionaryEntry(outsider, personal.id, entry.id), rejected(403))
+  await assert.rejects(h.dictionaries.updateEditorDictionary(outsider, personal.id, { name: '탈취' }), rejected(403))
+  await assert.rejects(h.dictionaries.deleteEditorDictionary(outsider, personal.id), rejected(403))
+
+  const updated = await h.entries.updateEditorDictionaryEntry(author, personal.id, entry.id, { sourceText: '星币', translation: '스타 코인', note: '수정' })
+  assert.deepEqual([updated.id, updated.translation, updated.note], [entry.id, '스타 코인', '수정'])
+  const keptNote = await h.entries.updateEditorDictionaryEntry(author, personal.id, entry.id, { sourceText: '星币', translation: '스타 코인' })
+  assert.equal(keptNote.note, '수정')
+  // Admins moderate personal dictionaries they do not own.
+  const moderated = await h.entries.updateEditorDictionaryEntry({ id: 'outsider', role: 'admin' }, personal.id, entry.id, { sourceText: '星币', translation: '스타 코인', note: '' })
+  assert.equal(moderated.note, '')
+  await assert.rejects(h.entries.updateEditorDictionaryEntry(author, personal.id, entry.id, { sourceText: ' ', translation: '빈 원문' }), rejected(400))
+  await assert.rejects(h.entries.updateEditorDictionaryEntry(author, personal.id, randomUUID(), { sourceText: '新', translation: '없음' }), rejected(404))
+
+  // Entries are scoped to their own dictionary.
+  const other = await h.dictionaries.createEditorDictionary(author, { name: '다른 개인 기준' })
+  await assert.rejects(h.entries.deleteEditorDictionaryEntry(author, other.id, entry.id), rejected(404))
+
+  const renamed = await h.dictionaries.updateEditorDictionary(author, personal.id, { name: '새 이름', description: '설명', visibility: 'private' })
+  assert.deepEqual([renamed.name, renamed.description, renamed.visibility], ['새 이름', '설명', 'private'])
+  await assert.rejects(h.entries.getEditorDictionaryEntries(outsider, personal.id, {}), rejected(404))
+
+  await h.entries.deleteEditorDictionaryEntry(author, personal.id, entry.id)
+  assert.equal((await h.entries.getEditorDictionaryEntries(author, personal.id, {})).total, 0)
+  await h.entries.createEditorDictionaryEntry(author, personal.id, { sourceText: '旧', translation: '함께 삭제' })
+  await h.dictionaries.deleteEditorDictionary(author, personal.id)
+  assert.equal((await h.sql`SELECT count(*)::int AS count FROM editor_dictionary_entries WHERE dictionary_id = ${personal.id}`)[0].count, 0)
+  await assert.rejects(h.dictionaries.deleteEditorDictionary(author, personal.id), rejected(404))
+
+  const proposal = await h.glossary.proposeGlossaryEntry(author, h.dictionary.id, proposalInput())
+  const approved = await h.glossary.decideGlossaryProposal(reviewer, h.dictionary.id, proposal.id, { action: 'approve' })
+  const teamEntryId = approved.resultEntryId
+  assert.ok(teamEntryId)
+  await assert.rejects(h.dictionaries.updateEditorDictionary(reviewer, h.dictionary.id, { name: '변경' }), rejected(403))
+  await assert.rejects(h.dictionaries.deleteEditorDictionary(reviewer, h.dictionary.id), rejected(403))
+  await assert.rejects(h.entries.updateEditorDictionaryEntry(reviewer, h.dictionary.id, teamEntryId, { sourceText: '星币', translation: '직접 수정' }), rejected(403))
+  await assert.rejects(h.entries.deleteEditorDictionaryEntry(reviewer, h.dictionary.id, teamEntryId), rejected(403))
+  assert.equal((await h.sql`SELECT count(*)::int AS count FROM editor_dictionaries WHERE id = ${h.dictionary.id}`)[0].count, 1)
+})
+
 integration('glossary DB: approval, multilingual search and idempotent retry leave translations untouched', async (context) => {
   const h = await harness(context)
   const requestId = randomUUID()
