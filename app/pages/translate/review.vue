@@ -526,6 +526,7 @@ async function confirmApprovalSelection(): Promise<void> {
                 class="size-3.5 shrink-0"
               />
               <AppUserIdentity
+                :user-id="entry.actorId"
                 :handle="entry.handle"
                 :role="entry.actorRole"
                 fallback="익명"

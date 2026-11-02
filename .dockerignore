@@ -2,6 +2,7 @@
 .github
 .nuxt
 .output
+.data
 node_modules
 .pnpm-store
 .env

@@ -9,6 +9,8 @@ import { useEditorItems } from '~/composables/editor-items'
 import { useEditorActions } from '~/composables/editor-actions'
 import { useEditorRealtime } from '~/composables/editor-realtime'
 import { useEditorDictionaryPanel } from '~/composables/editor-dictionary-panel'
+import { useEditorGlossaryContext } from '~/composables/editor-glossary-context'
+import { provideEditorGlossaryWindow } from '~/composables/editor-glossary-window'
 import { createEmptyEditorItems, createEmptyEditorOverview } from '~/utils/editor-progress'
 import { formatEditorCount, formatEditorPercent } from '~/utils/editor-helpers'
 import type { EditorPageState } from '~/utils/editor-page-state'
@@ -68,6 +70,8 @@ const {
 
 const data = { itemsData, itemsError, itemsStatus, refreshItems, overviewData, overviewStatus, overviewError, refreshOverview }
 const itemState = useEditorItems(data, query, layout, draftStorage)
+const glossary = useEditorGlossaryContext(itemState.selectedItem)
+const glossaryWindow = provideEditorGlossaryWindow()
 const actions = useEditorActions(data, query, layout, itemState, draftStorage)
 useEditorRealtime(data, { ...query, requestQuery }, itemState, draftStorage)
 useAstralPageSeo(query.editorPageTitle)
@@ -80,7 +84,7 @@ function toggleDisplayLanguage(language: typeof displayLanguages.value[number]):
     : [...displayLanguages.value, language]
 }
 
-const state: EditorPageState = { ...data, ...query, ...layout, ...draftStorage, ...preferences, ...itemState, ...actions, ...dictionary, visibleSourceLanguageItems, toggleDisplayLanguage }
+const state: EditorPageState = { ...data, ...query, ...layout, ...draftStorage, ...preferences, ...itemState, ...actions, ...dictionary, ...glossary, visibleSourceLanguageItems, toggleDisplayLanguage }
 const { backPath, headerTitle } = query
 const { isSidebarOpen, isMobileSidebarOpen, activeSidebarMenu, activeSidebarMenuItem, sidebarMenuItems, editorToolbarHeight, selectSidebarMenu } = layout
 const { total, currentProgress, isLoading, selectedItemId, selectedItemKey, selectedItemStatusMeta, historyReloadKey, totalPages } = itemState
@@ -123,6 +127,19 @@ const { handleHistoryChanged, openCommentItem } = actions
       </div>
 
       <div class="ml-2 flex shrink-0 items-center">
+        <UTooltip text="공통 용어집" :delay-duration="0">
+          <UButton
+            icon="i-tabler-books"
+            color="neutral"
+            variant="ghost"
+            size="lg"
+            :ui="{ leadingIcon: 'size-5', base: 'p-2 lg:p-2.5' }"
+            :class="glossaryWindow.open.value && !glossaryWindow.minimized.value ? 'bg-elevated text-default' : 'text-muted hover:text-default'"
+            aria-label="공통 용어집 창"
+            :aria-pressed="glossaryWindow.open.value && !glossaryWindow.minimized.value"
+            @click="glossaryWindow.toggle"
+          />
+        </UTooltip>
         <UButton
           icon="i-tabler-bell"
           color="neutral"
@@ -280,6 +297,8 @@ const { handleHistoryChanged, openCommentItem } = actions
         </nav>
       </aside>
     </div>
+
+    <EditorGlossaryWindow v-if="glossaryWindow.request.value" @changed="glossary.refreshGlossary" />
   </div>
 </template>
 

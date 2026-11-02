@@ -144,6 +144,8 @@ export async function getEditorTranslationLogs(
           'kind', tu.kind,
           'category', tu.namespace,
           'unitKey', tu.unit_key,
+          'actorId', CASE WHEN tc.created_by LIKE 'deleted:%' THEN tc.created_by END,
+          'reviewerId', CASE WHEN tc.reviewed_by LIKE 'deleted:%' THEN tc.reviewed_by END,
           'actorRole', CASE
             WHEN au."role" IN ('admin', 'verified', 'user', 'bot') THEN au."role"
             ELSE 'user'::text
@@ -205,6 +207,8 @@ export async function getEditorTranslationLogEntry(changeId: string): Promise<Ed
       tu.kind,
       tu.namespace AS category,
       tu.unit_key AS "unitKey",
+      CASE WHEN tc.created_by LIKE 'deleted:%' THEN tc.created_by END AS "actorId",
+      CASE WHEN tc.reviewed_by LIKE 'deleted:%' THEN tc.reviewed_by END AS "reviewerId",
       CASE
         WHEN au."role" IN ('admin', 'verified', 'user', 'bot') THEN au."role"
         ELSE 'user'::text
@@ -295,12 +299,16 @@ export async function getEditorSourceChanges(
         'kind', tu.kind,
         'category', tu.namespace,
         'unitKey', tu.unit_key,
+        'actorId', CASE WHEN sc.created_by LIKE 'deleted:%' THEN sc.created_by END,
+        'actorRole', creator."role",
+        'handle', NULLIF(BTRIM(creator.handle), ''),
         'changeType', sc.change_type,
         ${sourceVersionFields(database, true)},
         'createdAt', sc.created_at
       ) AS entry
     FROM source_changes sc
     JOIN translation_units tu ON tu.id = sc.unit_id
+    JOIN app_users creator ON creator.google_sub = sc.created_by
     ${sourceVersionJoins(database)}
     WHERE sc.revision_id = ${revisionId}
     ORDER BY tu.namespace ASC, tu.unit_key ASC, sc.unit_id ASC

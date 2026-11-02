@@ -52,10 +52,12 @@ export interface EditorHistoryEntry {
   id: string
   action: EditorHistoryAction
   actorType: EditorHistoryActorType
+  actorId: string | null
   actorRole: EditorRole
   handle: string | null
   status: EditorChangeStatus | null
   changeKind: EditorChangeKind | null
+  reviewerId: string | null
   reviewerRole: EditorRole | null
   reviewerHandle: string | null
   reviewedAt: string | null
@@ -148,6 +150,8 @@ export interface EditorTranslationLogEntry {
   kind: 'lang' | 'str'
   category: string
   unitKey: string
+  actorId: string | null
+  reviewerId: string | null
   actorRole: EditorRole
   handle: string | null
   reviewerRole: EditorRole | null
@@ -202,6 +206,9 @@ export interface EditorSourceChangeEntry {
   kind: 'lang' | 'str'
   category: string
   unitKey: string
+  actorId: string | null
+  actorRole: EditorRole
+  handle: string | null
   changeType: EditorSourceChangeType
   beforeCnS: string | null
   beforeEn: string | null

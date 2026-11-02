@@ -2,7 +2,7 @@
 import type { EditorSourceRevision, EditorSourceChangeEntry } from '#shared/types/editor'
 import { formatEditorDate } from '~/utils/editor-helpers'
 import { getEditorItemLocation } from '~/utils/editor-links'
-import { BOT_HANDLE, getSourceBorderClass, getSourceDiffValues, getSourceActionIcon, getSourceTextClass, sourceChangeLabels } from '~/composables/change-log-display'
+import { getSourceBorderClass, getSourceDiffValues, getSourceActionIcon, getSourceTextClass, sourceChangeLabels } from '~/composables/change-log-display'
 
 defineProps<{
   selectedRevision: EditorSourceRevision | null
@@ -146,8 +146,9 @@ const emit = defineEmits<{ retry: [] }>()
               class="size-3.5 text-muted"
             />
             <AppUserIdentity
-              :handle="BOT_HANDLE"
-              role="bot"
+              :user-id="entry.actorId"
+              :handle="entry.handle"
+              :role="entry.actorRole"
               text-class="text-xs"
               icon-class="size-3.5"
               stop-propagation

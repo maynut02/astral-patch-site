@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isDeletedUserId } from '#shared/types/user'
 import { getUserRoleMeta, type UserRole } from '~/utils/user-role'
 import {
   formatHandle,
@@ -7,6 +8,7 @@ import {
 } from '~/utils/profile'
 
 const props = withDefaults(defineProps<{
+  userId?: unknown
   handle?: unknown
   role?: UserRole | null
   fallback?: string
@@ -25,10 +27,11 @@ const props = withDefaults(defineProps<{
   stopPropagation: false
 })
 
-const normalizedHandle = computed(() => normalizeHandle(props.handle).replace(/^@+/, ''))
-const displayHandle = computed(() => formatHandle(normalizedHandle.value, props.fallback))
+const isDeleted = computed(() => isDeletedUserId(props.userId))
+const normalizedHandle = computed(() => isDeleted.value ? '' : normalizeHandle(props.handle).replace(/^@+/, ''))
+const displayHandle = computed(() => isDeleted.value ? '탈퇴한 사용자' : formatHandle(normalizedHandle.value, props.fallback))
 const profilePath = computed(() => props.to || getPublicProfilePath(normalizedHandle.value))
-const roleMeta = computed(() => getUserRoleMeta(props.role))
+const roleMeta = computed(() => isDeleted.value ? null : getUserRoleMeta(props.role))
 const hasRoleIcon = computed(() => roleMeta.value !== null)
 
 function handleClick(event: MouseEvent) {

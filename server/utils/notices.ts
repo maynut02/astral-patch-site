@@ -22,6 +22,7 @@ function noticeSelect(database: DatabaseClient) {
       n.id,
       n.title,
       n.body,
+      CASE WHEN n.created_by LIKE 'deleted:%' THEN n.created_by END AS "authorId",
       NULLIF(BTRIM(author.handle), '') AS "authorHandle",
       author."role" AS "authorRole",
       n.created_at AS "createdAt"

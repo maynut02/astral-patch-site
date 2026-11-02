@@ -89,6 +89,7 @@ function toMod(row: ModRow): ModEntry {
     description: row.description,
     repository: row.repository,
     platforms: row.platforms,
+    authorId: row.authorId,
     authorHandle: row.authorHandle,
     authorRole: row.authorRole,
     isOwner: row.isOwner,
@@ -103,6 +104,7 @@ async function findMod(database: DatabaseClient, modId: string, viewerId: string
   const [row] = await database<ModRow[]>`
     SELECT
       m.id, m.name, m.summary, m.description, m.repository, m.platforms,
+      CASE WHEN m.created_by LIKE 'deleted:%' THEN m.created_by END AS "authorId",
       NULLIF(BTRIM(author.handle), '') AS "authorHandle",
       author."role" AS "authorRole",
       COALESCE(m.created_by = viewer.google_sub, false) AS "isOwner",
@@ -147,6 +149,7 @@ export async function getMods(viewerId: string | null = null): Promise<ModListRe
   const rows = await database<ModRow[]>`
     SELECT
       m.id, m.name, m.summary, m.description, m.repository, m.platforms,
+      CASE WHEN m.created_by LIKE 'deleted:%' THEN m.created_by END AS "authorId",
       NULLIF(BTRIM(author.handle), '') AS "authorHandle",
       author."role" AS "authorRole",
       COALESCE(m.created_by = viewer.google_sub, false) AS "isOwner",

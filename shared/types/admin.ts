@@ -31,6 +31,7 @@ export interface AdminTranslationPackPublication {
   revision: string
   publishedAt: string
   publishedBy: string | null
+  publisherId: string | null
   gzipByteSize: number
   langCount: number
   strCount: number

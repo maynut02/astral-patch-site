@@ -61,8 +61,10 @@ pnpm dev               # SSH 터널을 열고 Nuxt 개발 서버 시작
 | `pnpm dev:nuxt` | Nuxt 개발 서버만 실행 |
 | `pnpm build` / `pnpm preview` | production 빌드 / 빌드 결과 실행 |
 | `pnpm check` | `db:check` → `test:unit` → `lint` → `typecheck` → `build` (PR 전 필수) |
-| `pnpm db:check` | migration 파일 번호·형식 검증 |
-| `pnpm test:unit` | 서버 없이 실행하는 테스트 전체 (보안 패치, 모드, 파티 채팅) |
+| `pnpm db:check` | migration 파일 번호·형식 및 기초 용어 생성 SQL 검증 |
+| `pnpm glossary:generate` | 검토된 기초 용어 JSON으로 migration SQL 생성 (이미 적용한 migration 수정 금지) |
+| `pnpm smoke:release` | 로컬 후보 서버의 운영 HTTP 동작 검사 |
+| `pnpm test:unit` | 서버 없이 실행하는 테스트 전체 (보안, 모드, 계정, 용어집, 번역 팩, 파티 채팅; DB 사례는 별도 테스트 DB 필요) |
 | `pnpm test:party` / `pnpm test:party:storage` | 실행 중인 서버 대상 파티 채팅 통합 테스트 |
 | `pnpm lint` / `pnpm lint:fix` | ESLint |
 | `pnpm typecheck` | `nuxt typecheck` |

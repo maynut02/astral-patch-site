@@ -201,6 +201,7 @@ watch(sessionKey, async () => {
             </NuxtLink>
             <div class="flex items-center justify-between gap-3 border-t border-default px-5 py-3">
               <AppUserIdentity
+                :user-id="mod.authorId"
                 :handle="mod.authorHandle"
                 :role="mod.authorRole"
                 text-class="text-xs text-muted"

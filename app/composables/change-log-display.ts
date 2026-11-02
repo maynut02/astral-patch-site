@@ -29,7 +29,6 @@ interface TranslationStatusMeta {
 }
 
 export const ALL_STATUS_VALUE = '__all_status__'
-export const BOT_HANDLE = 'Bot'
 
 export const tabItems = [
   { label: '번역 수정', value: 'translations' },

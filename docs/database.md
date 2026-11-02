@@ -9,7 +9,7 @@ PostgreSQL 18을 사용하며 schema의 유일한 소유자는 이 저장소의 
 | 번역 | `translation_units`, `source_versions`, `translations`, `translation_changes`, `translation_change_groups`, `translation_pack_publications`, *`translation_workbench`*, *`translation_change_group_summary`*, *`current_source_texts`* |
 | 원문·빌드 | `source_changes`, `game_revisions`, `builds`, `build_files`, `asset_locations`, *`source_revision_change_summary`* |
 | 사용자 | `app_users`, `app_user_social_links` |
-| 에디터 | `editor_comments`, `editor_dictionaries`, `editor_dictionary_entries` |
+| 에디터 | `editor_comments`, `editor_dictionaries`, `editor_dictionary_entries`, `editor_dictionary_proposals` |
 | 공지 | `notices` |
 | 패치 감시 | `patch_watch_config`, `patch_watch_routes`, `patch_watch_runs`, `patch_watch_run_routes` |
 | 파티 채팅 | `party_chat_sessions`, `party_chat_participants`, `party_chat_messages`, `party_chat_connection_events` |
@@ -18,6 +18,20 @@ PostgreSQL 18을 사용하며 schema의 유일한 소유자는 이 저장소의 
 | migration 기록 | `astral_schema_migrations` (실행기가 생성) |
 
 정확한 정의는 해당 migration 파일을 기준으로 합니다.
+
+`0019_editor_glossary.sql`은 기존 용어집에 `is_team`(기본 false), 항목에 metadata·revision을 추가합니다. 기존 행은 개인·공개 범위와 원문·번역을 유지합니다. 공개 공통 용어집의 제안 스냅샷·처리 이력은 별도 테이블에 저장하고 번역 테이블이나 팩 구조는 바꾸지 않습니다. 새 migration이 먼저 적용돼도 이전 앱은 기존 컬럼으로 계속 동작할 수 있습니다.
+
+`0020_base_glossary.sql`은 검토된 85개 기초 용어를 실제 승인 번역과 대조해 등록합니다. 기존 공통 용어·보관 항목·미처리 제안은 보존하고 개인 용어집·번역·코멘트는 수정하지 않습니다. 실행 로그에 등록·중복·근거 변경 건수를 남기며 `pnpm db:check`가 검토 JSON과 생성 SQL의 일치를 검사합니다. [운영 반영 절차](glossary-release.md)를 참고하세요.
+
+`0021_team_dictionary_ownership.sql`은 공통 용어집의 소유자를 삭제할 수 없는 예약 Bot 계정으로 통일합니다. 정규화 전에 용어집 테이블 잠금을 잡아 이전 앱의 동시 쓰기와 직렬화하고, 이후 이전 앱이 생성한 공통 용어집도 트리거로 Bot 소유로 정규화합니다. 개인 용어집은 공개 범위와 소유자를 유지합니다. 용어집 소유자 외래 키는 `RESTRICT`로 변경해 사용자 삭제가 콘텐츠 연쇄 삭제로 이어지지 않게 합니다.
+
+## 회원 탈퇴와 콘텐츠 보존
+
+탈퇴는 원래 로그인 계정과 이메일·핸들·게임 UID·초대 코드·소셜 링크를 제거합니다. 번역·원문 변경·댓글·공지·모드·용어집·제안·검토 이력·번역 팩 발행 기록은 유지하고, 작성자 참조만 탈퇴 건별 `deleted:<UUID>` 익명 계정으로 이전합니다. 이 익명 행은 외래 키 보존용이며 실제 Google 계정이나 프로필을 갖지 않습니다. 화면에는 프로필 링크 없이 **탈퇴한 사용자**로 표시합니다.
+
+개인 용어집도 내용과 기존 공개 범위를 유지한 채 익명 계정 소유로 이전합니다. 비공개 용어집은 공개로 바뀌지 않으며 기존 관리자 접근 범위만 유지됩니다. 같은 Google 계정으로 재가입해도 새 계정이 이전 비공개 콘텐츠의 소유권을 되찾지 않습니다.
+
+콘텐츠 본문은 수정하지 않으므로 사용자가 본문에 직접 쓴 개인정보를 자동으로 찾아 지우지는 않습니다. 이 처리는 운영 DB의 계정 정보에 대한 것이며, 이미 생성된 백업이나 운영 로그의 물리적 삭제를 뜻하지 않습니다.
 
 ## Migration 규칙
 
