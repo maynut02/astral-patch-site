@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { EditorPageState } from '~/utils/editor-page-state'
 import { formatEditorCount } from '~/utils/editor-helpers'
+import { useEditorGlossaryWindow } from '~/composables/editor-glossary-window'
 
 const props = defineProps<{ state: EditorPageState }>()
 const {
@@ -9,6 +10,7 @@ const {
   getDictionaryCreatorHandle, getDictionaryOwnerHandle, openCreateDictionary, openCreateDictionaryEntry,
   runDictionaryEntrySearch, selectDictionary, selectedDictionary, selectedDictionaryId
 } = props.state
+const glossaryWindow = useEditorGlossaryWindow()
 </script>
 
 <template>
@@ -53,13 +55,12 @@ const {
 
     <UButton
       v-if="selectedDictionary.isTeam"
-      :to="{ path: '/translate/glossary', query: { dictionary: selectedDictionary.id } }"
-      target="_blank"
       color="info"
       variant="soft"
       class="m-3"
+      @click="glossaryWindow.show({ dictionary: selectedDictionary.id })"
     >
-      공통 기준 조회·제안 ↗
+      공통 기준 조회·제안
     </UButton>
 
     <div class="flex shrink-0 gap-2 border-b border-default p-3">
