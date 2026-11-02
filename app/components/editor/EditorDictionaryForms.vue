@@ -3,16 +3,17 @@ import type { EditorPageState } from '~/utils/editor-page-state'
 
 const props = defineProps<{ state: EditorPageState }>()
 const {
-  createDictionary, createDictionaryEntry, dictionaryEntryForm, dictionaryEntryModalError,
-  dictionaryEntryModalOpen, dictionaryEntryModalSaving, dictionaryForm, dictionaryModalError,
-  dictionaryModalOpen, dictionaryModalSaving
+  confirmDictionaryDelete, dictionaryDeleteError, dictionaryDeleteModalOpen, dictionaryDeleteSaving,
+  dictionaryDeleteTarget, dictionaryEntryForm, dictionaryEntryModalError, dictionaryEntryModalOpen,
+  dictionaryEntryModalSaving, dictionaryForm, dictionaryModalError, dictionaryModalOpen, dictionaryModalSaving,
+  editingDictionaryEntry, editingDictionaryId, saveDictionary, saveDictionaryEntry
 } = props.state
 </script>
 
 <template>
   <UModal
     v-model:open="dictionaryModalOpen"
-    title="새 용어집"
+    :title="editingDictionaryId ? '용어집 수정' : '새 용어집'"
     :ui="{ footer: 'justify-end' }"
   >
     <template #body>
@@ -20,7 +21,7 @@ const {
         id="editor-dictionary-form"
         :state="dictionaryForm"
         class="flex flex-col gap-4"
-        @submit="createDictionary"
+        @submit="saveDictionary"
       >
         <UFormField
           name="name"
@@ -86,14 +87,14 @@ const {
         size="lg"
         :loading="dictionaryModalSaving"
       >
-        만들기
+        {{ editingDictionaryId ? '저장' : '만들기' }}
       </UButton>
     </template>
   </UModal>
 
   <UModal
     v-model:open="dictionaryEntryModalOpen"
-    title="용어 추가"
+    :title="editingDictionaryEntry ? '용어 수정' : '용어 추가'"
     :ui="{ footer: 'justify-end' }"
   >
     <template #body>
@@ -101,7 +102,7 @@ const {
         id="editor-dictionary-entry-form"
         :state="dictionaryEntryForm"
         class="flex flex-col gap-4"
-        @submit="createDictionaryEntry"
+        @submit="saveDictionaryEntry"
       >
         <UFormField
           name="sourceText"
@@ -167,7 +168,53 @@ const {
         variant="soft"
         :loading="dictionaryEntryModalSaving"
       >
-        추가
+        {{ editingDictionaryEntry ? '저장' : '추가' }}
+      </UButton>
+    </template>
+  </UModal>
+
+  <UModal
+    v-model:open="dictionaryDeleteModalOpen"
+    :title="dictionaryDeleteTarget?.kind === 'entry' ? '용어 삭제' : '용어집 삭제'"
+    :dismissible="!dictionaryDeleteSaving"
+    :close="!dictionaryDeleteSaving"
+    :ui="{ footer: 'justify-end' }"
+  >
+    <template #body>
+      <div class="flex flex-col gap-4">
+        <p class="wrap-break-word text-sm">
+          <template v-if="dictionaryDeleteTarget?.kind === 'entry'">
+            <strong>{{ dictionaryDeleteTarget.label }}</strong> 용어를 삭제할까요? 삭제한 용어는 복구할 수 없습니다.
+          </template>
+          <template v-else>
+            <strong>{{ dictionaryDeleteTarget?.label }}</strong> 용어집을 삭제할까요? 용어집에 있는 모든 용어도 함께 삭제되며 복구할 수 없습니다.
+          </template>
+        </p>
+        <UAlert
+          v-if="dictionaryDeleteError"
+          color="error"
+          variant="soft"
+          :title="dictionaryDeleteError"
+        />
+      </div>
+    </template>
+    <template #footer>
+      <UButton
+        color="neutral"
+        variant="ghost"
+        :disabled="dictionaryDeleteSaving"
+        @click="dictionaryDeleteModalOpen = false"
+      >
+        취소
+      </UButton>
+      <UButton
+        color="error"
+        variant="soft"
+        :loading="dictionaryDeleteSaving"
+        :disabled="!dictionaryDeleteTarget"
+        @click="confirmDictionaryDelete"
+      >
+        {{ dictionaryDeleteError ? '다시 시도' : '삭제' }}
       </UButton>
     </template>
   </UModal>

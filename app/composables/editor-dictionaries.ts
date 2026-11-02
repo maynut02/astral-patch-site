@@ -12,6 +12,10 @@ function createEmptyDictionaryEntries(): EditorDictionaryEntriesResponse {
   return { entries: [], total: 0, page: 1, pageSize: 50, totalPages: 1 }
 }
 
+export type EditorDictionaryDeleteTarget
+  = | { kind: 'dictionary', dictionaryId: string, label: string }
+    | { kind: 'entry', dictionaryId: string, entryId: string, label: string }
+
 export function useEditorDictionaryList() {
   const dictionaries = ref<EditorDictionary[]>([])
   const dictionariesStatus = ref<EditorDictionaryRequestStatus>('idle')
@@ -144,6 +148,13 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
   const dictionaryEntryModalSaving = ref(false)
   const dictionaryModalError = ref('')
   const dictionaryEntryModalError = ref('')
+  // null while creating; the target id while editing.
+  const editingDictionaryId = ref<string | null>(null)
+  const editingDictionaryEntry = ref<{ dictionaryId: string, entryId: string } | null>(null)
+  const dictionaryDeleteTarget = ref<EditorDictionaryDeleteTarget | null>(null)
+  const dictionaryDeleteModalOpen = ref(false)
+  const dictionaryDeleteSaving = ref(false)
+  const dictionaryDeleteError = ref('')
 
   const dictionaryForm = reactive<{
     name: string
@@ -167,6 +178,7 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
       return
     }
 
+    editingDictionaryId.value = null
     dictionaryForm.name = ''
     dictionaryForm.description = ''
     dictionaryForm.visibility = 'private'
@@ -174,7 +186,16 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
     dictionaryModalOpen.value = true
   }
 
-  async function createDictionary(): Promise<void> {
+  function openEditDictionary(dictionary: EditorDictionary): void {
+    editingDictionaryId.value = dictionary.id
+    dictionaryForm.name = dictionary.name
+    dictionaryForm.description = dictionary.description
+    dictionaryForm.visibility = dictionary.visibility
+    dictionaryModalError.value = ''
+    dictionaryModalOpen.value = true
+  }
+
+  async function saveDictionary(): Promise<void> {
     const name = dictionaryForm.name.trim()
 
     if (!name) {
@@ -182,17 +203,29 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
       return
     }
 
+    if (dictionaryModalSaving.value) {
+      return
+    }
+
+    const editingId = editingDictionaryId.value
     dictionaryModalSaving.value = true
     dictionaryModalError.value = ''
 
     try {
+      const body = { name, description: dictionaryForm.description, visibility: dictionaryForm.visibility }
+      if (editingId) {
+        const dictionary = await $fetch<EditorDictionary>(`/api/editor/dictionaries/${encodeURIComponent(editingId)}`, {
+          method: 'PATCH',
+          body
+        })
+        dictionaries.value = dictionaries.value.map(item => item.id === dictionary.id ? dictionary : item)
+        dictionaryModalOpen.value = false
+        return
+      }
+
       const dictionary = await $fetch<EditorDictionary>('/api/editor/dictionaries', {
         method: 'POST',
-        body: {
-          name,
-          description: dictionaryForm.description,
-          visibility: dictionaryForm.visibility
-        }
+        body
       })
 
       dictionaries.value = [dictionary, ...dictionaries.value]
@@ -202,13 +235,14 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
       dictionaryEntriesStatus.value = 'idle'
       dictionaryModalOpen.value = false
     } catch {
-      dictionaryModalError.value = '용어집을 만들지 못했습니다.'
+      dictionaryModalError.value = editingId ? '용어집을 수정하지 못했습니다.' : '용어집을 만들지 못했습니다.'
     } finally {
       dictionaryModalSaving.value = false
     }
   }
 
   function openCreateDictionaryEntry(): void {
+    editingDictionaryEntry.value = null
     dictionaryEntryForm.sourceText = ''
     dictionaryEntryForm.translation = ''
     dictionaryEntryForm.note = ''
@@ -216,10 +250,20 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
     dictionaryEntryModalOpen.value = true
   }
 
-  async function createDictionaryEntry(): Promise<void> {
-    const dictionaryId = selectedDictionaryId.value
+  function openEditDictionaryEntry(entry: EditorDictionaryEntry): void {
+    editingDictionaryEntry.value = { dictionaryId: entry.dictionaryId, entryId: entry.id }
+    dictionaryEntryForm.sourceText = entry.sourceText
+    dictionaryEntryForm.translation = entry.translation
+    dictionaryEntryForm.note = entry.note
+    dictionaryEntryModalError.value = ''
+    dictionaryEntryModalOpen.value = true
+  }
 
-    if (!dictionaryId) {
+  async function saveDictionaryEntry(): Promise<void> {
+    const editing = editingDictionaryEntry.value
+    const dictionaryId = editing?.dictionaryId ?? selectedDictionaryId.value
+
+    if (!dictionaryId || dictionaryEntryModalSaving.value) {
       return
     }
 
@@ -232,25 +276,72 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
     dictionaryEntryModalError.value = ''
 
     try {
-      await $fetch<EditorDictionaryEntry>(
-        `/api/editor/dictionaries/${encodeURIComponent(dictionaryId)}/entries`,
-        {
-          method: 'POST',
-          body: {
-            sourceText: dictionaryEntryForm.sourceText,
-            translation: dictionaryEntryForm.translation,
-            note: dictionaryEntryForm.note
-          }
-        }
-      )
+      const dictionaryPath = `/api/editor/dictionaries/${encodeURIComponent(dictionaryId)}/entries`
+      const body = {
+        sourceText: dictionaryEntryForm.sourceText,
+        translation: dictionaryEntryForm.translation,
+        note: dictionaryEntryForm.note
+      }
+      await (editing
+        ? $fetch<EditorDictionaryEntry>(`${dictionaryPath}/${encodeURIComponent(editing.entryId)}`, { method: 'PATCH', body })
+        : $fetch<EditorDictionaryEntry>(dictionaryPath, { method: 'POST', body }))
 
       dictionaryEntryModalOpen.value = false
       await loadDictionaryEntries()
       await loadDictionaries()
     } catch {
-      dictionaryEntryModalError.value = '용어집 항목을 추가하지 못했습니다.'
+      dictionaryEntryModalError.value = editing ? '용어집 항목을 수정하지 못했습니다.' : '용어집 항목을 추가하지 못했습니다.'
     } finally {
       dictionaryEntryModalSaving.value = false
+    }
+  }
+
+  function openDeleteDictionaryTarget(target: EditorDictionaryDeleteTarget): void {
+    dictionaryDeleteTarget.value = target
+    dictionaryDeleteError.value = ''
+    dictionaryDeleteModalOpen.value = true
+  }
+
+  function openDeleteDictionary(dictionary: EditorDictionary): void {
+    openDeleteDictionaryTarget({ kind: 'dictionary', dictionaryId: dictionary.id, label: dictionary.name })
+  }
+
+  function openDeleteDictionaryEntry(entry: EditorDictionaryEntry): void {
+    openDeleteDictionaryTarget({ kind: 'entry', dictionaryId: entry.dictionaryId, entryId: entry.id, label: entry.sourceText })
+  }
+
+  async function confirmDictionaryDelete(): Promise<void> {
+    const target = dictionaryDeleteTarget.value
+
+    if (!target || dictionaryDeleteSaving.value) {
+      return
+    }
+
+    dictionaryDeleteSaving.value = true
+    dictionaryDeleteError.value = ''
+
+    try {
+      const dictionaryPath = `/api/editor/dictionaries/${encodeURIComponent(target.dictionaryId)}`
+      if (target.kind === 'entry') {
+        await $fetch(`${dictionaryPath}/entries/${encodeURIComponent(target.entryId)}`, { method: 'DELETE' })
+        dictionaryDeleteModalOpen.value = false
+        await loadDictionaryEntries()
+        await loadDictionaries()
+        return
+      }
+
+      await $fetch(dictionaryPath, { method: 'DELETE' })
+      dictionaries.value = dictionaries.value.filter(dictionary => dictionary.id !== target.dictionaryId)
+      if (selectedDictionaryId.value === target.dictionaryId) {
+        selectedDictionaryId.value = null
+        dictionaryEntries.value = createEmptyDictionaryEntries()
+        dictionaryEntriesStatus.value = 'idle'
+      }
+      dictionaryDeleteModalOpen.value = false
+    } catch {
+      dictionaryDeleteError.value = target.kind === 'entry' ? '용어를 삭제하지 못했습니다.' : '용어집을 삭제하지 못했습니다.'
+    } finally {
+      dictionaryDeleteSaving.value = false
     }
   }
 
@@ -263,9 +354,20 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
     dictionaryEntryModalError,
     dictionaryForm,
     dictionaryEntryForm,
+    editingDictionaryId,
+    editingDictionaryEntry,
+    dictionaryDeleteTarget,
+    dictionaryDeleteModalOpen,
+    dictionaryDeleteSaving,
+    dictionaryDeleteError,
     openCreateDictionary,
-    createDictionary,
+    openEditDictionary,
+    saveDictionary,
     openCreateDictionaryEntry,
-    createDictionaryEntry
+    openEditDictionaryEntry,
+    saveDictionaryEntry,
+    openDeleteDictionary,
+    openDeleteDictionaryEntry,
+    confirmDictionaryDelete
   }
 }

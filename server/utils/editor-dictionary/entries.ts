@@ -4,7 +4,7 @@ import type { EditorDictionaryEntriesResponse, EditorDictionaryEntry, GlossaryMe
 import { emptyGlossaryMetadata } from '../../../shared/utils/glossary'
 import type { UserRole } from '#shared/types/user'
 import { getDatabase, type DatabaseClient } from '../database'
-import { requireDictionary, type EditorDictionaryViewer } from '../editor-dictionary'
+import { requireDictionary, requirePersonalDictionary, type EditorDictionaryViewer } from '../editor-dictionary'
 import { containsLikePattern, getFirstQueryValue, parseOptionalText, parsePage as parseValidatedPage, parseRequiredText } from '../validation'
 
 export const EDITOR_DICTIONARY_PAGE_SIZE = 50
@@ -111,8 +111,7 @@ export async function createEditorDictionaryEntry(
   input: { sourceText?: unknown, translation?: unknown, note?: unknown }
 ): Promise<EditorDictionaryEntry> {
   const database = getDatabase()
-  const dictionary = await requireDictionary(database, dictionaryId, viewer, true)
-  if (dictionary.isTeam) throw createError({ statusCode: 403, statusMessage: 'Team entries must be proposed and reviewed' })
+  await requirePersonalDictionary(database, dictionaryId, viewer)
   const sourceText = parseRequiredText(input.sourceText, 'Source text', 500)
   const translation = parseRequiredText(input.translation, 'Translation', 500)
   const note = parseOptionalText(input.note, 'Note', 1000)
@@ -138,6 +137,39 @@ export async function createEditorDictionaryEntry(
   }
 
   return entry
+}
+
+export async function updateEditorDictionaryEntry(
+  viewer: EditorDictionaryViewer,
+  dictionaryId: string,
+  entryId: string,
+  input: { sourceText?: unknown, translation?: unknown, note?: unknown }
+): Promise<EditorDictionaryEntry> {
+  const database = getDatabase()
+  await requirePersonalDictionary(database, dictionaryId, viewer)
+  const sourceText = parseRequiredText(input.sourceText, 'Source text', 500)
+  const translation = parseRequiredText(input.translation, 'Translation', 500)
+  const note = parseOptionalText(input.note, 'Note', 1000)
+  const [row] = await database<DictionaryEntryRow[]>`
+    WITH saved AS (
+      UPDATE editor_dictionary_entries
+      SET source_text = ${sourceText}, translation = ${translation}, note = ${note}, updated_at = now()
+      WHERE id = ${entryId} AND dictionary_id = ${dictionaryId}
+      RETURNING *
+    )
+    SELECT ${entryFields(database)}
+    FROM saved e
+    JOIN app_users creator ON creator.google_sub = e.created_by
+  `
+  if (!row) throw createError({ statusCode: 404, statusMessage: 'Dictionary entry not found' })
+  return toEntry(row)
+}
+
+export async function deleteEditorDictionaryEntry(viewer: EditorDictionaryViewer, dictionaryId: string, entryId: string): Promise<void> {
+  const database = getDatabase()
+  await requirePersonalDictionary(database, dictionaryId, viewer)
+  const deleted = await database`DELETE FROM editor_dictionary_entries WHERE id = ${entryId} AND dictionary_id = ${dictionaryId}`
+  if (deleted.count === 0) throw createError({ statusCode: 404, statusMessage: 'Dictionary entry not found' })
 }
 
 export async function getEditorDictionaryEntry(viewer: EditorDictionaryViewer, dictionaryId: string, entryId: string): Promise<EditorDictionaryEntry> {

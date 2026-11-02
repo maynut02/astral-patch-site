@@ -44,7 +44,7 @@ flowchart TD
 | `editor-drafts` | 미저장 번역의 브라우저 저장 (키: translation unit UUID) |
 | `editor-realtime` | 실시간 이벤트 반영 |
 | `editor-preferences` | 표시 언어, diff 방식 |
-| `editor-dictionaries`, `editor-dictionary-panel` | 용어집 조회·추가, 사전 패널 |
+| `editor-dictionaries`, `editor-dictionary-panel` | 용어집 조회·추가·수정·삭제, 사전 패널 |
 | `editor-glossary-window`, `glossary-workspace` | 에디터 공통 용어집 창 열기·최소화, 전체 페이지와 공유하는 용어집 상태 (창은 URL 대신 메모리에 위치 보관) |
 | `editor-layout`, `editor-visual-viewport` | 사이드바, 모바일 키보드 대응 |
 
@@ -60,8 +60,9 @@ flowchart TD
 
 - 로그인 사용자는 용어집을 만들 수 있고 공개(`public`)·비공개(`private`)를 고릅니다. 기본은 비공개입니다.
 - 공개 용어집은 모든 사용자, 비공개 용어집은 소유자와 관리자만 봅니다.
-- 항목 추가는 소유자와 관리자만 할 수 있습니다(`canEdit`).
-- 제공 API: 용어집 목록·생성, 항목 목록(검색, 50개씩)·추가. 용어집·항목의 수정·삭제 API는 화면에서 쓰지 않아 제공하지 않습니다.
+- 개인 용어집의 항목 추가·수정·삭제와 용어집 이름·설명·공개 범위 수정, 용어집 삭제는 소유자와 관리자만 할 수 있습니다(`canEdit`). 삭제는 확인 창을 거치며, 용어집을 삭제하면 항목도 함께 삭제되고 복구할 수 없습니다.
+- 제공 API: 용어집 목록·생성(`GET`/`POST /api/editor/dictionaries`), 수정·삭제(`PATCH`/`DELETE /api/editor/dictionaries/:id`), 항목 목록(검색, 50개씩)·추가(`GET`/`POST …/:id/entries`), 항목 수정·삭제(`PATCH`/`DELETE …/:id/entries/:entryId`).
+- 공통 용어집(`is_team`)은 위 수정·삭제 API가 `403`으로 거부합니다. 공통 기준은 아래 제안·검토와 보관으로만 바꿉니다.
 - 탈퇴해도 용어집·항목·제안·검토 이력은 보존하고 작성자를 탈퇴한 사용자로 표시합니다. 비공개 용어집은 공개되지 않으며 재가입해도 소유권이 자동 복구되지 않습니다.
 
 ### 공통 번역 기준
