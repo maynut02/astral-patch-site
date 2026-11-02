@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { GlossaryWorkspace } from '~/composables/glossary-workspace'
 import { getRequestErrorMessage } from '~/utils/request-error'
+import { GLOSSARY_ACTION_NAMES as actionNames, GLOSSARY_STATUS_NAMES as statusNames } from '~/utils/glossary-labels'
 import type { GlossaryDecision, GlossaryProposal } from '#shared/types/editor-dictionary'
 
 const props = withDefaults(defineProps<{
@@ -22,8 +23,6 @@ const reasonAction = ref<GlossaryDecision>('hold')
 const reasonOpen = ref(false)
 const reasonProposal = ref<GlossaryProposal | null>(null)
 const detailProposalId = ref('')
-const statusNames = { pending: '제안 대기', held: '보류', approved: '확정', rejected: '반려', withdrawn: '철회' }
-const actionNames: Record<GlossaryDecision, string> = { approve: '확정', hold: '보류', reject: '반려', resume: '검토 재개', withdraw: '철회' }
 const reviewBlockReason = computed(() => {
   if (selectedProposal.value?.entryId && currentProposalEntry.value && selectedProposal.value.baseRevision !== currentProposalEntry.value.revision) return '현행 기준이 변경됐습니다. 최신판으로 다시 제안해 주세요.'
   if (selectedProposal.value?.metadata.semanticReview === 'unresolved') return '의미 차이를 정리한 뒤 다시 제안해 주세요.'
@@ -82,10 +81,7 @@ async function submitReason() {
       <h1 v-if="!compact" class="text-xl font-semibold">
         공통 용어집
       </h1>
-      <p v-else class="text-xs text-muted">
-        일본어 기준 · 중국어 의미 대조
-      </p>
-      <div class="flex flex-wrap gap-2">
+      <div class="ml-auto flex flex-wrap gap-2">
         <UButton
           v-if="!compact"
           to="/translate/editor"
@@ -112,9 +108,6 @@ async function submitReason() {
         </UButton>
       </div>
     </header>
-    <p v-if="!compact" class="text-xs text-muted">
-      일본어 기준 · 중국어 의미 대조
-    </p>
     <div class="flex flex-wrap items-center gap-3">
       <USelect
         v-model="dictionaryId"
@@ -138,6 +131,7 @@ async function submitReason() {
       :items="[{ label: '용어', value: 'term' }, { label: '캐릭터 문체', value: 'voice' }, { label: '제안·검토', value: 'proposals' }]"
       class="w-fit"
       color="neutral"
+      size="sm"
     />
     <div v-if="tab !== 'proposals'" class="flex flex-wrap items-center gap-2">
       <UInput
@@ -225,21 +219,24 @@ async function submitReason() {
           </UButton><UButton
             size="xs"
             color="neutral"
-            variant="ghost"
+            :variant="detail === 'overview' ? 'soft' : 'ghost'"
+            :aria-pressed="detail === 'overview'"
             @click="showDetail('overview')"
           >
             개요
           </UButton><UButton
             size="xs"
             color="neutral"
-            variant="ghost"
+            :variant="detail === 'usage' ? 'soft' : 'ghost'"
+            :aria-pressed="detail === 'usage'"
             @click="showDetail('usage')"
           >
             사용처
           </UButton><UButton
             size="xs"
             color="neutral"
-            variant="ghost"
+            :variant="detail === 'history' ? 'soft' : 'ghost'"
+            :aria-pressed="detail === 'history'"
             @click="showHistory"
           >
             결정 이력
@@ -249,36 +246,9 @@ async function submitReason() {
           v-if="detail === 'overview'"
           :entry="selection"
           @propose="propose(selection)"
-          @usage="showDetail('usage')"
-          @history="showHistory"
         />
         <GlossaryUsages v-else-if="detail === 'usage'" :entry="selection" />
-        <div v-else class="flex flex-col gap-4 p-4 text-sm">
-          <p class="text-xs text-muted">
-            최근 50건 · 전체 기록은 제안·검토에서 확인
-          </p>
-          <article v-for="proposal in history" :key="proposal.id" class="border-b border-default pb-3">
-            <p>{{ statusNames[proposal.status] }} · {{ new Date(proposal.createdAt).toLocaleString('ko-KR') }}</p>
-            <p class="mt-1 text-xs text-muted">
-              <AppUserIdentity
-                :user-id="proposal.createdBy"
-                :handle="proposal.creatorHandle"
-                fallback="참여자"
-                text-class="text-xs text-muted"
-              /> 제안
-            </p>
-            <GlossaryEntryDetails
-              :entry="{ translation: proposal.translation, note: proposal.note, metadata: proposal.metadata, revision: proposal.baseRevision + 1 }"
-              hide-actions
-              :proposed="proposal.status !== 'approved'"
-            />
-            <p v-for="(event, index) in proposal.history" :key="index" class="mt-2 text-xs text-muted">
-              {{ actionNames[event.action] }}<span v-if="event.reason"> · {{ event.reason }}</span> · <AppUserIdentity :user-id="event.actor" fallback="참여자" text-class="text-xs text-muted" /> · {{ new Date(event.at).toLocaleString('ko-KR') }}
-            </p>
-          </article><p v-if="!history.length" class="text-muted">
-            처리 이력이 없습니다.
-          </p>
-        </div>
+        <GlossaryHistory v-else :proposals="history" />
       </aside>
     </div>
     <div v-else class="grid items-start gap-5 @4xl:grid-cols-2">
