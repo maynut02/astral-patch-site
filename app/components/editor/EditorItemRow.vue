@@ -13,6 +13,19 @@ const item = computed(() => props.item)
 const status = computed(() => getItemStatus(item.value))
 const statusMeta = computed(() => EDITOR_STATUS_META[status.value])
 const syntaxWarning = computed(() => getTranslationSyntaxWarning(item.value))
+// Shown only for slow lookups so fast selections don't flash a spinner.
+const glossaryPending = computed(() => selectedItemId.value === item.value.id && glossaryLoading.value)
+const showGlossarySpinner = ref(false)
+let glossarySpinnerTimer: ReturnType<typeof setTimeout> | undefined
+watch(glossaryPending, (pending) => {
+  clearTimeout(glossarySpinnerTimer)
+  showGlossarySpinner.value = false
+  if (!pending) return
+  glossarySpinnerTimer = setTimeout(() => {
+    showGlossarySpinner.value = true
+  }, 300)
+}, { immediate: true })
+onScopeDispose(() => clearTimeout(glossarySpinnerTimer))
 </script>
 
 <template>
@@ -52,13 +65,29 @@ const syntaxWarning = computed(() => getTranslationSyntaxWarning(item.value))
           </p>
         </div>
 
-        <span class="break-all text-xs font-medium text-dimmed">
-          {{ item.category }}_{{ item.unitKey }}
-        </span>
-        <p v-if="selectedItemId === item.id && glossaryLoading" class="text-xs text-dimmed">
-          용어집 확인 중
-        </p>
-        <p v-else-if="selectedItemId === item.id && glossaryFailed" class="text-xs text-muted">
+        <!-- The spinner slot is always reserved so loading never changes the row height or key wrapping. -->
+        <div class="flex min-w-0 items-start gap-2">
+          <span class="min-w-0 flex-1 break-all text-xs font-medium text-dimmed">
+            {{ item.category }}_{{ item.unitKey }}
+          </span>
+          <span class="flex size-4 shrink-0 items-center justify-center">
+            <UTooltip
+              v-if="showGlossarySpinner"
+              text="용어 확인 중"
+              :delay-duration="0"
+            >
+              <span role="status">
+                <UIcon
+                  name="i-tabler-loader-2"
+                  class="size-3.5 animate-spin text-dimmed"
+                  aria-hidden="true"
+                />
+                <span class="sr-only">용어 확인 중</span>
+              </span>
+            </UTooltip>
+          </span>
+        </div>
+        <p v-if="selectedItemId === item.id && glossaryFailed" class="text-xs text-muted">
           용어 기준을 불러오지 못했습니다.
           <button type="button" class="text-info underline underline-offset-2" @click.stop="refreshGlossary">
             다시 불러오기
