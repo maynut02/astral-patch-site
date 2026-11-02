@@ -35,7 +35,7 @@ function showUsages(entry: EditorDictionaryEntry) {
     <template #content>
       <section class="max-h-96 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto p-4 text-sm" @click.stop>
         <h2 class="font-medium">
-          {{ text }} · 공통 용어
+          {{ text }}
         </h2>
         <p v-if="entries.length > 1" class="mt-2 text-xs text-muted">
           문맥에 맞는 기준을 선택하세요.
@@ -85,9 +85,5 @@ function showUsages(entry: EditorDictionaryEntry) {
       </section>
     </template>
   </UPopover>
-  <UModal v-model:open="usageOpen" title="용어 사용처" description="표현별 사용처 검색">
-    <template #body>
-      <GlossaryUsages v-if="usageEntry" :entry="usageEntry" />
-    </template>
-  </UModal>
+  <GlossaryEntryModal v-model:open="usageOpen" :entry="usageEntry" view="usage" />
 </template>

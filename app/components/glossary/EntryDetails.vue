@@ -3,7 +3,9 @@ import type { EditorDictionaryEntry } from '#shared/types/editor-dictionary'
 import { getEditorKeyQuery } from '~/utils/editor-links'
 
 defineProps<{ entry: Pick<EditorDictionaryEntry, 'translation' | 'revision' | 'metadata' | 'note'>, hideActions?: boolean, proposed?: boolean }>()
-defineEmits<{ propose: [], usage: [], history: [] }>()
+defineEmits<{ propose: [] }>()
+// `actions`: extra buttons for hosts without their own usage/history navigation (the editor sidebar).
+defineSlots<{ actions?: () => unknown }>()
 const { showToast } = useAppToast()
 async function copy(text: string) {
   try {
@@ -98,21 +100,9 @@ async function copy(text: string) {
         @click="$emit('propose')"
       >
         변경 제안
-      </UButton><UButton
-        size="xs"
-        color="neutral"
-        variant="soft"
-        @click="$emit('usage')"
-      >
-        사용처
-      </UButton><UButton
-        size="xs"
-        color="neutral"
-        variant="soft"
-        @click="$emit('history')"
-      >
-        결정 이력
-      </UButton><UButton
+      </UButton>
+      <slot name="actions" />
+      <UButton
         size="xs"
         color="neutral"
         variant="ghost"

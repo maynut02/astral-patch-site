@@ -76,7 +76,6 @@ async function submit() {
     :dismissible="!saving"
     :close="!saving"
     :title="entry ? '기준 변경 제안' : kind === 'voice' ? '캐릭터 문체 제안' : '새 용어 제안'"
-    description="검토 후 용어집에 반영됩니다."
   >
     <template #body>
       <form id="glossary-entry-form" class="flex flex-col gap-4" @submit.prevent="submit">
