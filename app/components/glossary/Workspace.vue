@@ -10,6 +10,8 @@ const props = withDefaults(defineProps<{
   /** Focus refresh only runs while the workspace is visible. */
   active?: boolean
 }>(), { compact: false, active: true })
+// `changed`: a confirmed standard changed, so hosts showing related terms can refresh.
+const emit = defineEmits<{ changed: [] }>()
 const { loggedIn, user, dictionaries, dictionaryId, tab, search, page, statusFilter, archived, entries, proposals, loading, error, selection, selectedProposal, currentProposalEntry, comparisonError, detail, history, formOpen, editingEntry, isReviewer, deciding, locationQuery, init, load, runSearch, selectEntry, closeEntry, propose, showDetail, showHistory, decide, createDictionary } = props.workspace
 const createOpen = ref(false)
 const dictionaryName = ref('공통 번역 기준')
@@ -37,6 +39,10 @@ function refreshOnFocus() {
 }
 onMounted(() => window.addEventListener('focus', refreshOnFocus))
 onUnmounted(() => window.removeEventListener('focus', refreshOnFocus))
+// A list switch auto-selects its first proposal; the compact view must return to the list instead.
+watch([tab, dictionaryId, statusFilter], () => {
+  detailProposalId.value = ''
+})
 async function create() {
   if (creating.value) return
   creating.value = true
@@ -53,6 +59,9 @@ async function create() {
 function selectProposal(proposal: GlossaryProposal) {
   selectedProposal.value = proposal
   detailProposalId.value = proposal.id
+}
+async function approve() {
+  if (await decide('approve', '')) emit('changed')
 }
 function askDecision(action: 'hold' | 'reject') {
   if (!selectedProposal.value) return
@@ -337,7 +346,7 @@ async function submitReason() {
             color="info"
             :loading="deciding"
             :disabled="Boolean(reviewBlockReason) || (Boolean(selectedProposal.entryId) && (!currentProposalEntry || comparisonError))"
-            @click="decide('approve', '')"
+            @click="approve"
           >
             확정
           </UButton><UButton

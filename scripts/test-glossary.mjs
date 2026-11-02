@@ -338,6 +338,26 @@ test('glossary client: an embedded workspace opens linked history without touchi
   assert.equal(workspace.locationQuery.value.dictionary, 'team')
 })
 
+test('glossary client: opening a target while the dictionary list fails drops old rows and an interrupted spinner', async (context) => {
+  let calls = 0
+  const h = clientHarness(context, () => calls++ === 0
+    ? Promise.resolve({ entries: [{ id: 'old', dictionaryId: 'team', metadata: metadata() }], total: 1, page: 1, totalPages: 1 })
+    : new Promise(() => {}), { dictionary: 'team', tab: 'term' })
+  h.list.dictionaries.value = [{ id: 'team', isTeam: true }]
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace', { syncRoute: false })
+  await workspace.load()
+  h.list.dictionariesStatus.value = 'error'
+  h.list.dictionariesError.value = '용어집 목록을 불러오지 못했습니다.'
+  await workspace.open({ dictionary: 'team', tab: 'voice', entry: 'target' })
+  assert.equal(workspace.entries.value, null)
+  assert.equal(workspace.selection.value, null)
+  void workspace.load()
+  assert.equal(workspace.loading.value, true)
+  await workspace.open({ dictionary: 'team', tab: 'term', entry: 'target' })
+  assert.equal(workspace.loading.value, false)
+  assert.equal(workspace.error.value, '용어집 목록을 불러오지 못했습니다.')
+})
+
 test('glossary client: refreshing the same source retains references, while a new version clears them and ignores old replies', async (context) => {
   const replies = []
   const h = clientHarness(context, () => new Promise(resolve => replies.push(resolve)))

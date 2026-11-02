@@ -2,6 +2,7 @@
 import { useEditorGlossaryWindow } from '~/composables/editor-glossary-window'
 import { useGlossaryWorkspace } from '~/composables/glossary-workspace'
 
+const emit = defineEmits<{ changed: [] }>()
 const { open, minimized, request } = useEditorGlossaryWindow()
 const workspace = useGlossaryWorkspace({ syncRoute: false })
 const windowElement = ref<HTMLElement | null>(null)
@@ -33,7 +34,9 @@ function clampPosition(x: number, y: number) {
   }
 }
 function keepInViewport() {
-  if (position.value) position.value = clampPosition(position.value.x, position.value.y)
+  // A hidden or full-screen window has no floating size to clamp against.
+  if (!position.value || !floating.value || !open.value || !windowElement.value?.offsetWidth) return
+  position.value = clampPosition(position.value.x, position.value.y)
 }
 function startDrag(event: PointerEvent) {
   if (!floating.value || event.button !== 0 || !windowElement.value) return
@@ -54,7 +57,7 @@ function endDrag(event: PointerEvent) {
 function syncFloating() {
   floating.value = desktopQuery?.matches ?? false
 }
-watch(minimized, () => nextTick(keepInViewport))
+watch([open, minimized, floating], () => nextTick(keepInViewport))
 onMounted(() => {
   desktopQuery = window.matchMedia('(min-width: 64rem)')
   desktopQuery.addEventListener('change', syncFloating)
@@ -87,6 +90,7 @@ onBeforeUnmount(() => {
       @pointermove="moveDrag"
       @pointerup="endDrag"
       @pointercancel="endDrag"
+      @lostpointercapture="endDrag"
     >
       <UIcon name="i-tabler-books" class="size-4 shrink-0 text-muted" />
       <h2 id="editor-glossary-window-title" class="mr-auto min-w-0 truncate text-sm font-medium">
@@ -126,10 +130,15 @@ onBeforeUnmount(() => {
       v-show="!minimized"
       class="editor-scrollbar overflow-auto overscroll-contain p-4"
       :class="floating
-        ? 'h-[min(44rem,calc(100dvh-7rem))] max-h-[calc(100dvh-1rem)] min-h-60 w-xl max-w-[calc(100vw-1rem)] min-w-80 resize'
+        ? 'h-[min(44rem,calc(100dvh-9rem))] max-h-[calc(100dvh-1rem)] min-h-60 w-xl max-w-[calc(100vw-1rem)] min-w-80 resize'
         : 'min-h-0 h-auto! w-full! flex-1'"
     >
-      <GlossaryWorkspace :workspace="workspace" compact :active="open && !minimized" />
+      <GlossaryWorkspace
+        :workspace="workspace"
+        compact
+        :active="open && !minimized"
+        @changed="emit('changed')"
+      />
     </div>
   </section>
 </template>

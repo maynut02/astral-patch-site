@@ -297,7 +297,7 @@ const { handleHistoryChanged, openCommentItem } = actions
       </aside>
     </div>
 
-    <EditorGlossaryWindow v-if="glossaryWindow.request.value" />
+    <EditorGlossaryWindow v-if="glossaryWindow.request.value" @changed="glossary.refreshGlossary" />
   </div>
 </template>
 

@@ -151,6 +151,7 @@ export function useGlossaryWorkspace(options: { syncRoute?: boolean } = {}) {
     if (id !== initializationRequest) return
     if (list.dictionariesStatus.value === 'error') {
       error.value = list.dictionariesError.value
+      loading.value = false
       return
     }
     if (!dictionaries.value.some(dictionary => dictionary.id === dictionaryId.value)) {
@@ -266,6 +267,10 @@ export function useGlossaryWorkspace(options: { syncRoute?: boolean } = {}) {
     }
     localQuery.value = query
     applyQuery(query)
+    // applyQuery invalidated any in-flight load; drop its rows so they never show under the new target.
+    entries.value = null
+    proposals.value = null
+    clearSelection()
     await init()
   }
   watch([dictionaryId, tab, statusFilter, archived], () => {
