@@ -84,7 +84,7 @@ const dictionaryMenuItems = computed(() => {
       class="m-3"
       @click="glossaryWindow.show({ dictionary: selectedDictionary.id })"
     >
-      공통 기준 조회·제안
+      공통 용어집 조회·제안
     </UButton>
 
     <div class="flex shrink-0 gap-2 border-b border-default p-3">

@@ -17,8 +17,9 @@ const voiceId = ref('general')
 const formOpen = ref(false)
 const selectedEntry = ref<EditorDictionaryEntry | null>(null)
 const expanded = ref<string | null>(null)
-const usageOpen = ref(false)
-const usageEntry = ref<EditorDictionaryEntry | null>(null)
+const infoOpen = ref(false)
+const infoView = ref<'usage' | 'history'>('usage')
+const infoEntry = ref<EditorDictionaryEntry | null>(null)
 const voice = computed(() => voices.value.find(entry => entry.id === voiceId.value))
 function propose(entry: EditorDictionaryEntry | null = null) {
   if (!loggedIn.value) {
@@ -31,9 +32,14 @@ function propose(entry: EditorDictionaryEntry | null = null) {
   selectedEntry.value = entry
   formOpen.value = true
 }
-function showUsage(entry: EditorDictionaryEntry) {
-  usageEntry.value = entry
-  usageOpen.value = true
+function showInfo(entry: EditorDictionaryEntry, view: 'usage' | 'history') {
+  if (view === 'history' && !loggedIn.value) {
+    showLoginRequiredToast('glossary-history-login')
+    return
+  }
+  infoEntry.value = entry
+  infoView.value = view
+  infoOpen.value = true
 }
 watch(() => props.item?.id, () => {
   voiceId.value = 'general'
@@ -69,7 +75,7 @@ onMounted(() => {
       v-else-if="failed"
       color="error"
       variant="soft"
-      title="공통 기준을 불러오지 못했습니다."
+      title="공통 용어집을 불러오지 못했습니다."
     >
       <template #actions>
         <UButton size="xs" color="neutral" @click="load">
@@ -100,7 +106,7 @@ onMounted(() => {
               size="xs"
               color="neutral"
               variant="soft"
-              @click="showUsage(entry)"
+              @click="showInfo(entry, 'usage')"
             >
               사용처
             </UButton>
@@ -114,12 +120,25 @@ onMounted(() => {
             @click="expanded = null"
           >
             접기
-          </UButton><GlossaryEntryDetails
-            :entry="entry"
-            @propose="propose(entry)"
-            @usage="showUsage(entry)"
-            @history="glossaryWindow.show({ dictionary: entry.dictionaryId, entry: entry.id, tab: entry.metadata.kind, detail: 'history' })"
-          />
+          </UButton><GlossaryEntryDetails :entry="entry" @propose="propose(entry)">
+            <template #actions>
+              <UButton
+                size="xs"
+                color="neutral"
+                variant="soft"
+                @click="showInfo(entry, 'usage')"
+              >
+                사용처
+              </UButton><UButton
+                size="xs"
+                color="neutral"
+                variant="soft"
+                @click="showInfo(entry, 'history')"
+              >
+                결정 이력
+              </UButton>
+            </template>
+          </GlossaryEntryDetails>
         </template>
       </article>
       <p v-if="item && !entries.length" class="py-4 text-center text-sm text-muted">
@@ -133,13 +152,25 @@ onMounted(() => {
           :items="[{ label: '일반 가이드', value: 'general' }, ...voices.map(entry => ({ label: entry.translation, value: entry.id }))]"
           aria-label="참고할 캐릭터 문체"
           class="my-3 w-full"
-        /><GlossaryEntryDetails
-          v-if="voice"
-          :entry="voice"
-          @propose="propose(voice)"
-          @usage="showUsage(voice)"
-          @history="glossaryWindow.show({ dictionary: voice.dictionaryId, entry: voice.id, tab: 'voice', detail: 'history' })"
-        />
+        /><GlossaryEntryDetails v-if="voice" :entry="voice" @propose="propose(voice)">
+          <template #actions>
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="soft"
+              @click="showInfo(voice, 'usage')"
+            >
+              사용처
+            </UButton><UButton
+              size="xs"
+              color="neutral"
+              variant="soft"
+              @click="showInfo(voice, 'history')"
+            >
+              결정 이력
+            </UButton>
+          </template>
+        </GlossaryEntryDetails>
       </section>
     </template>
     <div class="mt-5 flex flex-col gap-2 border-t border-default pt-3">
@@ -166,10 +197,6 @@ onMounted(() => {
       :source="item"
       @submitted="load"
     />
-    <UModal v-model:open="usageOpen" title="용어 사용처" description="표현별 사용처 검색">
-      <template #body>
-        <GlossaryUsages v-if="usageEntry" :entry="usageEntry" />
-      </template>
-    </UModal>
+    <GlossaryEntryModal v-model:open="infoOpen" :entry="infoEntry" :view="infoView" />
   </div>
 </template>

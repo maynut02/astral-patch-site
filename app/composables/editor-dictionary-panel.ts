@@ -57,7 +57,7 @@ export function useEditorDictionaryPanel(query: ReturnType<typeof useEditorQuery
   const dictionaryPanelTabs = [
     { label: '검색', value: 'search' },
     { label: '용어집', value: 'collections' },
-    { label: '공통 기준', value: 'glossary' }
+    { label: '공통 용어집', value: 'glossary' }
   ] satisfies { label: string, value: EditorDictionaryPanelView }[]
 
   const dictionaryNamespace = computed(() => dictionarySelection.value?.type === 'Buff' ? 'STRBuff' : 'STRCard')
