@@ -23,12 +23,14 @@ export function parseGlossaryMetadata(value: unknown): GlossaryMetadata {
     if (!Array.isArray(values) || values.length > 10) throw createError({ statusCode: 400, statusMessage: 'Invalid glossary variants' })
     result[field] = [...new Set(values.map(text => parseRequiredText(text, field, 200)))]
   }
-  if (input.scope !== undefined && !['project', 'file', 'entry', 'character'].includes(String(input.scope))) throw createError({ statusCode: 400, statusMessage: 'Invalid glossary scope' })
-  result.scope = (input.scope ?? 'project') as GlossaryMetadata['scope']
+  const scope = input.scope === undefined ? 'project' : input.scope
+  if (scope !== 'project' && scope !== 'file' && scope !== 'entry' && scope !== 'character') throw createError({ statusCode: 400, statusMessage: 'Invalid glossary scope' })
+  result.scope = scope
   if (result.scope !== 'project' && !result.target) throw createError({ statusCode: 400, statusMessage: 'Scope target is required' })
   if (result.scope === 'project') result.target = ''
-  if (input.semanticReview !== undefined && !['unrecorded', 'recorded', 'unresolved'].includes(String(input.semanticReview))) throw createError({ statusCode: 400, statusMessage: 'Invalid semantic review' })
-  result.semanticReview = (input.semanticReview ?? 'unrecorded') as GlossaryMetadata['semanticReview']
+  const semanticReview = input.semanticReview === undefined ? 'unrecorded' : input.semanticReview
+  if (semanticReview !== 'unrecorded' && semanticReview !== 'recorded' && semanticReview !== 'unresolved') throw createError({ statusCode: 400, statusMessage: 'Invalid semantic review' })
+  result.semanticReview = semanticReview
   if (result.semanticReview === 'recorded' && !result.semanticNote) throw createError({ statusCode: 400, statusMessage: 'Semantic review note is required' })
   if (result.kind === 'term' && !result.japanese && !result.chineseSimplified && !result.chineseTraditional) throw createError({ statusCode: 400, statusMessage: 'Japanese or Chinese term is required' })
   if (result.kind === 'voice' && (!result.speechStyle || !result.exampleTranslation)) throw createError({ statusCode: 400, statusMessage: 'Voice style and representative line are required' })
@@ -115,9 +117,24 @@ export async function decideGlossaryProposal(viewer: EditorDictionaryViewer, dic
   if (action !== 'withdraw' && !isReviewerRole(viewer.role)) throw createError({ statusCode: 403, statusMessage: 'Reviewer permission is required' })
   const result = await sql.begin(async (transaction) => {
     const tx = transaction as unknown as DatabaseClient
+    const [candidate] = await tx<{ createdBy: string }[]>`
+      SELECT created_by AS "createdBy" FROM editor_dictionary_proposals
+      WHERE id = ${proposalId} AND dictionary_id = ${dictionaryId}
+    `
+    if (!candidate) throw createError({ statusCode: 404, statusMessage: 'Proposal not found' })
+    // Lock identities before the proposal: approval also references its creator.
+    const actors = await tx<{ id: string, role: string }[]>`
+      SELECT google_sub AS id, "role" FROM app_users
+      WHERE google_sub IN (${viewer.id}, ${candidate.createdBy})
+      ORDER BY google_sub FOR KEY SHARE
+    `
+    const actor = actors.find(account => account.id === viewer.id)
+    if (!actor) throw createError({ statusCode: 401, statusMessage: 'Authentication is required' })
+    if (action !== 'withdraw' && !isReviewerRole(actor.role)) throw createError({ statusCode: 403, statusMessage: 'Reviewer permission is required' })
     const [proposal] = await tx<ProposalRow[]>`SELECT ${proposalFields(tx)} FROM editor_dictionary_proposals p
       JOIN app_users creator ON creator.google_sub = p.created_by WHERE p.id = ${proposalId} AND p.dictionary_id = ${dictionaryId} FOR UPDATE OF p`
     if (!proposal) throw createError({ statusCode: 404, statusMessage: 'Proposal not found' })
+    if (proposal.createdBy !== candidate.createdBy) throw createError({ statusCode: 409, statusMessage: 'Proposal author changed; refresh and retry' })
     if (action === 'withdraw' && proposal.createdBy !== viewer.id) throw createError({ statusCode: 403, statusMessage: 'Only the proposal author may withdraw' })
     const status = glossaryNextStatus(proposal.status, action)
     if (!status) throw createError({ statusCode: 409, statusMessage: 'Proposal state changed' })

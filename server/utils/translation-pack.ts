@@ -30,6 +30,7 @@ interface PublicationRow {
   revision: string
   publishedAt: Date
   publishedBy: string | null
+  publisherId: string | null
   gzipByteSize: number
   langCount: number
   strCount: number
@@ -71,6 +72,7 @@ async function getLatestPublication(database: DatabaseClient): Promise<Publicati
       p.revision,
       p.published_at AS "publishedAt",
       u.handle AS "publishedBy",
+      CASE WHEN p.published_by LIKE 'deleted:%' THEN p.published_by END AS "publisherId",
       p.gzip_byte_size AS "gzipByteSize",
       p.lang_count AS "langCount",
       p.str_count AS "strCount"
@@ -277,6 +279,7 @@ export async function publishTranslationPack(publisher: CurrentSessionUser): Pro
       revision: game.revision,
       publishedAt: publishedAt.toISOString(),
       publishedBy: publisher.handle,
+      publisherId: null,
       gzipByteSize: gzip.byteLength,
       langCount,
       strCount

@@ -8,6 +8,7 @@ export default defineEventHandler(async (): Promise<ContributorListResponse> => 
 
   const contributors = await database<ContributorListItem[]>`
     SELECT
+      COALESCE(users.handle, users.google_sub) AS id,
       users.handle,
       users."role" AS role,
       ${contributorCounts(database)}
@@ -15,7 +16,7 @@ export default defineEventHandler(async (): Promise<ContributorListResponse> => 
     JOIN translation_changes changes ON changes.created_by = users.google_sub
     WHERE users.google_sub <> ${BOT_GOOGLE_SUB}
       AND users."role" <> 'bot'
-      AND users.handle IS NOT NULL
+      AND (users.handle IS NOT NULL OR users.google_sub LIKE 'deleted:%')
     GROUP BY users.google_sub
     ORDER BY
       count(changes.id) DESC,

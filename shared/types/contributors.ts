@@ -1,7 +1,8 @@
 import type { UserRole } from './user'
 
 export interface ContributorListItem {
-  handle: string
+  id: string
+  handle: string | null
   role: UserRole
   translationCount: number
   approvedTranslationCount: number

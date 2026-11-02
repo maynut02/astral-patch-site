@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { createError } from 'h3'
-import { BOT_HANDLE } from '#shared/types/user'
 import { getDatabase } from './database'
 import { getTextLength, parseUuid } from './validation'
 import { broadcastWsMessage } from './ws-hub'
@@ -302,10 +301,12 @@ export async function getEditorHistory(unitId: string): Promise<EditorHistoryRes
         concat('source:', sc.revision_id::text, ':', sc.unit_id::text) AS id,
         'source_changed'::text AS action,
         CASE WHEN source_creator."role" = 'bot' THEN 'automation'::text ELSE 'user'::text END AS "actorType",
+        CASE WHEN sc.created_by LIKE 'deleted:%' THEN sc.created_by END AS "actorId",
         source_creator."role"::text AS "actorRole",
-        COALESCE(NULLIF(BTRIM(source_creator.handle), ''), ${BOT_HANDLE}) AS handle,
+        NULLIF(BTRIM(source_creator.handle), '') AS handle,
         NULL::text AS status,
         NULL::text AS "changeKind",
+        NULL::text AS "reviewerId",
         NULL::text AS "reviewerRole",
         NULL::text AS "reviewerHandle",
         NULL AS "reviewedAt",
@@ -329,10 +330,12 @@ export async function getEditorHistory(unitId: string): Promise<EditorHistoryRes
         concat(tc.id::text, ':translation') AS id,
         'translation_changed'::text AS action,
         CASE WHEN creator."role" = 'bot' THEN 'automation'::text ELSE 'user'::text END AS "actorType",
+        CASE WHEN tc.created_by LIKE 'deleted:%' THEN tc.created_by END AS "actorId",
         creator."role"::text AS "actorRole",
         NULLIF(BTRIM(creator.handle), '') AS handle,
         tc.status::text AS status,
         tc.change_kind::text AS "changeKind",
+        CASE WHEN tc.reviewed_by LIKE 'deleted:%' THEN tc.reviewed_by END AS "reviewerId",
         reviewer."role"::text AS "reviewerRole",
         NULLIF(BTRIM(reviewer.handle), '') AS "reviewerHandle",
         tc.reviewed_at AS "reviewedAt",

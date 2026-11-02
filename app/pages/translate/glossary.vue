@@ -5,7 +5,7 @@ import type { GlossaryDecision, GlossaryProposal } from '#shared/types/editor-di
 
 useAstralPageSeo('공통 용어집')
 const workspace = useGlossaryWorkspace()
-const { loggedIn, user, dictionaries, dictionaryId, tab, search, page, statusFilter, archived, entries, proposals, loading, error, selection, selectedProposal, currentProposalEntry, comparisonError, detail, history, formOpen, editingEntry, isReviewer, deciding, init, load, runSearch, selectEntry, propose, showHistory, decide, createDictionary } = workspace
+const { loggedIn, user, dictionaries, dictionaryId, tab, search, page, statusFilter, archived, entries, proposals, loading, error, selection, selectedProposal, currentProposalEntry, comparisonError, detail, history, formOpen, editingEntry, isReviewer, deciding, init, load, runSearch, selectEntry, propose, showDetail, showHistory, decide, createDictionary } = workspace
 const createOpen = ref(false)
 const dictionaryName = ref('공통 번역 기준')
 const creating = ref(false)
@@ -187,14 +187,14 @@ async function submitReason() {
             size="xs"
             color="neutral"
             variant="ghost"
-            @click="detail = 'overview'"
+            @click="showDetail('overview')"
           >
             개요
           </UButton><UButton
             size="xs"
             color="neutral"
             variant="ghost"
-            @click="detail = 'usage'"
+            @click="showDetail('usage')"
           >
             사용처
           </UButton><UButton
@@ -210,7 +210,7 @@ async function submitReason() {
           v-if="detail === 'overview'"
           :entry="selection"
           @propose="propose(selection)"
-          @usage="detail = 'usage'"
+          @usage="showDetail('usage')"
           @history="showHistory"
         />
         <GlossaryUsages v-else-if="detail === 'usage'" :entry="selection" />
@@ -220,13 +220,21 @@ async function submitReason() {
           </p>
           <article v-for="proposal in history" :key="proposal.id" class="border-b border-default pb-3">
             <p>{{ statusNames[proposal.status] }} · {{ new Date(proposal.createdAt).toLocaleString('ko-KR') }}</p>
+            <p class="mt-1 text-xs text-muted">
+              <AppUserIdentity
+                :user-id="proposal.createdBy"
+                :handle="proposal.creatorHandle"
+                fallback="참여자"
+                text-class="text-xs text-muted"
+              /> 제안
+            </p>
             <GlossaryEntryDetails
               :entry="{ translation: proposal.translation, note: proposal.note, metadata: proposal.metadata, revision: proposal.baseRevision + 1 }"
               hide-actions
               :proposed="proposal.status !== 'approved'"
             />
             <p v-for="(event, index) in proposal.history" :key="index" class="mt-2 text-xs text-muted">
-              {{ actionNames[event.action] }}<span v-if="event.reason"> · {{ event.reason }}</span> · {{ new Date(event.at).toLocaleString('ko-KR') }}
+              {{ actionNames[event.action] }}<span v-if="event.reason"> · {{ event.reason }}</span> · <AppUserIdentity :user-id="event.actor" fallback="참여자" text-class="text-xs text-muted" /> · {{ new Date(event.at).toLocaleString('ko-KR') }}
             </p>
           </article><p v-if="!history.length" class="text-muted">
             처리 이력이 없습니다.
@@ -276,7 +284,12 @@ async function submitReason() {
         <UAlert v-if="comparisonError" color="warning" title="현행 기준을 불러오지 못했습니다." />
         <UAlert v-if="reviewBlockReason && ['pending', 'held'].includes(selectedProposal.status)" color="warning" :title="reviewBlockReason" />
         <p class="text-xs text-muted">
-          {{ selectedProposal.creatorHandle || '참여자' }} 제안
+          <AppUserIdentity
+            :user-id="selectedProposal.createdBy"
+            :handle="selectedProposal.creatorHandle"
+            fallback="참여자"
+            text-class="text-xs text-muted"
+          /> 제안
         </p>
         <div v-if="isReviewer && selectedProposal.status === 'pending'" class="flex flex-wrap gap-2">
           <UButton
@@ -319,7 +332,7 @@ async function submitReason() {
           제안 철회
         </UButton>
         <div v-for="(event, index) in selectedProposal.history" :key="index" class="border-t border-default pt-3 text-xs text-muted">
-          {{ actionNames[event.action] }}<span v-if="event.reason"> · {{ event.reason }}</span> · {{ new Date(event.at).toLocaleString('ko-KR') }}
+          {{ actionNames[event.action] }}<span v-if="event.reason"> · {{ event.reason }}</span> · <AppUserIdentity :user-id="event.actor" fallback="참여자" text-class="text-xs text-muted" /> · {{ new Date(event.at).toLocaleString('ko-KR') }}
         </div>
       </aside>
     </div>

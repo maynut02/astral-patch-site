@@ -28,12 +28,12 @@ const sortedContributors = computed<ContributorListItem[]>(() => {
     if (sortMode.value === 'approved') {
       return right.approvedTranslationCount - left.approvedTranslationCount
         || right.translationCount - left.translationCount
-        || left.handle.localeCompare(right.handle, 'ko-KR')
+        || (left.handle ?? left.id).localeCompare(right.handle ?? right.id, 'ko-KR')
     }
 
     return right.translationCount - left.translationCount
       || right.approvedTranslationCount - left.approvedTranslationCount
-      || left.handle.localeCompare(right.handle, 'ko-KR')
+      || (left.handle ?? left.id).localeCompare(right.handle ?? right.id, 'ko-KR')
   })
 })
 </script>
@@ -114,10 +114,11 @@ const sortedContributors = computed<ContributorListItem[]>(() => {
       v-else
       class="flex flex-col gap-3 pb-5"
     >
-      <NuxtLink
+      <component
+        :is="contributor.handle ? resolveComponent('NuxtLink') : 'div'"
         v-for="(contributor, index) in sortedContributors"
-        :key="contributor.handle"
-        :to="`/@${contributor.handle}`"
+        :key="contributor.id"
+        :to="contributor.handle ? `/@${contributor.handle}` : undefined"
         class="group grid min-h-18 grid-cols-[2.5rem_1fr] items-center gap-3 border border-default bg-muted p-4 transition-colors hover:bg-elevated sm:grid-cols-[2.5rem_1fr_auto]"
       >
         <span class="text-center text-sm font-semibold tabular-nums text-muted">
@@ -126,6 +127,7 @@ const sortedContributors = computed<ContributorListItem[]>(() => {
 
         <div class="flex min-w-0 items-center gap-3">
           <AppUserIdentity
+            :user-id="contributor.id"
             :handle="contributor.handle"
             :role="contributor.role"
             :link="false"
@@ -148,11 +150,12 @@ const sortedContributors = computed<ContributorListItem[]>(() => {
             </span>
           </div>
           <UIcon
+            v-if="contributor.handle"
             name="i-tabler-chevron-right"
             class="ml-auto size-5 shrink-0 text-dimmed transition-transform group-hover:translate-x-0.5 group-hover:text-default sm:ml-0"
           />
         </div>
-      </NuxtLink>
+      </component>
     </div>
   </div>
 </template>

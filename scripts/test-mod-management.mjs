@@ -81,7 +81,7 @@ function loadComponent(file, runtime, withTemplate = false) {
 function mod(overrides = {}) {
   return {
     id: '1', name: '한글 패치', repository: 'owner/repo', summary: '', description: '', platforms: ['windows'],
-    authorHandle: 'owner', authorRole: 'user', isOwner: true, canEdit: true, canDelete: true,
+    authorId: null, authorHandle: 'owner', authorRole: 'user', isOwner: true, canEdit: true, canDelete: true,
     createdAt: '2026-10-07T00:00:00Z', updatedAt: '2026-10-07T00:00:00Z', ...overrides
   }
 }

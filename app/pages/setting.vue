@@ -395,7 +395,7 @@ async function deleteAccount(): Promise<void> {
             color="error"
             variant="soft"
             icon="i-tabler-alert-triangle"
-            description="프로필과 소유한 용어집이 영구적으로 삭제됩니다. 번역 기록에서는 개인 정보가 제거됩니다."
+            description="프로필과 개인 정보는 삭제되며, 번역·용어집·댓글 등 작성한 콘텐츠와 기록은 ‘탈퇴한 사용자’로 보존됩니다. 비공개 용어집은 공개되지 않으며 같은 Google 계정으로 다시 가입해도 접근할 수 없습니다."
           />
 
           <UFormField label="확인을 위해 ‘탈퇴’를 입력해 주세요.">

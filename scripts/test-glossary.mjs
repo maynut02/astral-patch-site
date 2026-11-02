@@ -8,9 +8,7 @@ import { runInNewContext } from 'node:vm'
 import { test } from 'node:test'
 import postgres from 'postgres'
 import ts from 'typescript'
-import { fetchPublicSnapshot, importPublicSnapshot, validatePublicSnapshot, PUBLIC_TRANSLATION_ORIGIN } from './sync-public-translations.mjs'
-import { seedBaseGlossary, BASE_GLOSSARY_ID } from './seed-base-glossary.mjs'
-import { renderBaseGlossarySql } from './base-glossary-sql.mjs'
+import { renderBaseGlossarySql, BASE_GLOSSARY_ID, PUBLIC_TRANSLATION_ORIGIN } from './base-glossary-sql.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -59,6 +57,26 @@ test('glossary: Chinese-only terms and bounded variants are validated', () => {
   assert.throws(() => pure.validation.parseGlossaryMetadata(metadata({ chineseSimplified: '' })), error => error.statusCode === 400)
   assert.throws(() => pure.validation.parseGlossaryMetadata(metadata({ historical: Array(11).fill('과거') })), error => error.statusCode === 400)
   assert.throws(() => pure.validation.parseGlossaryMetadata(metadata({ semanticReview: 'recorded' })), error => error.statusCode === 400)
+})
+
+test('glossary: scope and semantic review accept only exact allowed strings, with defaults only when omitted', () => {
+  const omitted = metadata()
+  delete omitted.scope
+  delete omitted.semanticReview
+  const defaults = pure.validation.parseGlossaryMetadata(omitted)
+  assert.equal(defaults.scope, 'project')
+  assert.equal(defaults.semanticReview, 'unrecorded')
+  for (const scope of ['project', 'file', 'entry', 'character']) {
+    assert.equal(pure.validation.parseGlossaryMetadata(metadata({ scope, target: 'STRFixture_1' })).scope, scope)
+  }
+  for (const semanticReview of ['unrecorded', 'recorded', 'unresolved']) {
+    assert.equal(pure.validation.parseGlossaryMetadata(metadata({ semanticReview, semanticNote: '검토 근거' })).semanticReview, semanticReview)
+  }
+  for (const [field, allowed] of [['scope', 'project'], ['semanticReview', 'unresolved']]) {
+    for (const value of [[allowed], [], null, {}, 1, true, { toString: () => allowed }]) {
+      assert.throws(() => pure.validation.parseGlossaryMetadata(metadata({ [field]: value })), error => error.statusCode === 400)
+    }
+  }
 })
 
 test('glossary: source matching respects language, markup and scope without mutating text', () => {
@@ -126,7 +144,7 @@ async function flushClient() {
 }
 
 function clientHarness(context, fetch, query = {}) {
-  const route = { query }
+  const route = vue.reactive({ query })
   const scope = vue.effectScope()
   const unmount = []
   context.after(() => {
@@ -144,7 +162,7 @@ function clientHarness(context, fetch, query = {}) {
     $fetch: fetch
   }
   const loader = modules(null, globals, new Map([[path.join(root, 'app/composables/editor-dictionaries.ts'), { useEditorDictionaryList: () => list }]]))
-  return { route, create: (file, method, ...args) => scope.run(() => loader.load(file)[method](...args)) }
+  return { route, list, create: (file, method, ...args) => scope.run(() => loader.load(file)[method](...args)) }
 }
 
 test('glossary client: a review decision stays bound to its captured proposal after selection changes', async (context) => {
@@ -193,6 +211,102 @@ test('glossary client: proposal filter and page are restored from the URL', asyn
   await flushClient()
   assert.equal(h.route.query.status, 'approved')
   assert.equal(h.route.query.page, undefined)
+})
+
+test('glossary client: entry history survives refresh and a fresh deep link without losing proposal records', async (context) => {
+  const linked = { id: 'linked', dictionaryId: 'team', metadata: metadata() }
+  const records = ['old', 'middle', 'latest'].map(id => ({ id, entryId: linked.id, dictionaryId: 'team' }))
+  for (let visit = 0; visit < 2; visit++) {
+    let historyLoads = 0
+    const h = clientHarness(context, async (url, options) => {
+      if (url.endsWith('/entries/linked')) return linked
+      if (url.endsWith('/proposals')) {
+        assert.equal(options.query.entryId, linked.id)
+        historyLoads++
+        return { proposals: records, total: records.length, page: 1, totalPages: 1 }
+      }
+      return { entries: [], total: 0, page: 1, totalPages: 1 }
+    }, { dictionary: 'team', tab: 'term', entry: 'linked', detail: 'history' })
+    h.list.dictionaries.value = [{ id: 'team', isTeam: true }]
+    const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace')
+    await workspace.init()
+    assert.equal(workspace.selection.value.id, linked.id)
+    assert.equal(workspace.detail.value, 'history')
+    assert.deepEqual(Array.from(workspace.history.value, proposal => proposal.id), ['old', 'middle', 'latest'])
+    await workspace.load()
+    assert.equal(historyLoads, 2)
+    assert.deepEqual(Array.from(workspace.history.value, proposal => proposal.id), ['old', 'middle', 'latest'])
+    assert.equal(h.route.query.entry, 'linked')
+    assert.equal(h.route.query.detail, 'history')
+  }
+})
+
+test('glossary client: late history replies cannot refill another entry or a different detail tab', async (context) => {
+  const replies = []
+  const h = clientHarness(context, () => new Promise(resolve => replies.push(resolve)), { dictionary: 'team', tab: 'term' })
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace')
+  const first = { id: 'first', dictionaryId: 'team', metadata: metadata() }
+  const second = { ...first, id: 'second' }
+  await workspace.selectEntry(first)
+  const oldHistory = workspace.showHistory()
+  await flushClient()
+  assert.equal(h.route.query.detail, 'history')
+  await workspace.selectEntry(second)
+  replies[0]({ proposals: [{ id: 'first-history' }], total: 1, page: 1, totalPages: 1 })
+  await oldHistory
+  assert.equal(workspace.detail.value, 'overview')
+  assert.equal(workspace.history.value.length, 0)
+  const secondHistory = workspace.showHistory()
+  await flushClient()
+  await workspace.showDetail('usage')
+  replies[1]({ proposals: [{ id: 'second-history' }], total: 1, page: 1, totalPages: 1 })
+  await secondHistory
+  assert.equal(workspace.detail.value, 'usage')
+  assert.equal(workspace.history.value.length, 0)
+  assert.equal(h.route.query.detail, 'usage')
+  await workspace.showDetail('overview')
+  assert.equal(h.route.query.detail, undefined)
+  assert.equal(h.route.query.entry, second.id)
+})
+
+test('glossary client: filters and search reset linked detail with exactly one list request', async (context) => {
+  const calls = []
+  const h = clientHarness(context, async (url, options) => {
+    calls.push({ url, options })
+    return { entries: [{ id: 'visible', dictionaryId: 'team', metadata: metadata() }], total: 60, page: options.query.page, totalPages: 2 }
+  }, { dictionary: 'team', tab: 'term', page: '2', entry: 'old', detail: 'history' })
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace')
+  workspace.archived.value = true
+  await flushClient()
+  assert.equal(calls.length, 1)
+  assert.equal(workspace.page.value, 1)
+  assert.equal(workspace.detail.value, 'overview')
+  for (const key of ['entry', 'detail', 'page']) assert.equal(h.route.query[key], undefined)
+  workspace.page.value = 2
+  await flushClient()
+  assert.equal(calls.length, 2)
+  workspace.search.value = '새 검색'
+  await workspace.runSearch()
+  await flushClient()
+  assert.equal(calls.length, 3)
+  assert.equal(workspace.page.value, 1)
+  assert.equal(h.route.query.q, '새 검색')
+})
+
+test('glossary client: external URL changes restore the linked entry and history detail', async (context) => {
+  const first = { id: 'first', dictionaryId: 'team', metadata: metadata() }
+  const second = { ...first, id: 'second' }
+  const h = clientHarness(context, async (url, options) => {
+    if (url.endsWith('/proposals')) return { proposals: [{ id: 'history', entryId: options.query.entryId }], total: 1, page: 1, totalPages: 1 }
+    return { entries: [first, second], total: 2, page: 1, totalPages: 1 }
+  }, { dictionary: 'team', tab: 'term', entry: 'first' })
+  const workspace = h.create('app/composables/glossary-workspace.ts', 'useGlossaryWorkspace')
+  await workspace.load()
+  h.route.query = { dictionary: 'team', tab: 'term', entry: 'second', detail: 'history' }
+  await flushClient()
+  assert.equal(workspace.selection.value.id, second.id)
+  assert.equal(workspace.detail.value, 'history')
+  assert.equal(workspace.history.value[0].entryId, second.id)
 })
 
 test('glossary client: refreshing the same source retains references, while a new version clears them and ignores old replies', async (context) => {
@@ -254,7 +368,7 @@ async function harness(context) {
   await control`CREATE SCHEMA ${control(schema)}`
   created = true
   sql = postgres(databaseUrl, { ...options, max: 5, connection: { search_path: schema, lock_timeout: '5000', statement_timeout: '10000' } })
-  for (const name of ['0001_initial.sql', '0019_editor_glossary.sql']) await sql.unsafe(readFileSync(path.join(root, 'database/migrations', name), 'utf8'))
+  for (const name of ['0001_initial.sql', '0010_translation_change_kind.sql', '0019_editor_glossary.sql', '0021_team_dictionary_ownership.sql']) await sql.unsafe(readFileSync(path.join(root, 'database/migrations', name), 'utf8'))
   await sql`INSERT INTO app_users (google_sub, email, handle, role) VALUES ('author', 'author@test.invalid', 'Author', 'user'), ('reviewer', 'reviewer@test.invalid', 'Reviewer', 'verified'), ('outsider', 'outsider@test.invalid', 'Other', 'user')`
   const loaded = modules(sql)
   const dictionaries = loaded.load('server/utils/editor-dictionary.ts')
@@ -332,6 +446,38 @@ integration('glossary DB: unresolved meanings cannot be approved and voice cards
   assert.equal((await h.entries.getEditorDictionaryEntries(author, h.dictionary.id, { kind: 'term' })).total, 0)
 })
 
+integration('glossary DB: array metadata is rejected at submission and cannot bypass approval of old proposals', async (context) => {
+  const h = await harness(context)
+  for (const invalid of [{ scope: ['project'] }, { semanticReview: ['unresolved'] }]) {
+    await assert.rejects(h.glossary.proposeGlossaryEntry(author, h.dictionary.id, proposalInput({ metadata: metadata(invalid) })), error => error.statusCode === 400)
+    const proposal = await h.glossary.proposeGlossaryEntry(author, h.dictionary.id, proposalInput())
+    await h.sql`UPDATE editor_dictionary_proposals SET metadata = ${h.sql.json(metadata(invalid))} WHERE id = ${proposal.id}`
+    await assert.rejects(h.glossary.decideGlossaryProposal(reviewer, h.dictionary.id, proposal.id, { action: 'approve' }), error => error.statusCode === 400)
+    assert.equal((await h.sql`SELECT status FROM editor_dictionary_proposals WHERE id = ${proposal.id}`)[0].status, 'pending')
+  }
+  assert.equal((await h.entries.getEditorDictionaryEntries(author, h.dictionary.id, {})).total, 0)
+})
+
+integration('glossary DB: scoped targets must exist and context cannot leak file or entry rules to other targets', async (context) => {
+  const h = await harness(context)
+  const itemId = await insertEvidenceFixture(h.sql, evidenceTerm())
+  const siblingId = await insertEvidenceFixture(h.sql, evidenceTerm({ key: 'STRFixture_2' }))
+  const otherFileId = await insertEvidenceFixture(h.sql, evidenceTerm({ key: 'STROther_1' }))
+  for (const [scope, target] of [['file', 'STRMissing'], ['entry', 'STRFixture_missing']]) {
+    await assert.rejects(h.glossary.proposeGlossaryEntry(author, h.dictionary.id, proposalInput({ metadata: metadata({ scope, target }) })), error => error.statusCode === 400)
+  }
+  const approvedIds = []
+  for (const [scope, target] of [['file', 'STRFixture'], ['entry', 'STRFixture_1']]) {
+    const proposal = await h.glossary.proposeGlossaryEntry(author, h.dictionary.id, proposalInput({ metadata: metadata({ scope, target }) }))
+    assert.equal(proposal.metadata.scope, scope)
+    const approved = await h.glossary.decideGlossaryProposal(reviewer, h.dictionary.id, proposal.id, { action: 'approve' })
+    approvedIds.push(approved.resultEntryId)
+  }
+  assert.deepEqual(Array.from((await h.glossary.getGlossaryContext(itemId)).entries, entry => entry.id).sort(), [...approvedIds].sort())
+  assert.deepEqual(Array.from((await h.glossary.getGlossaryContext(siblingId)).entries, entry => entry.id), [approvedIds[0]])
+  assert.equal((await h.glossary.getGlossaryContext(otherFileId)).entries.length, 0)
+})
+
 integration('glossary DB: related terms use current source, exclude private dictionaries and stop showing archived rules', async (context) => {
   const h = await harness(context)
   const revisionId = randomUUID()
@@ -379,106 +525,66 @@ integration('glossary HTTP handler: public listing forwards kind and archive fil
   assert.equal(archived.entries[0].metadata.archived, true)
 })
 
-function publicItem(overrides = {}) {
-  return { id: randomUUID(), sourceVersionId: randomUUID(), kind: 'str', category: 'STRItem', unitKey: '1',
-    jp: 'スターコイン', cnS: '星币', cnT: '星幣', en: 'Star Coin', ko: '스타 코인',
-    pendingKo: null, approvedForCurrentSource: true, ...overrides }
-}
-const publicSnapshot = items => ({ origin: PUBLIC_TRANSLATION_ORIGIN, total: items.length, fetchedAt: '2026-10-31T00:00:00.000Z', items })
-async function mirrorHarness(context) {
-  const h = await harness(context)
-  await h.sql.unsafe(readFileSync(path.join(root, 'database/migrations/0010_translation_change_kind.sql'), 'utf8'))
-  return h
+function evidenceTerm(overrides = {}) {
+  return { key: 'STRFixture_1', sourceVersionId: randomUUID(), translation: '스타 코인', japanese: 'スターコイン',
+    chineseSimplified: '星币', chineseTraditional: '星幣', note: '합성 테스트 용어의 승인 근거.', ...overrides }
 }
 
-test('public translation sync: reject incomplete or duplicate snapshots before writing', () => {
-  const item = publicItem()
-  assert.throws(() => validatePublicSnapshot({ ...publicSnapshot([item]), total: 2 }))
-  assert.throws(() => validatePublicSnapshot(publicSnapshot([item, item])))
-  assert.throws(() => validatePublicSnapshot(publicSnapshot([{ ...item, ko: null }])))
-})
-
-test('public translation sync: collect every page and detect pagination drift', async () => {
-  const rows = [publicItem({ unitKey: '1' }), publicItem({ unitKey: '2' }), publicItem({ unitKey: '3' })]
-  const fetched = []
-  const result = await fetchPublicSnapshot(async (url) => {
-    const page = Number(new URL(url).searchParams.get('page'))
-    fetched.push(page)
-    return { ok: true, json: async () => ({ total: 3, totalPages: 3, items: [rows[page - 1]] }) }
-  })
-  assert.equal(result.items.length, 3)
-  assert.deepEqual(fetched.sort(), [1, 2, 3])
-  await assert.rejects(fetchPublicSnapshot(async url => ({
-    ok: true, json: async () => ({ total: url.endsWith('1') ? 3 : 4, totalPages: 3, items: [rows[0]] })
-  })), /조회 중/)
-})
-
-integration('public translation DB: mirror real IDs and languages without approving pending or stale text', async (context) => {
-  const h = await mirrorHarness(context)
-  const approved = publicItem()
-  const pending = publicItem({ unitKey: '2', pendingKo: '대기 중', ko: '대기 중' })
-  const stale = publicItem({ unitKey: '3', ko: '확인 전 번역', approvedForCurrentSource: false })
-  const untranslated = publicItem({ unitKey: '4', ko: '', approvedForCurrentSource: null })
-  const input = publicSnapshot([approved, pending, stale, untranslated])
-  const result = await importPublicSnapshot(h.sql, input)
-  assert.equal(result.total, 4)
-  assert.equal(result.approved, 1)
-  const rows = await h.sql`SELECT unit_id, source_version_id, jp, cn_s, en, cn_t, approved_text FROM translation_workbench ORDER BY unit_key`
-  assert.equal(rows[0].unit_id, approved.id)
-  assert.equal(rows[0].source_version_id, approved.sourceVersionId)
-  assert.equal(rows[0].approved_text, approved.ko)
-  assert.equal(rows[0].jp, approved.jp)
-  assert.equal(rows[0].cn_s, approved.cnS)
-  assert.equal(rows[0].cn_t, approved.cnT)
-  assert.equal(rows[0].en, approved.en)
-  assert.equal(rows.filter(row => row.approved_text === null).length, 3)
-  await importPublicSnapshot(h.sql, input)
-  assert.equal((await h.sql`SELECT count(*)::int AS total FROM translation_changes`)[0].total, 1)
-})
-
-integration('public translation DB: a new remote approval updates its mirror and preserves local approvals', async (context) => {
-  const h = await mirrorHarness(context)
-  const item = publicItem()
-  await importPublicSnapshot(h.sql, publicSnapshot([item]))
-  await importPublicSnapshot(h.sql, publicSnapshot([{ ...item, ko: '변경된 공개 번역' }]))
-  assert.equal((await h.sql`SELECT text FROM translations WHERE unit_id = ${item.id}`)[0].text, '변경된 공개 번역')
-  const group = randomUUID()
-  const change = randomUUID()
-  await h.sql`INSERT INTO translation_change_groups (id, title, created_by) VALUES (${group}, '로컬 검토', 'reviewer')`
-  await h.sql`INSERT INTO translation_changes (id, group_id, unit_id, locale, source_version_id, proposed_text, change_kind, status, created_by, reviewed_by, reviewed_at)
-    VALUES (${change}, ${group}, ${item.id}, 'ko', ${item.sourceVersionId}, '로컬 확정 표기', 'translation_edit', 'approved', 'reviewer', 'reviewer', now())`
-  await h.sql`UPDATE translations SET text = '로컬 확정 표기', applied_change_id = ${change} WHERE unit_id = ${item.id}`
-  await importPublicSnapshot(h.sql, publicSnapshot([{ ...item, ko: '새 운영 번역' }]))
-  assert.equal((await h.sql`SELECT text FROM translations WHERE unit_id = ${item.id}`)[0].text, '로컬 확정 표기')
-})
-
-integration('public translation DB: changed source content under the same version rolls back the import', async (context) => {
-  const h = await mirrorHarness(context)
-  const item = publicItem()
-  await importPublicSnapshot(h.sql, publicSnapshot([item]))
-  await assert.rejects(importPublicSnapshot(h.sql, publicSnapshot([{ ...item, jp: '변경된 같은 버전' }])), /같은 원문 버전/)
-  assert.equal((await h.sql`SELECT jp FROM current_source_texts WHERE unit_id = ${item.id}`)[0].jp, item.jp)
-})
+// Explicit synthetic relational fixtures, not a public API snapshot or a synchronization path.
+async function insertEvidenceFixture(sql, term) {
+  const itemId = randomUUID()
+  const revisionId = randomUUID()
+  const groupId = randomUUID()
+  const changeId = randomUUID()
+  const separator = term.key.lastIndexOf('_')
+  await sql`INSERT INTO game_revisions (id, route, game_version, revision, source_url, catalog_url, catalog_sha256)
+    VALUES (${revisionId}, 'TEST_FIXTURE', 'synthetic', ${revisionId}, 'https://example.invalid/source', 'https://example.invalid/catalog', ${'0'.repeat(64)})`
+  await sql`INSERT INTO translation_units (id, kind, namespace, unit_key)
+    VALUES (${itemId}, 'str', ${term.key.slice(0, separator)}, ${term.key.slice(separator + 1)})`
+  await sql`INSERT INTO source_versions (id, unit_id, cn_s, en, jp, cn_t, source_fingerprint, first_seen_revision_id)
+    VALUES (${term.sourceVersionId}, ${itemId}, ${term.chineseSimplified}, 'Synthetic fixture', ${term.japanese}, ${term.chineseTraditional}, ${'1'.repeat(64)}, ${revisionId})`
+  await sql`UPDATE translation_units SET current_source_version_id = ${term.sourceVersionId} WHERE id = ${itemId}`
+  await sql`INSERT INTO translation_change_groups (id, title, created_by) VALUES (${groupId}, '합성 승인 테스트', 'reviewer')`
+  await sql`INSERT INTO translation_changes (id, group_id, unit_id, locale, source_version_id, proposed_text, change_kind, status, created_by, reviewed_by, reviewed_at)
+    VALUES (${changeId}, ${groupId}, ${itemId}, 'ko', ${term.sourceVersionId}, ${term.translation}, 'translation_edit', 'approved', 'author', 'reviewer', now())`
+  await sql`INSERT INTO translations (id, unit_id, locale, text, approved_source_version_id, applied_change_id, approved_by)
+    VALUES (${randomUUID()}, ${itemId}, 'ko', ${term.translation}, ${term.sourceVersionId}, ${changeId}, 'reviewer')`
+  return itemId
+}
 
 integration('base glossary DB: create evidenced terms once, preserve edits and ignore changed evidence', async (context) => {
-  const h = await mirrorHarness(context)
-  const item = publicItem()
-  await importPublicSnapshot(h.sql, publicSnapshot([item]))
-  const term = { key: 'STRItem_1', sourceVersionId: item.sourceVersionId, translation: item.ko, japanese: item.jp, chineseSimplified: item.cnS, chineseTraditional: item.cnT, note: '기존 번역 표기 유지.' }
+  const h = await harness(context)
+  const term = evidenceTerm()
+  const itemId = await insertEvidenceFixture(h.sql, term)
   const data = { origin: PUBLIC_TRANSLATION_ORIGIN, terms: [term] }
-  const seeded = await seedBaseGlossary(h.sql, data)
+  const seeded = await h.sql.begin(async (sql) => {
+    await sql.unsafe(renderBaseGlossarySql(data))
+    return (await sql`SELECT current_setting('astral.base_glossary_result')::jsonb AS result`)[0].result
+  })
   assert.equal(seeded.added, 1)
   assert.equal(seeded.dictionaryId, h.dictionary.id)
   const [entry] = await h.sql`SELECT id, metadata FROM editor_dictionary_entries WHERE dictionary_id = ${seeded.dictionaryId}`
   assert.equal(entry.metadata.evidenceKey, term.key)
   assert.equal(entry.metadata.semanticReview, 'unrecorded')
   await h.sql`UPDATE editor_dictionary_entries SET translation = '유지할 수정', revision = 2 WHERE id = ${entry.id}`
-  assert.equal((await seedBaseGlossary(h.sql, data)).existing, 1)
+  await h.sql.begin(async (sql) => {
+    await sql.unsafe(renderBaseGlossarySql(data))
+    assert.equal((await sql`SELECT current_setting('astral.base_glossary_result')::jsonb AS result`)[0].result.existing, 1)
+  })
   assert.equal((await h.sql`SELECT translation FROM editor_dictionary_entries WHERE id = ${entry.id}`)[0].translation, '유지할 수정')
-  const stale = await seedBaseGlossary(h.sql, { ...data, terms: [{ ...term, sourceVersionId: randomUUID() }] })
-  assert.deepEqual(stale.skipped, ['STRItem_1'])
-  const contextResult = await h.glossary.getGlossaryContext(item.id)
-  assert.equal(contextResult.entries.length, 1)
+  for (const mismatch of [
+    { sourceVersionId: randomUUID() }, { key: 'STRMissing_1' }, { translation: '다른 번역' },
+    { japanese: '別の原文' }, { chineseSimplified: '其他原文' }, { chineseTraditional: '其他原文' }
+  ]) {
+    const candidate = { ...term, ...mismatch }
+    await h.sql.begin(async (sql) => {
+      await sql.unsafe(renderBaseGlossarySql({ ...data, terms: [candidate] }))
+      const result = (await sql`SELECT current_setting('astral.base_glossary_result')::jsonb AS result`)[0].result
+      assert.equal(result.added, 0)
+      assert.deepEqual(result.skipped, [candidate.key])
+    })
+  }
+  assert.equal((await h.glossary.getGlossaryContext(itemId)).entries.length, 1)
 })
 
 const baseData = JSON.parse(readFileSync(path.join(root, 'data/glossary-base.json'), 'utf8'))
@@ -510,7 +616,7 @@ test('glossary write routes: rate limits block proposals and review decisions be
 })
 
 integration('base glossary migration: empty DB remains empty and repeated application is harmless', async (context) => {
-  const h = await mirrorHarness(context)
+  const h = await harness(context)
   await h.sql.unsafe(migration20)
   await h.sql.unsafe(migration20)
   assert.equal((await h.sql`SELECT count(*)::int AS total FROM editor_dictionary_entries`)[0].total, 0)
@@ -518,15 +624,17 @@ integration('base glossary migration: empty DB remains empty and repeated applic
   assert.equal((await h.sql`SELECT count(*)::int AS total FROM translations`)[0].total, 0)
 })
 
-integration('base glossary migration: seed from production-shaped approvals without touching translations, comments or pending reviews', async (context) => {
-  const h = await mirrorHarness(context)
+integration('base glossary migration: synthetic approvals leave translations, comments and pending reviews untouched', async (context) => {
+  const h = await harness(context)
   await h.sql.unsafe(readFileSync(path.join(root, 'database/migrations/0007_editor_comments.sql'), 'utf8'))
   const [first, second] = baseData.terms
-  const makeItem = term => publicItem({ category: term.key.slice(0, term.key.lastIndexOf('_')), unitKey: term.key.slice(term.key.lastIndexOf('_') + 1),
-    sourceVersionId: term.sourceVersionId, jp: term.japanese, cnS: term.chineseSimplified, cnT: term.chineseTraditional, ko: term.translation })
-  const items = [makeItem(first), makeItem(second)]
-  await importPublicSnapshot(h.sql, publicSnapshot(items))
-  await h.sql`INSERT INTO editor_comments (id, unit_id, created_by, body) VALUES (${randomUUID()}, ${items[0].id}, 'author', '보존할 기존 코멘트')`
+  const itemId = await insertEvidenceFixture(h.sql, first)
+  await insertEvidenceFixture(h.sql, second)
+  await h.sql`INSERT INTO editor_comments (id, unit_id, created_by, body) VALUES (${randomUUID()}, ${itemId}, 'author', '보존할 기존 코멘트')`
+  const pendingGroup = randomUUID()
+  await h.sql`INSERT INTO translation_change_groups (id, title, created_by) VALUES (${pendingGroup}, '대기 중인 합성 검토', 'author')`
+  await h.sql`INSERT INTO translation_changes (id, group_id, unit_id, locale, source_version_id, proposed_text, change_kind, created_by)
+    VALUES (${randomUUID()}, ${pendingGroup}, ${itemId}, 'ko', ${first.sourceVersionId}, '대기 중인 번역', 'translation_edit', 'author')`
   const pending = await h.glossary.proposeGlossaryEntry(author, h.dictionary.id, proposalInput({
     translation: '진행 중인 검토', metadata: metadata({ japanese: second.japanese, chineseSimplified: second.chineseSimplified, chineseTraditional: second.chineseTraditional })
   }))
@@ -548,11 +656,9 @@ integration('base glossary migration: seed from production-shaped approvals with
 })
 
 integration('base glossary migration: preserved private dictionaries, archived rules and rules in other team dictionaries', async (context) => {
-  const h = await mirrorHarness(context)
+  const h = await harness(context)
   const term = baseData.terms[0]
-  const item = publicItem({ category: 'STRCharacter', unitKey: '1010', sourceVersionId: term.sourceVersionId,
-    jp: term.japanese, cnS: term.chineseSimplified, cnT: term.chineseTraditional, ko: term.translation })
-  await importPublicSnapshot(h.sql, publicSnapshot([item]))
+  await insertEvidenceFixture(h.sql, term)
   const personal = await h.dictionaries.createEditorDictionary(author, { name: '개인 용어', visibility: 'private' })
   await h.entries.createEditorDictionaryEntry(author, personal.id, { sourceText: term.japanese, translation: '개인 표기', note: '보존' })
   const team = await h.dictionaries.createEditorDictionary(reviewer, { name: '다른 공통 기준', visibility: 'public', isTeam: true })
@@ -566,11 +672,10 @@ integration('base glossary migration: preserved private dictionaries, archived r
 })
 
 integration('base glossary migration: an unrelated dictionary ID collision rolls back without publishing private data', async (context) => {
-  const h = await mirrorHarness(context)
+  const h = await harness(context)
   await h.sql`UPDATE editor_dictionaries SET id = ${BASE_GLOSSARY_ID}, is_team = false, visibility = 'private' WHERE id = ${h.dictionary.id}`
   const term = baseData.terms[0]
-  await importPublicSnapshot(h.sql, publicSnapshot([publicItem({ category: 'STRCharacter', unitKey: '1010', sourceVersionId: term.sourceVersionId,
-    jp: term.japanese, cnS: term.chineseSimplified, cnT: term.chineseTraditional, ko: term.translation })]))
+  await insertEvidenceFixture(h.sql, term)
   await assert.rejects(h.sql.unsafe(migration20), /belongs to another dictionary/)
   assert.equal((await h.sql`SELECT visibility FROM editor_dictionaries WHERE id = ${BASE_GLOSSARY_ID}`)[0].visibility, 'private')
   assert.equal((await h.sql`SELECT count(*)::int AS total FROM editor_dictionary_entries`)[0].total, 0)

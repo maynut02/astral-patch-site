@@ -46,6 +46,38 @@ export async function deleteUserAccount(googleSub: string): Promise<void> {
     `
 
     await transaction`
+      UPDATE source_changes
+      SET created_by = ${deletedUserId}
+      WHERE created_by = ${googleSub}
+    `
+    await transaction`
+      UPDATE editor_dictionaries
+      SET owner_id = CASE WHEN is_team THEN 'bot' ELSE ${deletedUserId} END
+      WHERE owner_id = ${googleSub}
+    `
+    await transaction`
+      UPDATE editor_dictionary_proposals
+      SET created_by = ${deletedUserId}
+      WHERE created_by = ${googleSub}
+    `
+    await transaction`
+      UPDATE editor_dictionary_proposals AS proposal
+      SET history = (
+        SELECT jsonb_agg(
+          CASE WHEN item.value->>'actor' = ${googleSub}
+            THEN jsonb_set(item.value, '{actor}', to_jsonb(${deletedUserId}::text))
+            ELSE item.value
+          END ORDER BY item.ordinality
+        )
+        FROM jsonb_array_elements(proposal.history) WITH ORDINALITY AS item(value, ordinality)
+      )
+      WHERE EXISTS (
+        SELECT 1 FROM jsonb_array_elements(proposal.history) AS item(value)
+        WHERE item.value->>'actor' = ${googleSub}
+      )
+    `
+
+    await transaction`
       UPDATE translation_change_groups
       SET created_by = ${deletedUserId}
       WHERE created_by = ${googleSub}

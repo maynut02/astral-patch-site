@@ -9,7 +9,7 @@ import type {
 } from '../../shared/types/editor-dictionary'
 import { resolveEditorRole } from '../../shared/types/editor'
 import type { UserRole } from '../../shared/types/user'
-import { isReviewerRole } from '../../shared/types/user'
+import { BOT_GOOGLE_SUB, isReviewerRole } from '../../shared/types/user'
 import {
   parseOptionalText,
   parseRequiredText,
@@ -167,7 +167,7 @@ export async function createEditorDictionary(
   const [row] = await database<DictionaryRow[]>`
     WITH saved AS (
       INSERT INTO editor_dictionaries (id, owner_id, name, description, visibility, is_team)
-      VALUES (${id}, ${viewer.id}, ${name}, ${description}, ${visibility}, ${isTeam})
+      VALUES (${id}, ${isTeam ? BOT_GOOGLE_SUB : viewer.id}, ${name}, ${description}, ${visibility}, ${isTeam})
       RETURNING *
     )
     SELECT ${dictionaryFields(database)}

@@ -35,14 +35,45 @@ export function useGlossaryWorkspace() {
     return { dictionary: dictionaryId.value || undefined, tab: tab.value, q: search.value || undefined, archived: archived.value ? 'true' : undefined, status: tab.value === 'proposals' ? statusFilter.value : undefined, page: page.value > 1 ? page.value : undefined }
   }
   let request = 0
+  let historyRequest = 0
+  let navigationRequest = 0
+  let initializationRequest = 0
+  let applyingState = false
+  const pendingQueries = new Set<string>()
+  function queryKey(query: Record<string, unknown>) {
+    return JSON.stringify(Object.entries(query).filter(([, value]) => value != null).map(([key, value]) => [key, String(value)]).sort(([left], [right]) => left!.localeCompare(right!)))
+  }
+  async function replaceQuery(query: Record<string, string | number | undefined>) {
+    const key = queryKey(query)
+    if (key === queryKey(route.query)) return
+    pendingQueries.add(key)
+    try {
+      await router.replace({ query })
+    } finally {
+      pendingQueries.delete(key)
+    }
+  }
+  function clearSelection() {
+    historyRequest++
+    comparisonRequest++
+    selection.value = null
+    selectedProposal.value = null
+    currentProposalEntry.value = null
+    comparisonError.value = false
+    detail.value = 'overview'
+    history.value = []
+  }
   async function load() {
     const id = ++request
     const previousProposalId = selectedProposal.value?.id
+    const dictionary = dictionaryId.value
+    const kind = tab.value
+    const query = { page: page.value, kind, search: search.value, archived: archived.value ? 'true' : undefined }
+    const linkedEntryId = route.query.dictionary === dictionary && typeof route.query.entry === 'string' ? route.query.entry : ''
+    const linkedDetail = linkedEntryId && (route.query.detail === 'history' || route.query.detail === 'usage') ? route.query.detail : 'overview'
     entries.value = null
     proposals.value = null
-    selection.value = null
-    selectedProposal.value = null
-    history.value = []
+    clearSelection()
     error.value = ''
     if (!dictionaryId.value || (tab.value === 'proposals' && !loggedIn.value)) {
       loading.value = false
@@ -51,21 +82,27 @@ export function useGlossaryWorkspace() {
     loading.value = true
     try {
       if (tab.value === 'proposals') {
-        const response = await $fetch<GlossaryProposalsResponse>(`/api/editor/dictionaries/${dictionaryId.value}/proposals`, { query: { page: page.value, status: statusFilter.value || undefined } })
+        const response = await $fetch<GlossaryProposalsResponse>(`/api/editor/dictionaries/${dictionary}/proposals`, { query: { page: query.page, status: statusFilter.value || undefined } })
         if (id !== request) return
         proposals.value = response
         selectedProposal.value = response.proposals.find(proposal => proposal.id === previousProposalId) ?? response.proposals[0] ?? null
       } else {
-        const response = await $fetch<EditorDictionaryEntriesResponse>(`/api/editor/dictionaries/${dictionaryId.value}/entries`, { query: { page: page.value, kind: tab.value, search: search.value, archived: archived.value ? 'true' : undefined } })
+        const response = await $fetch<EditorDictionaryEntriesResponse>(`/api/editor/dictionaries/${dictionary}/entries`, { query })
         if (id !== request) return
         entries.value = response
-        selection.value = response.entries.find(entry => entry.id === route.query.entry) ?? response.entries[0] ?? null
-        if (typeof route.query.entry === 'string' && route.query.dictionary === dictionaryId.value && !search.value && !response.entries.some(entry => entry.id === route.query.entry)) {
-          const linked = await $fetch<EditorDictionaryEntry>(`/api/editor/dictionaries/${dictionaryId.value}/entries/${encodeURIComponent(route.query.entry)}`)
+        let entry = response.entries.find(entry => entry.id === linkedEntryId) ?? response.entries[0] ?? null
+        if (linkedEntryId && !query.search && !response.entries.some(entry => entry.id === linkedEntryId)) {
+          const linked = await $fetch<EditorDictionaryEntry>(`/api/editor/dictionaries/${dictionary}/entries/${encodeURIComponent(linkedEntryId)}`)
           if (id !== request) return
-          if (linked.metadata.kind === tab.value && linked.metadata.archived === archived.value) selection.value = linked
+          if (linked.metadata.kind === kind && linked.metadata.archived === (query.archived === 'true')) entry = linked
         }
-        if (route.query.detail === 'history' && loggedIn.value) await showHistory()
+        selection.value = entry
+        detail.value = entry?.id === linkedEntryId ? linkedDetail : 'overview'
+        if (linkedEntryId && entry?.id !== linkedEntryId) {
+          await replaceQuery(listQuery())
+          if (id !== request) return
+        }
+        if (entry && detail.value === 'history' && loggedIn.value) await fetchHistory(entry)
       }
     } catch (cause) {
       if (id === request) error.value = getRequestErrorMessage(cause, '기준을 불러오지 못했습니다.')
@@ -74,23 +111,43 @@ export function useGlossaryWorkspace() {
     }
   }
   async function init() {
+    const id = ++initializationRequest
     await list.loadDictionaries()
+    if (id !== initializationRequest) return
     if (list.dictionariesStatus.value === 'error') {
       error.value = list.dictionariesError.value
       return
     }
-    if (!dictionaries.value.some(dictionary => dictionary.id === dictionaryId.value)) dictionaryId.value = dictionaries.value[0]?.id ?? ''
+    if (!dictionaries.value.some(dictionary => dictionary.id === dictionaryId.value)) {
+      const nextDictionaryId = dictionaries.value[0]?.id ?? ''
+      if (dictionaryId.value !== nextDictionaryId) {
+        dictionaryId.value = nextDictionaryId
+        return
+      }
+    }
     await load()
+  }
+  async function resetList(resetPage: boolean) {
+    const id = ++navigationRequest
+    request++
+    clearSelection()
+    if (resetPage) {
+      applyingState = true
+      page.value = 1
+      applyingState = false
+    }
+    await replaceQuery(listQuery())
+    if (id === navigationRequest) await load()
   }
   async function runSearch() {
-    page.value = 1
-    await router.replace({ query: listQuery() })
-    await load()
+    await resetList(true)
   }
   async function selectEntry(entry: EditorDictionaryEntry) {
+    historyRequest++
     selection.value = entry
     detail.value = 'overview'
-    await router.replace({ query: { ...listQuery(), entry: entry.id } })
+    history.value = []
+    await replaceQuery({ ...listQuery(), entry: entry.id })
   }
   function propose(entry: EditorDictionaryEntry | null = null) {
     if (!loggedIn.value) {
@@ -100,21 +157,31 @@ export function useGlossaryWorkspace() {
     editingEntry.value = entry
     formOpen.value = true
   }
-  async function showHistory() {
-    if (!loggedIn.value) {
+  async function fetchHistory(entry: EditorDictionaryEntry) {
+    const id = ++historyRequest
+    history.value = []
+    try {
+      const response = await $fetch<GlossaryProposalsResponse>(`/api/editor/dictionaries/${entry.dictionaryId}/proposals`, { query: { entryId: entry.id } })
+      if (id === historyRequest && detail.value === 'history' && selection.value?.id === entry.id && selection.value.dictionaryId === entry.dictionaryId) history.value = response.proposals
+    } catch (cause) {
+      if (id === historyRequest && detail.value === 'history') error.value = getRequestErrorMessage(cause, '이력을 불러오지 못했습니다.')
+    }
+  }
+  async function showDetail(next: 'overview' | 'usage' | 'history') {
+    if (next === 'history' && !loggedIn.value) {
       showLoginRequiredToast('glossary-history-login')
       return
     }
     const entry = selection.value
     if (!entry) return
-    detail.value = 'history'
+    const id = ++historyRequest
+    detail.value = next
     history.value = []
-    try {
-      const response = await $fetch<GlossaryProposalsResponse>(`/api/editor/dictionaries/${entry.dictionaryId}/proposals`, { query: { entryId: entry.id } })
-      if (selection.value?.id === entry.id) history.value = response.proposals
-    } catch (cause) {
-      if (selection.value?.id === entry.id) error.value = getRequestErrorMessage(cause, '이력을 불러오지 못했습니다.')
-    }
+    await replaceQuery({ ...listQuery(), entry: entry.id, detail: next === 'overview' ? undefined : next })
+    if (id === historyRequest && next === 'history') await fetchHistory(entry)
+  }
+  async function showHistory() {
+    await showDetail('history')
   }
   const deciding = ref(false)
   async function decide(action: GlossaryDecision, reason: string, proposal = selectedProposal.value) {
@@ -136,18 +203,28 @@ export function useGlossaryWorkspace() {
     const dictionary = await $fetch<EditorDictionary>('/api/editor/dictionaries', { method: 'POST', body: { name, description: '팀에서 합의한 용어와 캐릭터 문체', visibility: 'public', isTeam: true } })
     await list.loadDictionaries()
     dictionaryId.value = dictionary.id
-    await load()
   }
-  watch([dictionaryId, tab, statusFilter, archived], async () => {
-    page.value = 1
-    detail.value = 'overview'
-    await router.replace({ query: listQuery() })
-    await load()
-  })
-  watch(page, async () => {
-    await router.replace({ query: listQuery() })
-    await load()
-  })
+  watch([dictionaryId, tab, statusFilter, archived], () => {
+    if (!applyingState) void resetList(true)
+  }, { flush: 'sync' })
+  watch(page, () => {
+    if (!applyingState) void resetList(false)
+  }, { flush: 'sync' })
+  watch(() => route.query, () => {
+    if (pendingQueries.has(queryKey(route.query))) return
+    navigationRequest++
+    request++
+    applyingState = true
+    dictionaryId.value = typeof route.query.dictionary === 'string' ? route.query.dictionary : ''
+    tab.value = ['term', 'voice', 'proposals'].includes(String(route.query.tab)) ? String(route.query.tab) : 'term'
+    search.value = typeof route.query.q === 'string' ? route.query.q : ''
+    const nextPage = Number(route.query.page ?? 1)
+    page.value = Number.isSafeInteger(nextPage) && nextPage > 0 ? nextPage : 1
+    statusFilter.value = ['pending', 'held', 'approved', 'rejected', 'withdrawn'].includes(String(route.query.status)) ? String(route.query.status) : 'pending'
+    archived.value = route.query.archived === 'true'
+    applyingState = false
+    void load()
+  }, { flush: 'sync' })
   watch(loggedIn, () => {
     void init()
   })
@@ -164,6 +241,9 @@ export function useGlossaryWorkspace() {
   onUnmounted(() => {
     request++
     comparisonRequest++
+    historyRequest++
+    navigationRequest++
+    initializationRequest++
   })
-  return { loggedIn, user, dictionaries, dictionaryId, tab, search, page, statusFilter, archived, entries, proposals, loading, error, selection, selectedProposal, currentProposalEntry, comparisonError, detail, history, formOpen, editingEntry, isReviewer, deciding, init, load, runSearch, selectEntry, propose, showHistory, decide, createDictionary }
+  return { loggedIn, user, dictionaries, dictionaryId, tab, search, page, statusFilter, archived, entries, proposals, loading, error, selection, selectedProposal, currentProposalEntry, comparisonError, detail, history, formOpen, editingEntry, isReviewer, deciding, init, load, runSearch, selectEntry, propose, showDetail, showHistory, decide, createDictionary }
 }

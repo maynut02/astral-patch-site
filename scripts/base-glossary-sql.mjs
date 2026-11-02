@@ -1,8 +1,14 @@
-import { publicDataId, PUBLIC_TRANSLATION_ORIGIN } from './sync-public-translations.mjs'
+import { createHash } from 'node:crypto'
 import { emptyGlossaryMetadata } from '../shared/utils/glossary.ts'
 
 export const BASE_GLOSSARY_ID = '82699bf0-3c4e-4126-b667-6ccf6f31409a'
+export const PUBLIC_TRANSLATION_ORIGIN = 'https://astral.maynutlab.com'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function publicDataId(text) {
+  const hash = createHash('sha256').update(text).digest('hex')
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`
+}
 
 export function renderBaseGlossarySql(data) {
   if (data?.origin !== PUBLIC_TRANSLATION_ORIGIN || !Array.isArray(data.terms) || data.terms.length > 200) throw new Error('기초 용어 데이터가 올바르지 않습니다.')

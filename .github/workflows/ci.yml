@@ -97,32 +97,16 @@ jobs:
           ASTRAL_SMOKE_BASE_URL=http://127.0.0.1:55435 pnpm run smoke:release
           docker image inspect astral-patch-site:ci --format '{{.Id}}' > .data/production-image-id.txt
 
-      - name: Package reviewed deployment
-        shell: bash
-        run: |
-          set -euo pipefail
-          git archive --format=tar.gz --output=.data/astral-site-source.tar.gz HEAD
-          docker save astral-patch-site:ci | gzip -1 > .data/astral-site-image.tar.gz
-          sha256sum .data/astral-site-source.tar.gz .data/astral-site-image.tar.gz \
-            database/migrations/0019_editor_glossary.sql database/migrations/0020_base_glossary.sql > .data/SHA256SUMS
-
-      - name: Upload deployment package
+      - name: Upload production smoke evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: astral-site-${{ github.sha }}
+          name: astral-site-smoke-${{ github.sha }}
           retention-days: 14
-          compression-level: 0
           include-hidden-files: true
           if-no-files-found: error
           path: |
-            .data/astral-site-source.tar.gz
-            .data/astral-site-image.tar.gz
             .data/production-image-id.txt
             .data/release-smoke.json
-            .data/SHA256SUMS
-            database/migrations/0019_editor_glossary.sql
-            database/migrations/0020_base_glossary.sql
-            docs/glossary-release.md
 
       - name: Stop migration database
         if: always()

@@ -413,7 +413,11 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
                 배포자
               </dt>
               <dd class="text-right text-toned">
-                {{ translationPackStatus.latest.publishedBy ?? '-' }}
+                <AppUserIdentity
+                  :user-id="translationPackStatus.latest.publisherId"
+                  :handle="translationPackStatus.latest.publishedBy"
+                  fallback="-"
+                />
               </dd>
             </div>
             <div class="flex items-center justify-between gap-3">
@@ -513,6 +517,7 @@ async function updateRole(user: AdminUserEntry, value: unknown): Promise<void> {
       >
         <div class="min-w-0">
           <AppUserIdentity
+            :user-id="entry.id"
             :handle="entry.handle"
             :role="entry.role"
             fallback=""

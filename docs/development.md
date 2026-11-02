@@ -51,6 +51,7 @@ pnpm dev
 | --- | --- | --- |
 | `pnpm test:security` | | 공식 수정 버전 `node-forge`, 로컬 패치한 `braces` 회귀 |
 | `pnpm test:mods` | | 모드 GitHub 연동, 마크다운 렌더링, 권한·관리 |
+| `pnpm test:account` | PostgreSQL 사례만 별도 DB 필요 | 탈퇴 시 콘텐츠·비공개 범위 보존, 개인정보 제거, 탈퇴 사용자 표시, 재가입 격리 |
 | `pnpm test:glossary` | PostgreSQL 사례만 별도 DB 필요 | 다국어 용어 검증·매칭, 개인 용어집 보존, 제안·검토 권한, 중복 제출, 리비전 경쟁 승인·이력 |
 | `pnpm test:translation-pack` | PostgreSQL 사례만 별도 DB 필요 | 번역 팩 배포·이력 연결·실패 롤백·동시 승인 경계 및 실시간 갱신 경합. `TEST_DATABASE_URL`이 없으면 PostgreSQL 사례만 건너뜀 |
 | `pnpm test:party:rooms` | | 방 생명주기, TTL, 메시지 순서 |
@@ -62,7 +63,7 @@ pnpm dev
 
 `pnpm test:unit`은 서버가 필요 없는 위 묶음과 번역 팩 회귀 스크립트를 실행하고, `pnpm check`는 여기에 `db:check`, `lint`, `typecheck`, `build`를 더합니다.
 
-번역 팩 DB 회귀는 기존 `postgres` 의존성으로 실제 PostgreSQL에서 실행합니다. `.env`나 `DATABASE_URL`을 사용하지 않으며, 명시적으로 `TEST_DATABASE_URL`을 지정해야 합니다. **운영 DB가 아닌 별도 테스트 DB**를 사용하세요. 각 테스트는 임의 이름의 schema를 만들고 필요한 migration을 적용한 뒤 삭제합니다. R2·WebSocket 경계만 대체하므로 실제 파일 업로드나 알림 전송은 없습니다. 실시간 갱신 회귀는 DB 없이도 실행되며, 배포 전체 갱신과 개별 변경 갱신이 겹쳐도 이력을 누락하지 않는지 확인합니다.
+계정·용어집·번역 팩 DB 회귀는 기존 `postgres` 의존성으로 실제 PostgreSQL에서 실행합니다. `.env`나 `DATABASE_URL`을 사용하지 않으며, 명시적으로 `TEST_DATABASE_URL`을 지정해야 합니다. **운영 DB가 아닌 별도 테스트 DB**를 사용하세요. 각 테스트는 임의 이름의 schema를 만들고 필요한 migration을 적용한 뒤 삭제합니다. 번역 팩 테스트는 R2·WebSocket 경계만 대체하므로 실제 파일 업로드나 알림 전송은 없습니다.
 
 ```bash
 TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/astral_test pnpm test:translation-pack
@@ -70,14 +71,16 @@ TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/astral_test pnpm test:trans
 
 ## CI
 
-`.github/workflows/ci.yml`은 `release`/`master` 대상 PR(열림, 새 커밋 push, 다시 열림)과 수동 실행에서 실행됩니다. `develop` push만으로는 실행되지 않으므로, PR 없이 확인하려면 Actions에서 수동 실행합니다.
+`.github/workflows/ci.yml`은 `develop` push, `develop`/`release`/`master` 대상 PR(열림, 새 커밋 push, 다시 열림), 수동 실행에서 실행됩니다.
 
 1. `pnpm run db:check`
 2. 실제 PostgreSQL 컨테이너에 migration 두 번 적용 (두 번째 실행은 적용 기록을 보고 모두 건너뛰어야 성공)
 3. `lint` → `test:unit` → `typecheck` → `build`
 4. `test:security` 후 `audit:prod`
+5. 운영 Docker 이미지 빌드와 실제 HTTP smoke 검증
+6. HTTP 검증 결과와 이미지 ID를 작은 artifact로 보관 (소스·이미지 archive는 만들지 않음)
 
-CI의 단위 테스트 단계는 전용 컨테이너의 호스트 포트로 `TEST_DATABASE_URL`을 지정하므로 용어집·번역 팩 PostgreSQL 사례도 실제 실행합니다. 로컬 실행에서는 테스트 DB 주소를 명시하지 않으면 해당 DB 사례가 skip으로 표시됩니다.
+CI의 단위 테스트 단계는 전용 컨테이너의 호스트 포트로 `TEST_DATABASE_URL`을 지정하므로 계정·용어집·번역 팩 PostgreSQL 사례도 실제 실행합니다. 로컬 실행에서는 테스트 DB 주소를 명시하지 않으면 해당 DB 사례가 skip으로 표시됩니다.
 
 ## API 규칙
 

@@ -9,8 +9,6 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "db:check": "node scripts/check-migrations.mjs && node scripts/generate-base-glossary-migration.mjs --check",
-    "data:sync": "node scripts/sync-public-translations.mjs",
-    "glossary:seed": "node scripts/seed-base-glossary.mjs",
     "glossary:generate": "node scripts/generate-base-glossary-migration.mjs",
     "smoke:release": "node scripts/smoke-release.mjs",
     "lint": "eslint .",
@@ -25,7 +23,8 @@
     "test:translation-pack": "node scripts/test-translation-pack.mjs && node scripts/test-translation-pack-realtime.mjs",
     "test:mods": "node scripts/test-mod-github.mjs && node scripts/test-mod-hub.mjs && node --experimental-strip-types scripts/test-mod-markdown.mjs && node scripts/test-mod-commits.mjs && node scripts/test-mod-management.mjs",
     "test:glossary": "node scripts/test-glossary.mjs",
-    "test:unit": "pnpm run test:security && pnpm run test:mods && pnpm run test:translation-pack && pnpm run test:glossary && pnpm run test:party:rooms && pnpm run test:party:route && pnpm run test:party:client && pnpm run test:party:adapter",
+    "test:account": "node scripts/test-user-account.mjs",
+    "test:unit": "pnpm run test:security && pnpm run test:mods && pnpm run test:translation-pack && pnpm run test:glossary && pnpm run test:account && pnpm run test:party:rooms && pnpm run test:party:route && pnpm run test:party:client && pnpm run test:party:adapter",
     "audit:prod": "node scripts/audit-prod-deps.mjs",
     "lint:fix": "eslint . --fix",
     "check": "pnpm run db:check && pnpm run test:unit && pnpm run lint && pnpm run typecheck && pnpm run build"

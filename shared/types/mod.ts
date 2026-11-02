@@ -12,6 +12,7 @@ export interface ModEntry {
   description: string
   repository: string
   platforms: ModPlatform[]
+  authorId: string | null
   authorHandle: string | null
   authorRole: UserRole
   isOwner: boolean
