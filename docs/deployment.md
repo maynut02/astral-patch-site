@@ -74,6 +74,8 @@ Google OAuth 클라이언트에 redirect URI `https://<도메인>/auth/google`�
 
 ## 자동 배포
 
+공통 용어집의 데이터 등록과 검수·복구 절차는 [공통 용어집 운영 반영](glossary-release.md)에 정리되어 있습니다. 기초 용어는 기존 migration 단계에서 자동 등록하며 별도 환경변수나 운영 데이터 가져오기를 요구하지 않습니다.
+
 `develop → release` PR이 merge되면 `.github/workflows/deploy.yml`(`Deploy`)가 SSH로 서버에 접속해 다음을 실행합니다.
 
 ```mermaid

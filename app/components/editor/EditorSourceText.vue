@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { EditorDictionaryEntry } from '#shared/types/editor-dictionary'
+import type { EditorLanguage } from '#shared/types/editor'
+import { getGlossarySourceSegments, type GlossarySourceSegment } from '~/utils/editor-glossary-segments'
+
 type AstralLinkType = 'Buff' | 'Card'
 
 interface AstralReference {
@@ -7,13 +11,13 @@ interface AstralReference {
   originalText: string
 }
 
-type Segment
-  = | { type: 'text', content: string }
-    | { type: 'astral', linkType: AstralLinkType, id: string, content: string }
+type Segment = GlossarySourceSegment | { type: 'astral', linkType: AstralLinkType, id: string, content: string }
 
 const props = defineProps<{
   text: string | null
   lang?: string
+  language?: EditorLanguage
+  glossaryEntries?: EditorDictionaryEntry[]
 }>()
 
 const emit = defineEmits<{
@@ -48,7 +52,9 @@ const segments = computed<Segment[]>(() => {
     result.push({ type: 'text', content: props.text.slice(lastIndex) })
   }
 
-  return result
+  return result.flatMap<Segment>(part => part.type === 'text'
+    ? getGlossarySourceSegments(part.content, props.glossaryEntries ?? [], props.language ?? 'en')
+    : [part])
 })
 
 function selectReference(part: Extract<Segment, { type: 'astral' }>): void {
@@ -75,6 +81,11 @@ function selectReference(part: Extract<Segment, { type: 'astral' }>): void {
           v-if="part.type === 'text'"
           class="whitespace-pre-wrap"
         >{{ part.content }}</span>
+        <EditorGlossaryTerm
+          v-else-if="part.type === 'term'"
+          :text="part.content"
+          :entries="part.entries"
+        />
         <button
           v-else
           type="button"

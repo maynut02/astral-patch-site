@@ -6,6 +6,7 @@ export interface EditorComment {
   id: string
   unitId: string
   itemKey: string
+  authorId: string | null
   authorHandle: string | null
   authorRole: UserRole
   body: string

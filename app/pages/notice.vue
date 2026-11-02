@@ -203,6 +203,7 @@ async function submitNotice(): Promise<void> {
               </h2>
               <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-dimmed">
                 <AppUserIdentity
+                  :user-id="notice.authorId"
                   :handle="notice.authorHandle"
                   :role="notice.authorRole"
                   :link="false"

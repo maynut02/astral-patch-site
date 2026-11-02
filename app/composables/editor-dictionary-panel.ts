@@ -8,7 +8,7 @@ import { createEmptyEditorItems } from '~/utils/editor-progress'
 import { getEditorItemKey } from '~/utils/editor-links'
 import { createEditorDictionaryItemsRequest } from '~/utils/editor-dictionary-request'
 
-type EditorDictionaryPanelView = 'search' | 'collections'
+type EditorDictionaryPanelView = 'search' | 'collections' | 'glossary'
 type EditorDictionaryRequestStatus = 'idle' | 'pending' | 'success' | 'error'
 type AstralLinkType = 'Buff' | 'Card'
 
@@ -56,7 +56,8 @@ export function useEditorDictionaryPanel(query: ReturnType<typeof useEditorQuery
 
   const dictionaryPanelTabs = [
     { label: '검색', value: 'search' },
-    { label: '용어집', value: 'collections' }
+    { label: '용어집', value: 'collections' },
+    { label: '공통 기준', value: 'glossary' }
   ] satisfies { label: string, value: EditorDictionaryPanelView }[]
 
   const dictionaryNamespace = computed(() => dictionarySelection.value?.type === 'Buff' ? 'STRBuff' : 'STRCard')

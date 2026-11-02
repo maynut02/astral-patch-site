@@ -65,6 +65,8 @@ export async function getPendingEditorReviewCandidates(
       tu.kind,
       tu.namespace AS category,
       tu.unit_key AS "unitKey",
+      CASE WHEN tc.created_by LIKE 'deleted:%' THEN tc.created_by END AS "actorId",
+      CASE WHEN tc.reviewed_by LIKE 'deleted:%' THEN tc.reviewed_by END AS "reviewerId",
       CASE
         WHEN au."role" IN ('admin', 'verified', 'user', 'bot') THEN au."role"
         ELSE 'user'::text

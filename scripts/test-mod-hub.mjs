@@ -140,6 +140,7 @@ function rowFor(mod, viewerId) {
   const isOwner = Boolean(viewer && mod.createdBy === viewerId)
   return {
     ...mod,
+    authorId: mod.createdBy.startsWith('deleted:') ? mod.createdBy : null,
     authorHandle: author?.handle ?? null,
     authorRole: author?.role ?? 'user',
     isOwner,
@@ -268,6 +269,7 @@ test('public list is bounded and grants admin management without misreporting ow
     assert.equal(response.mods[0].isOwner, viewerId === 'owner')
     assert.equal(response.mods[0].canEdit, viewerId === 'owner' || viewerId === 'admin')
     assert.equal(response.mods[0].canDelete, viewerId === 'owner' || viewerId === 'admin')
+    assert.equal(response.mods[0].authorId, null)
     assert.equal(response.mods[0].githubDescription, 'GitHub About 소개')
     assert.equal(response.mods[0].createdAt, '2026-01-01T00:00:00.000Z')
     for (const key of ['googleSub', 'createdBy', 'created_by', 'email', 'ownerId']) {
@@ -278,6 +280,20 @@ test('public list is bounded and grants admin management without misreporting ow
   assert.equal(state.snapshotCalls.length, 0)
   assert.equal(state.releaseCalls.length, 0)
   assert.deepEqual(state.aboutCalls, Array(4).fill('owner/repo'))
+})
+
+test('deleted mod authors expose only anonymous attribution and retain the mod', async () => {
+  const deletedId = 'deleted:00000000-0000-4000-8000-000000000001'
+  state.accounts.delete('owner')
+  state.accounts.set(deletedId, { googleSub: deletedId, email: `${deletedId}@system.local`, handle: null, role: 'user' })
+  state.mods.get(modId).createdBy = deletedId
+  const { mods } = await hub.getMods('other')
+  assert.equal(mods[0].authorId, deletedId)
+  assert.equal(mods[0].authorHandle, null)
+  assert.equal(mods[0].authorRole, 'user')
+  assert.equal(mods[0].canEdit, false)
+  assert.equal(mods[0].name, input.name)
+  assert.equal('email' in mods[0], false)
 })
 
 test('list enriches About without replacing persisted summary or fetching detail data', async () => {

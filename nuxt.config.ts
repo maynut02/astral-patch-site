@@ -30,6 +30,7 @@ export default defineNuxtConfig({
   },
 
   routeRules: {
+    '/translate/glossary-harvest': { redirect: '/translate/glossary' },
     '/**': {
       headers: {
         'X-Content-Type-Options': 'nosniff',

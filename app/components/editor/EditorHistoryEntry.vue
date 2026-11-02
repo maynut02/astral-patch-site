@@ -190,6 +190,7 @@ function getReviewId(entry: EditorHistoryEntry): string {
       </span>
 
       <AppUserIdentity
+        :user-id="entry.actorId"
         :handle="getActorHandle(entry)"
         :role="entry.actorRole"
         text-class="text-xs text-muted"
@@ -323,6 +324,7 @@ function getReviewId(entry: EditorHistoryEntry): string {
             </span>
 
             <AppUserIdentity
+              :user-id="entry.reviewerId"
               :handle="getReviewerHandle(entry)"
               :role="entry.reviewerRole"
               text-class="text-muted"

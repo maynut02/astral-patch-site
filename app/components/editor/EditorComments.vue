@@ -489,6 +489,7 @@ onBeforeUnmount(() => {
                 {{ comment.itemKey }}
               </button>
               <AppUserIdentity
+                :user-id="comment.authorId"
                 :handle="comment.authorHandle"
                 :role="comment.authorRole"
                 text-class="text-xs text-muted"

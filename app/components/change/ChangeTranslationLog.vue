@@ -116,6 +116,7 @@ const emit = defineEmits<{ retry: [] }>()
               class="size-3.5 text-muted"
             />
             <AppUserIdentity
+              :user-id="entry.actorId"
               :handle="getTranslationHandle(entry)"
               :role="entry.actorRole"
               text-class="text-xs"
@@ -141,6 +142,7 @@ const emit = defineEmits<{ retry: [] }>()
               {{ getReviewActionLabel(entry.status) }}
             </span>
             <AppUserIdentity
+              :user-id="entry.reviewerId"
               :handle="getReviewerHandle(entry)"
               :role="entry.reviewerRole"
               fallback="시스템"

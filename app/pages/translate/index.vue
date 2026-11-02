@@ -146,6 +146,14 @@ const hasRowsForMode = computed(() => listMode.value === 'category'
 
         <div class="flex items-center gap-2">
           <UButton
+            to="/translate/glossary"
+            icon="i-tabler-books"
+            color="neutral"
+            variant="soft"
+          >
+            공통 용어집
+          </UButton>
+          <UButton
             to="/translate/editor"
             icon="i-tabler-arrow-right"
             color="info"

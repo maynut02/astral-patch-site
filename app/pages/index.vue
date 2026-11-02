@@ -635,6 +635,7 @@ function openDeveloperModeHelp(context: 'pc' | 'shizuku'): void {
 
                 <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted">
                   <AppUserIdentity
+                    :user-id="entry.actorId"
                     :handle="entry.handle"
                     :role="entry.actorRole"
                     fallback="익명"

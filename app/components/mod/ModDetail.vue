@@ -89,6 +89,7 @@ watch(() => mod.value.id, () => {
             />
           </UTooltip>
           <AppUserIdentity
+            :user-id="mod.authorId"
             :handle="mod.authorHandle"
             :role="mod.authorRole"
             text-class="text-xs"

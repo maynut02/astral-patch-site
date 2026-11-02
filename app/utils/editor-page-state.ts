@@ -6,6 +6,7 @@ import type { useEditorLayout } from '~/composables/editor-layout'
 import type { useEditorItems } from '~/composables/editor-items'
 import type { useEditorActions } from '~/composables/editor-actions'
 import type { useEditorDictionaryPanel } from '~/composables/editor-dictionary-panel'
+import type { useEditorGlossaryContext } from '~/composables/editor-glossary-context'
 import type { useEditorDraftStorage } from '~/composables/editor-drafts'
 import type { useEditorPreferences } from '~/composables/editor-preferences'
 import type { EditorLanguageOption } from '~/utils/editor-options'
@@ -27,6 +28,7 @@ export type EditorPageState = EditorPageData
   & ReturnType<typeof useEditorItems>
   & ReturnType<typeof useEditorActions>
   & ReturnType<typeof useEditorDictionaryPanel>
+  & ReturnType<typeof useEditorGlossaryContext>
   & ReturnType<typeof useEditorDraftStorage>
   & ReturnType<typeof useEditorPreferences>
   & {

@@ -26,3 +26,7 @@ export function isManageableUserRole(value: unknown): value is typeof MANAGEABLE
 export function isReservedBotAccount(id: string, role: unknown): boolean {
   return id === BOT_GOOGLE_SUB || role === 'bot'
 }
+
+export function isDeletedUserId(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('deleted:') && value.length > 'deleted:'.length
+}

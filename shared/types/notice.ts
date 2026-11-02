@@ -7,6 +7,7 @@ export interface Notice {
   id: string
   title: string
   body: string
+  authorId: string | null
   authorHandle: string | null
   authorRole: UserRole
   createdAt: string

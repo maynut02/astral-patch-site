@@ -1,9 +1,8 @@
-The node-forge backport in patches/node-forge@1.4.0.patch is used under the
-BSD-3-Clause option offered by the upstream project. Original source notices
-remain intact. The regression script generates its own keys and test vectors.
+The node-forge regression suite exercises the official upstream package under
+its BSD-3-Clause license. The regression script generates its own keys and
+test vectors. The former PR #1152 backport has been replaced by version 1.4.1.
 
-Upstream PR: https://github.com/digitalbazaar/forge/pull/1152
-Pinned commit: ceba34402e329f0365134f23fe19898756527d65
+Official package: https://www.npmjs.com/package/node-forge/v/1.4.1
 Upstream license:
 https://github.com/digitalbazaar/forge/blob/ceba34402e329f0365134f23fe19898756527d65/LICENSE
 

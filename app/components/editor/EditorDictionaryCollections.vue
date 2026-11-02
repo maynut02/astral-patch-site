@@ -31,6 +31,7 @@ const {
             {{ selectedDictionary.visibility === 'public' ? '공개 용어집' : '비공개 용어집' }} ·
           </span>
           <AppUserIdentity
+            :user-id="selectedDictionary.ownerId"
             :handle="getDictionaryOwnerHandle(selectedDictionary)"
             :role="selectedDictionary.ownerRole"
             text-class="text-xs text-dimmed"
@@ -40,7 +41,7 @@ const {
         </div>
       </div>
       <UButton
-        v-if="selectedDictionary.canEdit"
+        v-if="selectedDictionary.canEdit && !selectedDictionary.isTeam"
         icon="i-tabler-plus"
         color="neutral"
         variant="soft"
@@ -49,6 +50,17 @@ const {
         @click="openCreateDictionaryEntry"
       />
     </div>
+
+    <UButton
+      v-if="selectedDictionary.isTeam"
+      :to="{ path: '/translate/glossary', query: { dictionary: selectedDictionary.id } }"
+      target="_blank"
+      color="info"
+      variant="soft"
+      class="m-3"
+    >
+      공통 기준 조회·제안 ↗
+    </UButton>
 
     <div class="flex shrink-0 gap-2 border-b border-default p-3">
       <UInput
@@ -110,7 +122,7 @@ const {
           아직 등록된 용어가 없습니다.
         </p>
         <UButton
-          v-if="selectedDictionary.canEdit"
+          v-if="selectedDictionary.canEdit && !selectedDictionary.isTeam"
           color="neutral"
           variant="soft"
           size="sm"
@@ -151,6 +163,7 @@ const {
           </p>
           <div class="flex items-center gap-1 text-[10px] text-dimmed">
             <AppUserIdentity
+              :user-id="entry.createdBy"
               :handle="getDictionaryCreatorHandle(entry)"
               :role="entry.creatorRole"
               text-class="text-[10px] text-dimmed"
@@ -236,6 +249,7 @@ const {
             </span>
             <span class="mt-1 flex items-center gap-1 text-[10px] text-dimmed">
               <AppUserIdentity
+                :user-id="dictionary.ownerId"
                 :handle="getDictionaryOwnerHandle(dictionary)"
                 :role="dictionary.ownerRole"
                 text-class="text-[10px] text-dimmed"
