@@ -14,6 +14,8 @@ const {
   <UModal
     v-model:open="dictionaryModalOpen"
     :title="editingDictionaryId ? '용어집 수정' : '새 용어집'"
+    :dismissible="!dictionaryModalSaving"
+    :close="!dictionaryModalSaving"
     :ui="{ footer: 'justify-end' }"
   >
     <template #body>
@@ -75,6 +77,7 @@ const {
         color="neutral"
         variant="ghost"
         size="lg"
+        :disabled="dictionaryModalSaving"
         @click="dictionaryModalOpen = false"
       >
         취소
@@ -95,6 +98,8 @@ const {
   <UModal
     v-model:open="dictionaryEntryModalOpen"
     :title="editingDictionaryEntry ? '용어 수정' : '용어 추가'"
+    :dismissible="!dictionaryEntryModalSaving"
+    :close="!dictionaryEntryModalSaving"
     :ui="{ footer: 'justify-end' }"
   >
     <template #body>
@@ -157,6 +162,7 @@ const {
       <UButton
         color="neutral"
         variant="ghost"
+        :disabled="dictionaryEntryModalSaving"
         @click="dictionaryEntryModalOpen = false"
       >
         취소

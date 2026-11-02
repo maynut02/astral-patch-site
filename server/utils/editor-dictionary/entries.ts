@@ -149,11 +149,12 @@ export async function updateEditorDictionaryEntry(
   await requirePersonalDictionary(database, dictionaryId, viewer)
   const sourceText = parseRequiredText(input.sourceText, 'Source text', 500)
   const translation = parseRequiredText(input.translation, 'Translation', 500)
-  const note = parseOptionalText(input.note, 'Note', 1000)
+  // An omitted note keeps the stored value; an empty string clears it.
+  const note = input.note === undefined ? null : parseOptionalText(input.note, 'Note', 1000)
   const [row] = await database<DictionaryEntryRow[]>`
     WITH saved AS (
       UPDATE editor_dictionary_entries
-      SET source_text = ${sourceText}, translation = ${translation}, note = ${note}, updated_at = now()
+      SET source_text = ${sourceText}, translation = ${translation}, note = COALESCE(${note}::text, note), updated_at = now()
       WHERE id = ${entryId} AND dictionary_id = ${dictionaryId}
       RETURNING *
     )

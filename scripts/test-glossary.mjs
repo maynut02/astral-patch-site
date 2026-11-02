@@ -454,6 +454,11 @@ integration('glossary DB: owners edit and delete personal dictionaries while tea
 
   const updated = await h.entries.updateEditorDictionaryEntry(author, personal.id, entry.id, { sourceText: '星币', translation: '스타 코인', note: '수정' })
   assert.deepEqual([updated.id, updated.translation, updated.note], [entry.id, '스타 코인', '수정'])
+  const keptNote = await h.entries.updateEditorDictionaryEntry(author, personal.id, entry.id, { sourceText: '星币', translation: '스타 코인' })
+  assert.equal(keptNote.note, '수정')
+  // Admins moderate personal dictionaries they do not own.
+  const moderated = await h.entries.updateEditorDictionaryEntry({ id: 'outsider', role: 'admin' }, personal.id, entry.id, { sourceText: '星币', translation: '스타 코인', note: '' })
+  assert.equal(moderated.note, '')
   await assert.rejects(h.entries.updateEditorDictionaryEntry(author, personal.id, entry.id, { sourceText: ' ', translation: '빈 원문' }), rejected(400))
   await assert.rejects(h.entries.updateEditorDictionaryEntry(author, personal.id, randomUUID(), { sourceText: '新', translation: '없음' }), rejected(404))
 

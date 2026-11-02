@@ -61,7 +61,7 @@ flowchart TD
 - 로그인 사용자는 용어집을 만들 수 있고 공개(`public`)·비공개(`private`)를 고릅니다. 기본은 비공개입니다.
 - 공개 용어집은 모든 사용자, 비공개 용어집은 소유자와 관리자만 봅니다.
 - 개인 용어집의 항목 추가·수정·삭제와 용어집 이름·설명·공개 범위 수정, 용어집 삭제는 소유자와 관리자만 할 수 있습니다(`canEdit`). 삭제는 확인 창을 거치며, 용어집을 삭제하면 항목도 함께 삭제되고 복구할 수 없습니다.
-- 제공 API: 용어집 목록·생성(`GET`/`POST /api/editor/dictionaries`), 수정·삭제(`PATCH`/`DELETE /api/editor/dictionaries/:id`), 항목 목록(검색, 50개씩)·추가(`GET`/`POST …/:id/entries`), 항목 수정·삭제(`PATCH`/`DELETE …/:id/entries/:entryId`).
+- 제공 API: 용어집 목록·생성(`GET`/`POST /api/editor/dictionaries`), 수정·삭제(`PATCH`/`DELETE /api/editor/dictionaries/:id`), 항목 목록(검색, 50개씩)·추가(`GET`/`POST …/:id/entries`), 항목 수정·삭제(`PATCH`/`DELETE …/:id/entries/:entryId`). 수정 요청의 이름·원문·번역은 필수이며, 생략한 설명·메모·공개 범위는 기존 값을 유지합니다. 다른 곳에서 이미 삭제된 대상을 삭제하면 삭제된 것으로 보고 목록을 갱신합니다.
 - 공통 용어집(`is_team`)은 위 수정·삭제 API가 `403`으로 거부합니다. 공통 기준은 아래 제안·검토와 보관으로만 바꿉니다.
 - 탈퇴해도 용어집·항목·제안·검토 이력은 보존하고 작성자를 탈퇴한 사용자로 표시합니다. 비공개 용어집은 공개되지 않으며 재가입해도 소유권이 자동 복구되지 않습니다.
 

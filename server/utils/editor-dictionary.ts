@@ -199,7 +199,7 @@ export async function updateEditorDictionary(
   const database = getDatabase()
   const current = await requirePersonalDictionary(database, dictionaryId, viewer)
   const name = parseRequiredText(input.name, 'Dictionary name', 100)
-  const description = parseOptionalText(input.description, 'Dictionary description', 500)
+  const description = input.description === undefined ? current.description : parseOptionalText(input.description, 'Dictionary description', 500)
   const visibility = input.visibility === undefined ? current.visibility : parseVisibility(input.visibility)
   const updated = await database`
     UPDATE editor_dictionaries

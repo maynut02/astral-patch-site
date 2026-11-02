@@ -220,6 +220,8 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
         })
         dictionaries.value = dictionaries.value.map(item => item.id === dictionary.id ? dictionary : item)
         dictionaryModalOpen.value = false
+        // Supersede any list request that started before the rename.
+        void loadDictionaries()
         return
       }
 
@@ -287,9 +289,16 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
         : $fetch<EditorDictionaryEntry>(dictionaryPath, { method: 'POST', body }))
 
       dictionaryEntryModalOpen.value = false
-      await loadDictionaryEntries()
-      await loadDictionaries()
-    } catch {
+      void loadDictionaryEntries()
+      void loadDictionaries()
+    } catch (error) {
+      if (editing && getRequestErrorStatus(error) === 404) {
+        // Deleted elsewhere: show the current list instead of a retry that cannot succeed.
+        dictionaryEntryModalError.value = '이미 삭제된 용어입니다.'
+        void loadDictionaryEntries()
+        void loadDictionaries()
+        return
+      }
       dictionaryEntryModalError.value = editing ? '용어집 항목을 수정하지 못했습니다.' : '용어집 항목을 추가하지 못했습니다.'
     } finally {
       dictionaryEntryModalSaving.value = false
@@ -322,24 +331,29 @@ export function useEditorDictionaryForms(list: ReturnType<typeof useEditorDictio
 
     try {
       const dictionaryPath = `/api/editor/dictionaries/${encodeURIComponent(target.dictionaryId)}`
-      if (target.kind === 'entry') {
-        await $fetch(`${dictionaryPath}/entries/${encodeURIComponent(target.entryId)}`, { method: 'DELETE' })
-        dictionaryDeleteModalOpen.value = false
-        await loadDictionaryEntries()
-        await loadDictionaries()
-        return
+      try {
+        await $fetch(target.kind === 'entry' ? `${dictionaryPath}/entries/${encodeURIComponent(target.entryId)}` : dictionaryPath, { method: 'DELETE' })
+      } catch (error) {
+        // 404 means it is already gone, which is the requested end state.
+        if (getRequestErrorStatus(error) !== 404) {
+          dictionaryDeleteError.value = target.kind === 'entry' ? '용어를 삭제하지 못했습니다.' : '용어집을 삭제하지 못했습니다.'
+          return
+        }
       }
 
-      await $fetch(dictionaryPath, { method: 'DELETE' })
-      dictionaries.value = dictionaries.value.filter(dictionary => dictionary.id !== target.dictionaryId)
-      if (selectedDictionaryId.value === target.dictionaryId) {
-        selectedDictionaryId.value = null
-        dictionaryEntries.value = createEmptyDictionaryEntries()
-        dictionaryEntriesStatus.value = 'idle'
-      }
       dictionaryDeleteModalOpen.value = false
-    } catch {
-      dictionaryDeleteError.value = target.kind === 'entry' ? '용어를 삭제하지 못했습니다.' : '용어집을 삭제하지 못했습니다.'
+      if (target.kind === 'dictionary') {
+        dictionaries.value = dictionaries.value.filter(dictionary => dictionary.id !== target.dictionaryId)
+        if (selectedDictionaryId.value === target.dictionaryId) {
+          selectedDictionaryId.value = null
+          dictionaryEntries.value = createEmptyDictionaryEntries()
+          dictionaryEntriesStatus.value = 'idle'
+        }
+      } else {
+        await loadDictionaryEntries()
+      }
+      // Also supersedes any list request that started before the delete.
+      await loadDictionaries()
     } finally {
       dictionaryDeleteSaving.value = false
     }
