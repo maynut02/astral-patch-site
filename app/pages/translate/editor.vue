@@ -127,18 +127,19 @@ const { handleHistoryChanged, openCommentItem } = actions
       </div>
 
       <div class="ml-2 flex shrink-0 items-center">
-        <UButton
-          icon="i-tabler-books"
-          color="neutral"
-          variant="ghost"
-          size="lg"
-          :ui="{ leadingIcon: 'size-5', base: 'p-2 lg:p-2.5' }"
-          :class="glossaryWindow.open.value && !glossaryWindow.minimized.value ? 'bg-elevated text-default' : 'text-muted hover:text-default'"
-          aria-label="공통 용어집 창"
-          title="공통 용어집"
-          :aria-pressed="glossaryWindow.open.value && !glossaryWindow.minimized.value"
-          @click="glossaryWindow.toggle"
-        />
+        <UTooltip text="공통 용어집" :delay-duration="0">
+          <UButton
+            icon="i-tabler-books"
+            color="neutral"
+            variant="ghost"
+            size="lg"
+            :ui="{ leadingIcon: 'size-5', base: 'p-2 lg:p-2.5' }"
+            :class="glossaryWindow.open.value && !glossaryWindow.minimized.value ? 'bg-elevated text-default' : 'text-muted hover:text-default'"
+            aria-label="공통 용어집 창"
+            :aria-pressed="glossaryWindow.open.value && !glossaryWindow.minimized.value"
+            @click="glossaryWindow.toggle"
+          />
+        </UTooltip>
         <UButton
           icon="i-tabler-bell"
           color="neutral"

@@ -157,34 +157,37 @@ onBeforeUnmount(() => {
         <h2 id="editor-glossary-window-title" class="mr-auto min-w-0 truncate text-sm font-medium">
           공통 용어집
         </h2>
-        <UButton
-          :to="fullPageLink"
-          target="_blank"
-          icon="i-tabler-external-link"
-          color="neutral"
-          variant="ghost"
-          size="sm"
-          aria-label="전체 화면 용어집 열기"
-          title="전체 화면으로 열기"
-        />
-        <UButton
-          :icon="minimized ? 'i-tabler-window-maximize' : 'i-tabler-minus'"
-          color="neutral"
-          variant="ghost"
-          size="sm"
-          :aria-label="minimized ? '용어집 창 펼치기' : '용어집 창 최소화'"
-          :title="minimized ? '펼치기' : '최소화'"
-          @click="minimized = !minimized"
-        />
-        <UButton
-          icon="i-tabler-x"
-          color="neutral"
-          variant="ghost"
-          size="sm"
-          aria-label="용어집 창 닫기"
-          title="닫기"
-          @click="open = false"
-        />
+        <UTooltip text="전체 화면으로 열기" :delay-duration="0">
+          <UButton
+            :to="fullPageLink"
+            target="_blank"
+            icon="i-tabler-external-link"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            aria-label="전체 화면 용어집 열기"
+          />
+        </UTooltip>
+        <UTooltip :text="minimized ? '펼치기' : '최소화'" :delay-duration="0">
+          <UButton
+            :icon="minimized ? 'i-tabler-window-maximize' : 'i-tabler-minus'"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            :aria-label="minimized ? '용어집 창 펼치기' : '용어집 창 최소화'"
+            @click="minimized = !minimized"
+          />
+        </UTooltip>
+        <UTooltip text="닫기" :delay-duration="0">
+          <UButton
+            icon="i-tabler-x"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            aria-label="용어집 창 닫기"
+            @click="open = false"
+          />
+        </UTooltip>
       </header>
       <!-- v-show keeps search, selection and in-progress proposals while minimized. -->
       <div
