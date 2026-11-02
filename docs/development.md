@@ -52,7 +52,7 @@ pnpm dev
 | `pnpm test:security` | | 공식 수정 버전 `node-forge`, 로컬 패치한 `braces` 회귀 |
 | `pnpm test:mods` | | 모드 GitHub 연동, 마크다운 렌더링, 권한·관리 |
 | `pnpm test:account` | PostgreSQL 사례만 별도 DB 필요 | 탈퇴 시 콘텐츠·비공개 범위 보존, 개인정보 제거, 탈퇴 사용자 표시, 재가입 격리 |
-| `pnpm test:glossary` | PostgreSQL 사례만 별도 DB 필요 | 다국어 용어 검증·매칭, 개인 용어집 보존, 제안·검토 권한, 중복 제출, 리비전 경쟁 승인·이력 |
+| `pnpm test:glossary` | PostgreSQL 사례만 별도 DB 필요 | 다국어 용어 검증·매칭, 개인 용어집 보존·소유자 수정·삭제, 제안·검토 권한, 중복 제출, 리비전 경쟁 승인·이력 |
 | `pnpm test:translation-pack` | PostgreSQL 사례만 별도 DB 필요 | 번역 팩 배포·이력 연결·실패 롤백·동시 승인 경계 및 실시간 갱신 경합. `TEST_DATABASE_URL`이 없으면 PostgreSQL 사례만 건너뜀 |
 | `pnpm test:party:rooms` | | 방 생명주기, TTL, 메시지 순서 |
 | `pnpm test:party:route` | | 파티 WebSocket·HTTP 핸들러 (재접속 승계, 종료 사유, 오류 응답) |

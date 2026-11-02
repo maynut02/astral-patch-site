@@ -179,3 +179,41 @@ export async function createEditorDictionary(
   if (!row) throw createError({ statusCode: 404, statusMessage: 'Dictionary not found' })
   return toDictionary(row, viewer)
 }
+
+// Shared dictionaries keep their decision history, so only personal dictionaries change directly.
+export async function requirePersonalDictionary(
+  database: DatabaseClient,
+  dictionaryId: string,
+  viewer: EditorDictionaryViewer
+): Promise<EditorDictionary> {
+  const dictionary = await requireDictionary(database, dictionaryId, viewer, true)
+  if (dictionary.isTeam) throw createError({ statusCode: 403, statusMessage: 'Team dictionaries change through reviewed proposals' })
+  return dictionary
+}
+
+export async function updateEditorDictionary(
+  viewer: EditorDictionaryViewer,
+  dictionaryId: string,
+  input: { name?: unknown, description?: unknown, visibility?: unknown }
+): Promise<EditorDictionary> {
+  const database = getDatabase()
+  const current = await requirePersonalDictionary(database, dictionaryId, viewer)
+  const name = parseRequiredText(input.name, 'Dictionary name', 100)
+  const description = input.description === undefined ? current.description : parseOptionalText(input.description, 'Dictionary description', 500)
+  const visibility = input.visibility === undefined ? current.visibility : parseVisibility(input.visibility)
+  const updated = await database`
+    UPDATE editor_dictionaries
+    SET name = ${name}, description = ${description}, visibility = ${visibility}, updated_at = now()
+    WHERE id = ${dictionaryId} AND NOT is_team
+  `
+  if (updated.count === 0) throw createError({ statusCode: 404, statusMessage: 'Dictionary not found' })
+  return requireDictionary(database, dictionaryId, viewer)
+}
+
+export async function deleteEditorDictionary(viewer: EditorDictionaryViewer, dictionaryId: string): Promise<void> {
+  const database = getDatabase()
+  await requirePersonalDictionary(database, dictionaryId, viewer)
+  // Entries cascade with the dictionary.
+  const deleted = await database`DELETE FROM editor_dictionaries WHERE id = ${dictionaryId} AND NOT is_team`
+  if (deleted.count === 0) throw createError({ statusCode: 404, statusMessage: 'Dictionary not found' })
+}
