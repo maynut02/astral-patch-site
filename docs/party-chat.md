@@ -80,7 +80,7 @@ sequenceDiagram
 
 ### 캐릭터와 순서
 
-- 캐릭터 ID는 문자열이며 `shared/types/party.ts`의 `PARTY_CHARACTER_IDS`(`101`~`129`, `301`~`306`, 35개)와 특수 값 `spectator`(관전), `unselected`(참가했지만 미선택)를 서버가 검증합니다.
+- 캐릭터 ID는 문자열이며 `shared/types/party.ts`의 `PARTY_CHARACTER_IDS`(`101`~`130`, `301`~`306`, 36개)와 특수 값 `spectator`(관전), `unselected`(참가했지만 미선택)를 서버가 검증합니다.
 - 웹의 기본 입장은 `spectator` + 순서 `null`입니다. 관전 중에는 순서를 고를 수 없습니다.
 - 관전에서 캐릭터나 `unselected`로 바꾸면 `P1`부터 시작하고, 플레이어 상태끼리 바꾸면 순서를 유지합니다. 관전으로 바꾸면 `null`이 됩니다. 순서(`P1`~`P4`)는 중복 선택할 수 있습니다.
 - `JOIN.order`를 생략하면 플레이어는 `P1`로 시작합니다. 명시적 `null`이나 잘못된 값은 `INVALID_ORDER`입니다.

@@ -106,9 +106,9 @@ test('Party HTTP and WebSocket integration', { timeout: 60_000 }, async (t) => {
   await t.test('load the complete character catalogue', async () => {
     const result = await request('/api/party/characters')
     assert.equal(result.status, 200)
-    assert.equal(result.body.length, 35)
-    assert.equal(new Set(result.body.map(character => character.id)).size, 35)
-    for (const id of ['101', '129', '301', '306']) {
+    assert.equal(result.body.length, 36)
+    assert.equal(new Set(result.body.map(character => character.id)).size, 36)
+    for (const id of ['101', '130', '301', '306']) {
       const character = result.body.find(item => item.id === id)
       assert.ok(character?.name.trim())
       assert.equal(typeof character.nickname, 'string')
