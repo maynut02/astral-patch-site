@@ -347,7 +347,7 @@ test('spectators have no order and players may share an order', async (t) => {
 })
 
 test('unselected players have no image and keep all four orders', async (t) => {
-  assert.equal(PARTY_CHARACTER_IDS.length, 35)
+  assert.equal(PARTY_CHARACTER_IDS.length, 36)
   assert.equal(PARTY_CHARACTER_IDS.includes(PARTY_UNSELECTED_ID), false)
   assert.equal(isPartyCharacterId(PARTY_UNSELECTED_ID), true)
   assert.equal(getPartyCharacterImage(PARTY_UNSELECTED_ID), '')
